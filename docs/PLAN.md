@@ -79,9 +79,11 @@ sibling. Keeping it in its own repository keeps the cloud split clean.
 | LLM extraction | `TextModel` (Fast/Strong tiers), `structured_output`, `run_tool_loop` | extraction schemas, confidence, validation |
 | Durable side effects | `Outbox` (at least once), `Inbox` (exactly once), `Defer`, `scheduled` | posting events, bank import jobs |
 | Passkeys | `cratefield-auth-passkeys` (git rev) | step-up approval flow |
+| Agent keys, device login, rate limits | `ApiKeys`/`require_api_key`, `cratefield-module-device-auth`, `RateLimiter` | key tiers and limits on top |
+| Atomic writes | `batch_atomic` only (no interactive transactions), guard statements as in `usage::consume_statement` | guard patterns for numbering, periods, limits, audit chain |
 | Orgs and roles | `module-orgs` | used by `ledgers-cloud` teams |
 | Webhooks, notifications, push | `module-webhooks`, `module-notifications`, `Push` | approval notifications |
-| MCP | `cratefield-mcp`, ADR 0028 runtime MCP | command registry adapter |
+| MCP | not usable: `cratefield-mcp` serves the harness `fz` CLI; runtime MCP (ADR 0028) is designed, not built | **our own** adapter over the registry (stdio + Streamable HTTP) |
 | Typed client | `client-ts` | app client |
 | Money | `Money { minor_units: i64 }` only for payments; `major_to_minor(f64)` | **our own exact money type** (below) |
 | Double entry, audit chain | not in the harness | **ours** |
@@ -98,8 +100,11 @@ about 128 MB (reports paginate; nothing loads a whole ledger into memory);
    currency's own exponent (JPY 0, EUR 2, BHD 3, USDC 6), computed in `i128`
    and stored as `INTEGER` (`i64`) with an overflow check at the boundary.
    Rates (FX, tax) are exact decimals. Rounding is explicit and named.
-2. **Every entry balances** per currency: sum of debits equals sum of credits,
-   checked in the domain type and again in the database transaction.
+2. **Every entry balances** in base currency, and also in its transaction
+   currency when all lines share one; mixed-currency residuals post explicitly
+   to FX gain/loss or rounding. Checked in the domain type and again by a guard
+   statement in the posting batch (the harness has `batch_atomic`, not
+   interactive transactions: see the guards ADR issue).
 3. **Posted entries are immutable.** Corrections are reversals plus new
    entries. Nothing has an `UPDATE` path once posted.
 4. **Closed periods reject postings.** Reopening is a human-only action.
@@ -121,7 +126,8 @@ schema, the policy tier it needs, whether it moves money and how much, and
 whether it supports a dry run. From that single definition we generate:
 
 - the CLI (`ledgers bills match …`, `--json`, `--dry-run`),
-- MCP tools (`bills_match`, `bills_approve`, …),
+- MCP tools (`bills_match`, `bills_post`, `approvals_status`, …; there is no
+  approve tool for agents),
 - HTTP routes (`POST /v1/bills/{id}/match`),
 - the app's command palette (⌘K shows the CLI, MCP and API equivalent).
 
@@ -161,7 +167,8 @@ in `ledgers-cloud`.
 | `ledgers-invoice` | Sales invoices, credit notes, e-invoice formats (UBL, CII, XRechnung) |
 | `ledgers-matching` | 2-way and 3-way matching (order, receipt, invoice, payment) with confidence |
 | `ledgers-bank` | Bank accounts, statement import (CAMT.053, MT940, OFX, CSV), reconciliation |
-| `ledgers-tax` | Tax codes, rates as data, VAT/GST/sales tax calculation, return preparation |
+| `ledgers-tax` | Tax codes, rates as data, line calculation (M0); VAT/GST return preparation, EC Sales List, OSS (M3) |
+| `ledgers-subledger` | Parties, open items, AR/AP subledgers, allocations, payments and payment runs |
 | `ledgers-reports` | Trial balance, P&L, balance sheet, GL detail, aged AR/AP, per unit |
 | `ledgers-export` | Full export and import (open format), later SAF-T |
 | `ledgers-server` | The harness composition: Worker and native runtimes |
@@ -174,7 +181,7 @@ bare name `ledgers` belongs to an unrelated 2020 crate: never tell anyone to
 
 ## 7. Milestones
 
-- **M0 Foundations:** workspace, CI, money, ledger, audit, storage, boundary check.
+- **M0 Foundations:** workspace, CI, money, exchange rates, storage and guard patterns, accounts, tax codes, journal, periods, audit, boundary check.
 - **M1 Agent-safe core:** commands, policy, approvals with passkeys, CLI, MCP, HTTP, threat model.
 - **M2 Documents to entries:** documents, extraction, bills, matching.
 - **M3 Complete books:** invoice and e-invoice formats, bank import and reconciliation, tax, reports, export.

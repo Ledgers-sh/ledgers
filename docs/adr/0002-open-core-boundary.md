@@ -16,7 +16,8 @@ filing gateways, uptime).
 
 The dependency is one way: cloud depends on core. Core exposes extension
 points as traits with a working open default (`ApprovalRules`, `EntityScope`,
-`UsageMeter`, `DocumentIntake`, `BankFeed`, `EInvoiceTransport`, `Filing`);
+`UsageMeter`, `DocumentIntake`, `BankFeed`, `EInvoiceTransport`, `Filing`,
+`IdentityProvider`, `CloseCheck`);
 cloud provides implementations at composition time.
 
 ## Consequences
