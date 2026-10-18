@@ -10,14 +10,35 @@ repository = "https://github.com/Ledgers-sh/ledgers"
 
 [workspace.dependencies]
 # One Cratefield release round, pinned exactly, bumped together in one PR (docs/adr/0001).
-cratefield-core = "=0.8.4"
-cratefield-runtime-cloudflare = "=0.4.2"
-cratefield-runtime-native = "=0.4.2"
-cratefield-testing = "=0.5.1"
+cratefield-core = "=0.9.0"
+cratefield-runtime-cloudflare = "=0.4.3"
+cratefield-runtime-native = "=0.4.3"
+# The workspace default for the testing kit is its light, wasm-clean surface
+# (port conformance only, no harness graph); a crate that wants the harness
+# (TestHarness, fakes) adds `features = ["harness"]`, which is the kit's
+# default feature set.
+cratefield-testing = { version = "=0.5.2", default-features = false, features = [
+    "port-conformance",
+] }
+# The `fz` CLI (doctor, migration collection); 0.7.0 is the release of the
+# same round (requires core ^0.9). Not depended on by a crate yet — pinned
+# here so the tooling tasks inherit the round instead of re-resolving it.
+cratefield-cli = "=0.7.0"
+# The query builder cratefield-core renders statements with; the exact
+# version core 0.9.0 pins, with the same features (SQLite dialect,
+# thread-safe), so the workspace graph holds one sea-query.
+sea-query = { version = "=0.32.7", default-features = false, features = [
+    "backend-sqlite",
+    "thread-safe",
+] }
 
 # Exact money (issue #3):
 thiserror = "2"
 proptest = "1"
+
+# Storage foundation (issue #4): block-on for the conformance matrix tests,
+# the same release the testing kit itself uses.
+pollster = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
