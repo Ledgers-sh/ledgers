@@ -1,0 +1,35 @@
+# Weekly fresh dependency resolve.
+#
+# Every cratefield-* crate is pinned with '=', so day-to-day builds reuse
+# Cargo.lock and a pinned version is never re-resolved. That also means a
+# yanked (or otherwise broken) harness release would only surface when a
+# fresh resolve happens to run. This job deletes Cargo.lock and resolves the
+# workspace from scratch against crates.io, so a bad or missing pinned
+# version shows up here, on a schedule, before a contributor hits it.
+#
+# If it fails: check whether a pinned version was yanked or pulled, then bump
+# the whole cratefield-* release round together in one PR
+# (docs/adr/0001-harness-by-pinned-crates.md).
+
+name: fresh-resolve
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays at 06:23 UTC, off the hour to avoid cron congestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1" # keep in sync with rust-toolchain.toml
+      - name: Fresh resolve against crates.io
+        run: |
+          rm -f Cargo.lock
+          cargo check --workspace

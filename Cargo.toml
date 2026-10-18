@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Ledgers-sh/ledgers"
+
+[workspace.dependencies]
+# One Cratefield release round, pinned exactly, bumped together in one PR (docs/adr/0001).
+cratefield-core = "=0.8.4"
+cratefield-runtime-cloudflare = "=0.4.2"
+cratefield-runtime-native = "=0.4.2"
+cratefield-testing = "=0.5.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Money and ledger crates additionally deny `clippy::float_arithmetic` via a
+# `#![deny(clippy::float_arithmetic)]` crate attribute: workspace lints cannot
+# vary per crate, so the stricter money rule lives in the crates that need it.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# Unpublished harness crates (cratefield-auth-passkeys, cratefield-mcp) are NOT
+# on crates.io yet; they will arrive later via one pinned git rev plus a
+# [patch.crates-io] section per docs/adr/0001. Do not add a [patch] section
+# until that rev exists.
