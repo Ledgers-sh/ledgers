@@ -1,0 +1,22 @@
+[package]
+name = "ledgers-money"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# Reserved slot for crypto assets with their own minor-unit exponents
+# (e.g. USDC = 6). Planned for a later milestone (docs/PLAN.md §6); nothing
+# is gated on this yet.
+crypto = []
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

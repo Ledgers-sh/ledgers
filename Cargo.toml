@@ -15,6 +15,10 @@ cratefield-runtime-cloudflare = "=0.4.2"
 cratefield-runtime-native = "=0.4.2"
 cratefield-testing = "=0.5.1"
 
+# Exact money (issue #3):
+thiserror = "2"
+proptest = "1"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
