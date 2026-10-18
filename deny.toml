@@ -11,5 +11,11 @@ allow = [
 ]
 confidence-threshold = 0.93
 
+# webpki-roots ships Mozilla's CA root data under CDLA-Permissive-2.0 (permissive
+# data license). Reached via sqlx's TLS stack under cratefield-testing's harness feature.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
