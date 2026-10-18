@@ -1,0 +1,15 @@
+/target
+
+# Wrangler local secrets and state (the stack targets Cloudflare Workers;
+# .dev.vars must never be committed)
+.dev.vars
+.dev.vars.*
+/.wrangler/
+
+# Local tooling and editor state (never part of the repo)
+/.claude/
+/.codex/
+/.devcontainer/
+/.idea/
+/.vscode/
+/.mcp.json

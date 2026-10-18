@@ -11,8 +11,9 @@ the same commands.
 project. Our crates will be named `ledgers-*`.
 
 - The plan: [docs/PLAN.md](docs/PLAN.md)
-- Decisions: [docs/adr/](docs/adr/)
+- Decisions: [docs/adr/](docs/adr/), starting with [ADR 0001: harness by pinned crates](docs/adr/0001-harness-by-pinned-crates.md)
 - The work: this repository's issues, grouped by milestone (M0 to M5)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) — CI runs its checks on every PR
 - Site: https://ledgers.sh
 
 Built on the [Cratefield](https://cratefield.com) harness. MIT licensed.
