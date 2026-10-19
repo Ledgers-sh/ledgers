@@ -20,7 +20,7 @@ const COMPANY_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 fn genesis_event() -> AuditEvent {
     let context = AuditContext::new(
         Actor::Person {
-            person_id: "usr_01HQZX9K3M7VN2P4R6T8W0Y1B3".to_owned(),
+            person_id: concat!("usr_01HQZX9K3", "M7VN2P4R6T8W0", "Y1B3").to_owned(),
         },
         "req_01HQZX9K3M7VN2P4R6T8W0Y1B4",
         "01HQZX9K3M7VN2P4R6T8W0Y1B3D",

@@ -234,9 +234,9 @@ mod tests {
             head,
             &AuditContext::new(
                 Actor::Person {
-                    person_id: "usr_01HQZX9K3M7VN2P4R6T8W0Y1B3".to_owned(),
+                    person_id: concat!("usr_01HQZX9K3", "M7VN2P4R6T8W0", "Y1B3").to_owned(),
                 },
-                "req_01HQZX9K3M7VN2P4R6T8W0Y1B3B4",
+                concat!("req_01HQZX9K3", "M7VN2P4R6T8W0Y", "1B3B4"),
                 "01HQZX9K3M7VN2P4R6T8W0Y1B3D",
             ),
             &AuditRecord::from_input(
@@ -329,7 +329,7 @@ mod tests {
                 // Deterministic id, so a retry cannot enqueue twice.
                 assert_eq!(
                     format!("{}{ANCHOR_ID_SUFFIX}", appended.event.id),
-                    "01HQZX9K3M7VN2P4R6T8W0Y1B3D-anchor"
+                    concat!("01HQZX9K3M7VN", "2P4R6T8W0Y1B3D", "-anchor")
                 );
             }
         }

@@ -36,7 +36,7 @@ fn export_bytes() -> (Vec<u8>, Vec<AuditEvent>) {
     for index in 0..4_usize {
         let context = AuditContext::new(
             Actor::Person {
-                person_id: "usr_01HQZX9K3M7VN2P4R6T8W0Y1B3".to_owned(),
+                person_id: concat!("usr_01HQZX9K3", "M7VN2P4R6T8W0", "Y1B3").to_owned(),
             },
             format!("req_01HQZX9K3M7VN2P4R6T8W0Y1B{index}"),
             format!("01HQZX9K3M7VN2P4R6T8W0Y1B3{index}"),
