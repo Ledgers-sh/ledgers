@@ -1505,10 +1505,10 @@ mod tests {
     fn the_year_end_report_round_trips_through_its_serialization() {
         let eur = Currency::from_code("EUR").expect("EUR is in the table");
         let report = YearEndReport {
-            company_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
+            company_id: "test-company-000000000000".to_owned(),
             label: 2026,
             closing_entry: PostedEntry {
-                entry_id: "yearend-01ARZ3NDEKTSV4RRFFQ69G5FAV-2026".to_owned(),
+                entry_id: "yearend-test-company-000000000000-2026".to_owned(),
                 number: 3,
                 entry_date: "2026-12-31".to_owned(),
             },
@@ -1518,12 +1518,12 @@ mod tests {
                 check_id: "ledger.drafts".to_owned(),
                 kind: "draft-entries".to_owned(),
                 count: 2,
-                link: "/companies/01ARZ3NDEKTSV4RRFFQ69G5FAV/entries/drafts?period=2026-12"
+                link: "/companies/test-company-000000000000/entries/drafts?period=2026-12"
                     .to_owned(),
             }],
         };
         let text = report.serialize();
-        assert!(text.starts_with("company=01ARZ3NDEKTSV4RRFFQ69G5FAV\nlabel=2026\n"));
+        assert!(text.starts_with("company=test-company-000000000000\nlabel=2026\n"));
         assert!(text.contains("retained-earnings=-600.00\n"));
         assert!(
             text.contains("?period=2026-12"),

@@ -45,14 +45,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// The single-company fixture family, invented per AGENTS.md (never a
-/// real firm): one canonical ULID per scenario, so every scenario owns
+/// real firm): one clearly fake id per scenario, so every scenario owns
 /// its own chart, fiscal years and period rows.
-const LIFECYCLE_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV1";
-const SOFT_CLOSE_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV2";
-const CHECKS_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV3";
-const POSTING_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV4";
-const REOPEN_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV5";
-const YEAR_END_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV6";
+const LIFECYCLE_COMPANY: &str = "test-company-lifecycle";
+const SOFT_CLOSE_COMPANY: &str = "test-company-soft-close";
+const CHECKS_COMPANY: &str = "test-company-checks";
+const POSTING_COMPANY: &str = "test-company-posting";
+const REOPEN_COMPANY: &str = "test-company-reopen";
+const YEAR_END_COMPANY: &str = "test-company-year-end";
 
 const NOW: &str = "2026-02-01T09:00:00Z";
 

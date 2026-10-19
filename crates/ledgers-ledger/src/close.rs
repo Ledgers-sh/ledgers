@@ -239,21 +239,21 @@ mod tests {
     #[test]
     fn the_report_lists_every_blocker_with_count_and_link() {
         let report = CloseReport {
-            company_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
+            company_id: "test-company-000000000000".to_owned(),
             period: "2026-03".to_owned(),
             blockers: vec![
                 Blocker {
                     check_id: "ledger.drafts".to_owned(),
                     kind: "draft-entries".to_owned(),
                     count: 2,
-                    link: "/companies/01ARZ3NDEKTSV4RRFFQ69G5FAV/entries/drafts?period=2026-03"
+                    link: "/companies/test-company-000000000000/entries/drafts?period=2026-03"
                         .to_owned(),
                 },
                 Blocker {
                     check_id: "stub.fx".to_owned(),
                     kind: "fx-revaluation".to_owned(),
                     count: 1,
-                    link: "/companies/01ARZ3NDEKTSV4RRFFQ69G5FAV/fx?period=2026-03".to_owned(),
+                    link: "/companies/test-company-000000000000/fx?period=2026-03".to_owned(),
                 },
             ],
         };
@@ -261,7 +261,7 @@ mod tests {
         assert!(text.contains("draft-entries (ledger.drafts): 2"), "{text}");
         assert!(text.contains("fx-revaluation (stub.fx): 1"), "{text}");
         assert!(
-            text.contains("/companies/01ARZ3NDEKTSV4RRFFQ69G5FAV/entries/drafts?period=2026-03"),
+            text.contains("/companies/test-company-000000000000/entries/drafts?period=2026-03"),
             "{text}"
         );
         assert_eq!(format!("{report}"), text, "Display delegates to summary");

@@ -536,7 +536,7 @@ mod tests {
         let row = Row::new(vec![
             column(
                 "company_id",
-                sea_query::Value::from("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+                sea_query::Value::from("test-company-000000000000"),
             ),
             column("label", sea_query::Value::BigInt(Some(2026))),
             column("start_month", sea_query::Value::BigInt(Some(7))),
@@ -550,7 +550,7 @@ mod tests {
             column("updated_at", sea_query::Value::from("2025-06-30T10:00:00Z")),
         ]);
         let year = FiscalYear::from_row(&row).expect("a full row maps");
-        assert_eq!(year.company_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        assert_eq!(year.company_id, "test-company-000000000000");
         assert_eq!(year.label, 2026);
         assert_eq!(year.start_month, 7);
         assert!(year.has_adjustment_period);
