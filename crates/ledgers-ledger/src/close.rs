@@ -1,7 +1,7 @@
 //! The close-check registry: the extension point that decides whether a
 //! period or fiscal year may close — docs/adr/0002-open-core-boundary.md
 //! names `CloseCheck` among the open-core traits, with this registry as
-//! the working open-source default and `ledgers-cloud` supplying extra
+//! the working open-source default and the private cloud crate supplying extra
 //! checks (segregation rules, group preconditions) at composition time.
 //!
 //! A check answers one question — **what still blocks this close?** —
