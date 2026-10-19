@@ -47,6 +47,13 @@ ledgers-money = { path = "crates/ledgers-money" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 
+# Guard-statement helpers on the Database port (issue #40): every writing
+# crate shares the same numbering, period, limit and chain patterns.
+ledgers-db = { path = "crates/ledgers-db" }
+# Exact match to the time release cratefield-core pins (its Usage
+# statements take OffsetDateTime): one `time` in the workspace graph.
+time = "=0.3.55"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
