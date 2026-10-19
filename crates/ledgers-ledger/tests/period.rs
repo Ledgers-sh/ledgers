@@ -31,7 +31,7 @@ use ledgers_ledger::close::{
 };
 use ledgers_ledger::error::AccountsError;
 use ledgers_ledger::fiscal::FiscalYearSpec;
-use ledgers_ledger::journal::{
+use ledgers_ledger::journal_port::{
     AccountBalance, BoxFuture, Journal, NewEntry, NewEntryLine, PostedEntry,
 };
 use ledgers_ledger::period::{
@@ -178,11 +178,11 @@ impl Journal for DemoJournal {
         Box::pin(async move {
             let rows = db
                 .query(&Statement::with_values(
-                    "SELECT a.number AS account_number, COALESCE((
+                    "SELECT a.number AS account_number, CAST(COALESCE((
                         SELECT SUM(l.amount_minor) FROM demo_line l
                         JOIN demo_entry e ON e.entry_id = l.entry_id
                         WHERE e.journal_id = a.company_id AND l.account_number = a.number
-                    ), 0) AS balance
+                    ), 0) AS BIGINT) AS balance
                     FROM account a WHERE a.company_id = ? ORDER BY a.number"
                         .to_owned(),
                     vec![SeaValue::from(company_id)],
@@ -287,6 +287,19 @@ impl Journal for DemoJournal {
                     .expect("entry_date is NOT NULL text"),
             })
         })
+    }
+
+    fn ensure_journal<'a>(
+        &'a self,
+        _db: &'a dyn Database,
+        _company_id: &'a str,
+        _journal_id: &'a str,
+        _code: &'a str,
+        _name: &'a str,
+        _created_at: &'a str,
+    ) -> BoxFuture<'a, Result<(), AccountsError>> {
+        // The demo collapses the journal onto the company: nothing to provision.
+        Box::pin(async { Ok(()) })
     }
 
     fn find_entry<'a>(

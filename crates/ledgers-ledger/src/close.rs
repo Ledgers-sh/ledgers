@@ -20,7 +20,7 @@
 //! parses a link back.
 
 use crate::error::AccountsError;
-use crate::journal::{BoxFuture, Journal};
+use crate::journal_port::{BoxFuture, Journal};
 
 /// One thing standing in a close's way: a kind of unfinished work, how
 /// much of it there is, and where to look.

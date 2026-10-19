@@ -64,7 +64,7 @@ use crate::account::AccountType;
 use crate::close::{Blocker, CloseCheckContext, CloseCheckRegistry, CloseReport, gather_blockers};
 use crate::error::AccountsError;
 use crate::fiscal::{self, FiscalYear, FiscalYearSpec, RETAINED_EARNINGS_TAG};
-use crate::journal::{Journal, NewEntry, NewEntryLine, PostedEntry};
+use crate::journal_port::{Journal, NewEntry, NewEntryLine, PostedEntry};
 use crate::store;
 use cratefield_core::{Database, DbError, Statement};
 use ledgers_db::chain;
@@ -401,16 +401,20 @@ async fn transition_with_audit(
     retry::run_batch_with_retry(
         db,
         RetryPolicy::default(),
-        async || {
-            let head = chain::read_head(db, company_id).await?;
-            let seq = head.seq + 1;
-            let hash = audit_hash(seq, &head.hash, payload, now);
-            Ok(vec![
-                probe.clone(),
-                set_status.clone(),
-                guard::release_statement(&probe_key),
-                chain::append_statement(company_id, &head, &hash, payload, now),
-            ])
+        || {
+            let (probe, probe_key, set_status) =
+                (probe.clone(), probe_key.clone(), set_status.clone());
+            async move {
+                let head = chain::read_head(db, company_id).await?;
+                let seq = head.seq + 1;
+                let hash = audit_hash(seq, &head.hash, payload, now);
+                Ok(vec![
+                    probe.clone(),
+                    set_status.clone(),
+                    guard::release_statement(&probe_key),
+                    chain::append_statement(company_id, &head, &hash, payload, now),
+                ])
+            }
         },
         no_sleep,
     )
@@ -643,13 +647,21 @@ pub async fn open_fiscal_year(
     retry::run_batch_with_retry(
         db,
         RetryPolicy::default(),
-        async || {
-            let mut statements = Vec::with_capacity(3 + open_statements.len());
-            statements.push(probe.clone());
-            statements.push(insert.clone());
-            statements.extend(open_statements.iter().cloned());
-            statements.push(guard::release_statement(&probe_key));
-            Ok(statements)
+        || {
+            let (open_statements, probe, insert, probe_key) = (
+                open_statements.clone(),
+                probe.clone(),
+                insert.clone(),
+                probe_key.clone(),
+            );
+            async move {
+                let mut statements = Vec::with_capacity(3 + open_statements.len());
+                statements.push(probe.clone());
+                statements.push(insert.clone());
+                statements.extend(open_statements.iter().cloned());
+                statements.push(guard::release_statement(&probe_key));
+                Ok(statements)
+            }
         },
         no_sleep,
     )
@@ -1097,12 +1109,20 @@ async fn commit_year_end(
     retry::run_batch_with_retry(
         db,
         RetryPolicy::default(),
-        async || {
-            let head = chain::read_head(db, company_id).await?;
-            let seq = head.seq + 1;
-            let hash = audit_hash(seq, &head.hash, &payload, now);
-            let mut statements = Vec::with_capacity(5 + opening_statements.len());
-            statements.push(guard::assert_statement(
+        || {
+            let (payload, opening_statements, probe_key, update, close_last) = (
+                payload.clone(),
+                opening_statements.clone(),
+                probe_key.clone(),
+                update.clone(),
+                close_last.clone(),
+            );
+            async move {
+                let head = chain::read_head(db, company_id).await?;
+                let seq = head.seq + 1;
+                let hash = audit_hash(seq, &head.hash, &payload, now);
+                let mut statements = Vec::with_capacity(5 + opening_statements.len());
+                statements.push(guard::assert_statement(
                 &probe_key,
                 "(SELECT year_end_closed_at FROM fiscal_year WHERE company_id = ? AND label = ?) \
                  IS NULL",
@@ -1111,19 +1131,47 @@ async fn commit_year_end(
                     SeaValue::BigInt(Some(commit.label)),
                 ],
             ));
-            statements.extend(opening_statements.iter().cloned());
-            statements.push(update.clone());
-            statements.push(close_last.clone());
-            statements.push(guard::release_statement(&probe_key));
-            statements.push(chain::append_statement(
-                company_id, &head, &hash, &payload, now,
-            ));
-            Ok(statements)
+                statements.extend(opening_statements.iter().cloned());
+                statements.push(update.clone());
+                statements.push(close_last.clone());
+                statements.push(guard::release_statement(&probe_key));
+                statements.push(chain::append_statement(
+                    company_id, &head, &hash, &payload, now,
+                ));
+                Ok(statements)
+            }
         },
         no_sleep,
     )
     .await?;
     Ok(())
+}
+
+/// Posts the year-end closing entry, or finds it when a crashed close
+/// already posted it (its id is deterministic). The closing journal is one
+/// per fiscal year, so it is provisioned here before the first post.
+async fn post_closing_entry(
+    db: &dyn Database,
+    journal: &dyn Journal,
+    company_id: &str,
+    label: i64,
+    entry: &NewEntry,
+    now: &str,
+) -> Result<PostedEntry, AccountsError> {
+    if let Some(existing) = journal.find_entry(db, company_id, &entry.entry_id).await? {
+        return Ok(existing);
+    }
+    journal
+        .ensure_journal(
+            db,
+            company_id,
+            &entry.journal_id,
+            &format!("YE{label}"),
+            "Year-end close",
+            now,
+        )
+        .await?;
+    journal.post(db, entry).await
 }
 
 /// Closes a fiscal year end to end: clears the P&L, lands the result in
@@ -1255,10 +1303,7 @@ pub async fn close_fiscal_year(
         human: true,
         daily_limit: YEAR_END_DAILY_LIMIT,
     };
-    let posted = match journal.find_entry(db, company_id, &entry.entry_id).await? {
-        Some(existing) => existing,
-        None => journal.post(db, &entry).await?,
-    };
+    let posted = post_closing_entry(db, journal, company_id, label, &entry, &now).await?;
 
     // 7. Carry the balance sheet forward, from post-closing balances.
     let opening = carried_forward_opening(db, journal, company_id).await?;

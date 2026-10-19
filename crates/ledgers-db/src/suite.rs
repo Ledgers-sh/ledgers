@@ -110,10 +110,10 @@ pub struct PostInput {
     /// The fiscal year the numbering counter is scoped to.
     pub fiscal_year: i64,
     /// ISO 8601 calendar date, `"YYYY-MM-DD"` — names the posting
-    /// period unless `period_override` says otherwise, and the
-    /// usage-meter day.
+    /// period unless `period_override` says otherwise.
     pub entry_date: String,
-    /// ISO 8601 UTC timestamp bound from code, never `NOW()`.
+    /// ISO 8601 UTC timestamp bound from code, never `NOW()`. Its date
+    /// is the usage-meter day the daily limit is charged to.
     pub created_at: String,
     /// The entry's lines; the balanced guard requires at least the
     /// zero sum over them.
@@ -167,7 +167,7 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
         ))
     })?;
     let posting_period = input.period_override.clone().unwrap_or(derived_period);
-    let day = posting_day(&input.entry_date)?;
+    let day = meter_day(&input.created_at)?;
     let head = chain::read_head(db, &input.journal_id).await?;
 
     let mut statements = Vec::with_capacity(input.lines.len() + 8);
@@ -298,7 +298,13 @@ pub async fn post(
     policy: RetryPolicy,
     sleep: impl FnMut(Duration),
 ) -> Result<(), GuardError> {
-    retry::run_batch_with_retry(db, policy, async || plan_post(db, input).await, sleep).await
+    retry::run_batch_with_retry(
+        db,
+        policy,
+        || async move { plan_post(db, input).await },
+        sleep,
+    )
+    .await
 }
 
 /// The composite every dialect must pass: each guard refusing, the
@@ -318,6 +324,7 @@ pub async fn assert_guard_conformance(db: &dyn Database) {
     unbalanced_lines_reject(db).await;
     mixed_currency_rejects(db).await;
     daily_limit_rejects(db).await;
+    daily_limit_ignores_the_entry_date(db).await;
     chain_appends_and_retries(db).await;
     retry_exhaustion_is_a_conflict(db).await;
     usage_table_matches(db).await;
@@ -653,6 +660,42 @@ pub async fn daily_limit_rejects(db: &dyn Database) {
     assert_eq!(entry_count(db, JOURNAL).await, 2, "exactly two entries");
 }
 
+/// The daily limit is charged to the day the post is made, not to the
+/// entry's accounting date: with a limit of one, a second post made the
+/// same day is refused even when it is dated into another open period.
+///
+/// # Panics
+///
+/// Panics when the second post succeeds or fails the wrong way.
+pub async fn daily_limit_ignores_the_entry_date(db: &dyn Database) {
+    const JOURNAL: &str = "jrn-limit-dated";
+    create_demo_tables(db).await.expect("create demo tables");
+    open_period(db, JOURNAL, "2026-03").await;
+    open_period(db, JOURNAL, "2026-04").await;
+
+    let first = balanced_input("e-limit-dated-1", JOURNAL, "agent-limit-dated", 1);
+    post(db, &first, RetryPolicy::default(), no_sleep)
+        .await
+        .unwrap_or_else(|err| panic!("the first post is within the limit: {err}"));
+    let backdated = PostInput {
+        entry_date: "2026-03-15".to_owned(),
+        ..balanced_input("e-limit-dated-2", JOURNAL, "agent-limit-dated", 1)
+    };
+    let err = post(db, &backdated, RetryPolicy::default(), no_sleep)
+        .await
+        .expect_err("a backdated second post the same day exceeds the limit");
+    assert!(
+        matches!(err, GuardError::Database(_)),
+        "a spent allowance is a NOT NULL refusal: {err:?}"
+    );
+    assert_eq!(
+        used_for(db, "agent-limit-dated").await,
+        Some(1),
+        "the meter reads exactly the limit"
+    );
+    assert_eq!(entry_count(db, JOURNAL).await, 1, "exactly one entry");
+}
+
 /// Two posts append two linked events; a deterministic fork — two
 /// appends built from the same stale head — loses to the primary key,
 /// and the loser's error is recognised as the unique violation the
@@ -723,7 +766,7 @@ pub async fn retry_exhaustion_is_a_conflict(db: &dyn Database) {
     let err = retry::run_batch_with_retry(
         db,
         policy,
-        async || Ok(vec![guard::assert_statement("stuck", "1 = 1", Vec::new())]),
+        || async { Ok(vec![guard::assert_statement("stuck", "1 = 1", Vec::new())]) },
         |_| sleeps += 1,
     )
     .await
@@ -848,9 +891,26 @@ async fn set_period_status(db: &dyn Database, journal: &str, period: &str, statu
         .unwrap_or_else(|err| panic!("set {period} to {status} for {journal}: {err}"));
 }
 
+/// The usage-meter day of a post: the UTC day it is MADE (`created_at`),
+/// never the entry's accounting date. Were the limit charged to
+/// `entry_date`, an agent choosing that date could pick a fresh, unspent
+/// day for every post (backdating into any open period) and the daily
+/// limit would cap nothing.
+fn meter_day(created_at: &str) -> Result<OffsetDateTime, DbError> {
+    let date = created_at
+        .get(..10)
+        .filter(|date| period::period_of_date(date).is_some())
+        .ok_or_else(|| {
+            DbError::Query(format!(
+                "created_at {created_at} does not start with a YYYY-MM-DD date"
+            ))
+        })?;
+    posting_day(date)
+}
+
 /// The UTC midnight instant of a `"YYYY-MM-DD"` date — the usage
-/// meter's day anchor, derived from the entry so a retry re-plans the
-/// same window.
+/// meter's day anchor, taken from the post's `created_at` so a retry
+/// re-plans the same window.
 fn posting_day(entry_date: &str) -> Result<OffsetDateTime, DbError> {
     let year: i32 = entry_date[0..4]
         .parse()

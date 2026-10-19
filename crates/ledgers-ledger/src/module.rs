@@ -33,14 +33,25 @@ impl Module for LedgerModule {
     // error, and doctor cross-checks the created tables against these
     // declarations, so the list cannot drift from the migrations.
     fn tables(&self) -> &'static [&'static str] {
-        &["account", "fiscal_year", "fiscal_year_opening_balance"]
+        &[
+            "account",
+            "journal",
+            "journal_entry",
+            "journal_line",
+            "fiscal_year",
+            "fiscal_year_opening_balance",
+        ]
     }
 
     fn migrations(&self) -> Migrations {
         // The portable set: the SQLite dialect runs on D1, rusqlite and
-        // (lint-checked) Postgres. A postgres override set is added here
-        // only where the SQL truly differs.
-        Migrations::sqlite(super::SQLITE_MIGRATIONS)
+        // (lint-checked) Postgres. The postgres override exists because
+        // the journal immutability triggers are dialect SQL (RAISE(ABORT)
+        // vs plpgsql); the tables themselves are identical DDL.
+        Migrations {
+            sqlite: super::SQLITE_MIGRATIONS,
+            postgres: super::POSTGRES_MIGRATIONS,
+        }
     }
 
     fn validate_config(&self, _cfg: &dyn Config) -> Result<(), ConfigError> {

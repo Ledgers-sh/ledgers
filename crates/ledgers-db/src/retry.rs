@@ -26,6 +26,7 @@
 //! caller can back off its own way.
 
 use cratefield_core::{DbError, Statement};
+use std::future::Future;
 use std::time::Duration;
 
 /// Whether a driver error is a uniqueness violation, best-effort across
@@ -116,12 +117,16 @@ pub enum GuardError {
 /// races; [`GuardError::Database`] for every refusal or failure —
 /// including a `build` failure, since a failed read has nothing to
 /// retry against.
-pub async fn run_batch_with_retry(
+pub async fn run_batch_with_retry<F, Fut>(
     db: &dyn cratefield_core::Database,
     policy: RetryPolicy,
-    mut build: impl AsyncFnMut() -> Result<Vec<Statement>, DbError>,
+    mut build: F,
     mut sleep: impl FnMut(Duration),
-) -> Result<(), GuardError> {
+) -> Result<(), GuardError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Vec<Statement>, DbError>>,
+{
     let mut delays = policy.delays();
     let mut attempt: u32 = 1;
     loop {
