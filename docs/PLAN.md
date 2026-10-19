@@ -104,7 +104,7 @@ about 128 MB (reports paginate; nothing loads a whole ledger into memory);
    currency when all lines share one; mixed-currency residuals post explicitly
    to FX gain/loss or rounding. Checked in the domain type and again by a guard
    statement in the posting batch (the harness has `batch_atomic`, not
-   interactive transactions: see the guards ADR issue).
+   interactive transactions: [ADR 0004](adr/0004-guard-statements.md)).
 3. **Posted entries are immutable.** Corrections are reversals plus new
    entries. Nothing has an `UPDATE` path once posted.
 4. **Closed periods reject postings.** Reopening is a human-only action.
@@ -156,6 +156,7 @@ in `ledgers-cloud`.
 | Crate | Scope |
 |---|---|
 | `ledgers-money` | Exact money, currencies (ISO 4217 + crypto later), rounding, allocation, FX rates |
+| `ledgers-db` | Shared guard-statement helpers on the `Db` port: gapless numbering, periods, agent limits, audit chain, retry ([ADR 0004](adr/0004-guard-statements.md)) |
 | `ledgers-ledger` | Chart of accounts, journals, entries, periods, reversals, numbering, dimensions (units) |
 | `ledgers-audit` | Hash-chained audit log, verifier |
 | `ledgers-policy` | Agent keys, tiers, limits, decisions |

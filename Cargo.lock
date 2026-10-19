@@ -928,6 +928,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-db"
+version = "0.1.0"
+dependencies = [
+ "cratefield-core",
+ "cratefield-testing",
+ "pollster",
+ "sea-query",
+ "thiserror",
+ "time",
+]
+
+[[package]]
 name = "ledgers-ledger"
 version = "0.1.0"
 dependencies = [
