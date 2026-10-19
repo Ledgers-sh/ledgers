@@ -1,0 +1,270 @@
+# The generic small-business chart: jurisdiction-neutral, English default
+# vocabulary, flat enough to import in one pass. No eBilanz positions —
+# this chart is not tied to any statutory statement layout. Original
+# Ledgers data, MIT-licensed with the repository licence (see
+# templates/LICENSES.md).
+
+id = "generic-sme"
+name = "template.generic_sme.name"
+version = 1
+
+# --- Current assets ---------------------------------------------------------
+
+[[accounts]]
+number = "1000"
+name = "account.generic_sme.current_assets"
+type = "asset"
+
+[[accounts]]
+number = "1010"
+name = "account.generic_sme.cash"
+type = "asset"
+parent = "1000"
+tags = ["cash"]
+
+[[accounts]]
+number = "1020"
+name = "account.generic_sme.bank"
+type = "asset"
+parent = "1000"
+tags = ["bank"]
+
+[[accounts]]
+number = "1030"
+name = "account.generic_sme.accounts_receivable"
+type = "asset"
+parent = "1000"
+tags = ["ar"]
+
+[[accounts]]
+number = "1040"
+name = "account.generic_sme.inventory"
+type = "asset"
+parent = "1000"
+tags = ["inventory"]
+
+[[accounts]]
+number = "1050"
+name = "account.generic_sme.vat_input"
+type = "asset"
+parent = "1000"
+tags = ["vat-input"]
+
+[[accounts]]
+number = "1060"
+name = "account.generic_sme.prepayments"
+type = "asset"
+parent = "1000"
+
+# --- Fixed assets -----------------------------------------------------------
+
+[[accounts]]
+number = "1500"
+name = "account.generic_sme.fixed_assets"
+type = "asset"
+
+[[accounts]]
+number = "1510"
+name = "account.generic_sme.equipment"
+type = "asset"
+parent = "1500"
+
+[[accounts]]
+number = "1590"
+name = "account.generic_sme.accumulated_depreciation"
+type = "asset"
+normal = "credit"
+parent = "1500"
+tags = ["contra"]
+
+# --- Current liabilities ----------------------------------------------------
+
+[[accounts]]
+number = "2000"
+name = "account.generic_sme.current_liabilities"
+type = "liability"
+
+[[accounts]]
+number = "2010"
+name = "account.generic_sme.accounts_payable"
+type = "liability"
+parent = "2000"
+tags = ["ap"]
+
+[[accounts]]
+number = "2020"
+name = "account.generic_sme.vat_output"
+type = "liability"
+parent = "2000"
+tags = ["vat-output"]
+
+[[accounts]]
+number = "2030"
+name = "account.generic_sme.accrued_expenses"
+type = "liability"
+parent = "2000"
+
+[[accounts]]
+number = "2040"
+name = "account.generic_sme.suspense"
+type = "liability"
+parent = "2000"
+tags = ["suspense"]
+
+# --- Long-term liabilities --------------------------------------------------
+
+[[accounts]]
+number = "2500"
+name = "account.generic_sme.long_term_liabilities"
+type = "liability"
+
+[[accounts]]
+number = "2510"
+name = "account.generic_sme.bank_loan"
+type = "liability"
+parent = "2500"
+
+# --- Equity -------------------------------------------------------------------
+
+[[accounts]]
+number = "3000"
+name = "account.generic_sme.equity"
+type = "equity"
+
+[[accounts]]
+number = "3010"
+name = "account.generic_sme.share_capital"
+type = "equity"
+parent = "3000"
+
+[[accounts]]
+number = "3020"
+name = "account.generic_sme.retained_earnings"
+type = "equity"
+parent = "3000"
+tags = ["retained-earnings"]
+
+[[accounts]]
+number = "3030"
+name = "account.generic_sme.current_year_result"
+type = "equity"
+parent = "3000"
+
+# --- Income --------------------------------------------------------------------
+
+[[accounts]]
+number = "4000"
+name = "account.generic_sme.income"
+type = "income"
+
+[[accounts]]
+number = "4010"
+name = "account.generic_sme.sales"
+type = "income"
+parent = "4000"
+
+[[accounts]]
+number = "4020"
+name = "account.generic_sme.services_rendered"
+type = "income"
+parent = "4000"
+
+[[accounts]]
+number = "4030"
+name = "account.generic_sme.other_income"
+type = "income"
+parent = "4000"
+
+[[accounts]]
+number = "4040"
+name = "account.generic_sme.interest_income"
+type = "income"
+parent = "4000"
+
+[[accounts]]
+number = "4050"
+name = "account.generic_sme.fx_gains"
+type = "income"
+parent = "4000"
+tags = ["fx-gain"]
+
+# --- Expenses --------------------------------------------------------------------
+
+[[accounts]]
+number = "5000"
+name = "account.generic_sme.expenses"
+type = "expense"
+
+[[accounts]]
+number = "5010"
+name = "account.generic_sme.cost_of_goods_sold"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5020"
+name = "account.generic_sme.salaries_wages"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5030"
+name = "account.generic_sme.rent"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5040"
+name = "account.generic_sme.utilities"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5050"
+name = "account.generic_sme.marketing"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5060"
+name = "account.generic_sme.office_supplies"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5070"
+name = "account.generic_sme.insurance"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5080"
+name = "account.generic_sme.depreciation_expense"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5090"
+name = "account.generic_sme.interest_expense"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5100"
+name = "account.generic_sme.bank_fees"
+type = "expense"
+parent = "5000"
+
+[[accounts]]
+number = "5110"
+name = "account.generic_sme.fx_losses"
+type = "expense"
+parent = "5000"
+tags = ["fx-loss"]
+
+[[accounts]]
+number = "5950"
+name = "account.generic_sme.rounding_differences"
+type = "expense"
+parent = "5000"
+tags = ["rounding"]

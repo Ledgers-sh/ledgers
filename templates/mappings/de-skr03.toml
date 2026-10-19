@@ -1,0 +1,122 @@
+# SKR03 account numbers -> de-hgb account numbers (issue #5).
+#
+# Numbers only, on purpose: SKR account *names* are their publisher's
+# intellectual property ("Nachdruck ... nicht gestattet"), so neither the
+# names nor any other Datev text is bundled here — the bare account number
+# is the industry-standard interface every German bookkeeping system
+# exports. See NOTICE and templates/LICENSES.md.
+#
+# Every source number below was verified against at least two public
+# listings of the DATEV Standardkontenrahmen SKR 03 (sources recorded in
+# issue #5); rows were omitted rather than guessed wherever no clean
+# de-hgb counterpart exists. This is a migration seed, not an exhaustive
+# translation — unmapped accounts stay on their importer's review list.
+
+id = "de-skr03-to-de-hgb"
+source = "de-skr03"
+target = "de-hgb"
+version = 1
+
+[[map]]
+from = "0300"
+to = "10110"
+
+[[map]]
+from = "0320"
+to = "10130"
+
+[[map]]
+from = "0630"
+to = "22100"
+
+[[map]]
+from = "0800"
+to = "20100"
+
+[[map]]
+from = "0860"
+to = "20200"
+
+[[map]]
+from = "1000"
+to = "11100"
+
+[[map]]
+from = "1200"
+to = "11200"
+
+[[map]]
+from = "1400"
+to = "11400"
+
+[[map]]
+from = "1576"
+to = "11500"
+
+[[map]]
+from = "1600"
+to = "22200"
+
+[[map]]
+from = "1776"
+to = "22300"
+
+[[map]]
+from = "2100"
+to = "42100"
+
+[[map]]
+from = "3200"
+to = "40100"
+
+[[map]]
+from = "3980"
+to = "11300"
+
+[[map]]
+from = "4110"
+to = "40200"
+
+[[map]]
+from = "4120"
+to = "40200"
+
+[[map]]
+from = "4130"
+to = "40300"
+
+[[map]]
+from = "4210"
+to = "40400"
+
+[[map]]
+from = "4360"
+to = "40500"
+
+[[map]]
+from = "4500"
+to = "40600"
+
+[[map]]
+from = "4600"
+to = "40700"
+
+[[map]]
+from = "4910"
+to = "40800"
+
+[[map]]
+from = "4830"
+to = "41000"
+
+[[map]]
+from = "8125"
+to = "30300"
+
+[[map]]
+from = "8300"
+to = "30200"
+
+[[map]]
+from = "8400"
+to = "30100"

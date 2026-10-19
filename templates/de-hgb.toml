@@ -1,0 +1,411 @@
+# The German chart of accounts, structured on HGB §266 (balance sheet) and
+# §275 (income statement). Original Ledgers chart — every number, name key
+# and grouping is ours; the statute itself is public law.
+#
+# `ebilanz` values are position identifiers of the E-Bilanz-Taxonomie 6.9
+# (BMF letter of 2025-06-10, published with EStH Anhang 7; taxonomy
+# © XBRL Deutschland e.V.). Identifiers only — no taxonomy text is
+# reproduced. See NOTICE and templates/LICENSES.md for the licence basis.
+#
+# Positions are tagged only where a taxonomy counterpart was verified.
+# Left untagged on purpose: the balance sheet in the taxonomy is presented
+# NET of accumulated depreciation (no contra position exists), and no
+# verified position was found for input VAT (asset side), interest income,
+# FX gains/losses or rounding — so accounts 10900, 11500, 22500, 31100,
+# 31200, 41100, 42200 carry no `ebilanz`.
+#
+# Many accounts intentionally share one eBilanz position: fiscal-statement
+# lines aggregate account balances (e.g. all four Umsatzerlöse accounts
+# roll up into ...totalOutput.netSales).
+
+id = "de-hgb"
+name = "template.de_hgb.name"
+version = 1
+
+# --- Anlagevermögen (non-current assets) ---------------------------------
+
+[[accounts]]
+number = "10000"
+name = "account.de_hgb.anlagevermoegen"
+type = "asset"
+
+[[accounts]]
+number = "10100"
+name = "account.de_hgb.sachanlagen"
+type = "asset"
+parent = "10000"
+ebilanz = "bs.ass.fixAss.tan"
+
+[[accounts]]
+number = "10110"
+name = "account.de_hgb.bga"
+type = "asset"
+parent = "10100"
+ebilanz = "bs.ass.fixAss.tan.otherEquipm"
+
+[[accounts]]
+number = "10120"
+name = "account.de_hgb.maschinen"
+type = "asset"
+parent = "10100"
+ebilanz = "bs.ass.fixAss.tan.machinery"
+
+[[accounts]]
+number = "10130"
+name = "account.de_hgb.pkw"
+type = "asset"
+parent = "10100"
+ebilanz = "bs.ass.fixAss.tan.otherEquipm.passengerCars"
+
+[[accounts]]
+number = "10140"
+name = "account.de_hgb.nutzfahrzeuge"
+type = "asset"
+parent = "10100"
+ebilanz = "bs.ass.fixAss.tan.otherEquipm.comVehicle"
+
+[[accounts]]
+number = "10150"
+name = "account.de_hgb.grundstuecke_gebaeude"
+type = "asset"
+parent = "10100"
+ebilanz = "bs.ass.fixAss.tan.landBuildings"
+
+# Contra asset, credit-normal: the taxonomy balance sheet is net, so there
+# is no position for accumulated depreciation.
+[[accounts]]
+number = "10900"
+name = "account.de_hgb.kumulierte_abschreibungen"
+type = "asset"
+normal = "credit"
+parent = "10100"
+tags = ["contra"]
+
+# --- Umlaufvermögen (current assets) --------------------------------------
+
+[[accounts]]
+number = "11000"
+name = "account.de_hgb.umlaufvermoegen"
+type = "asset"
+ebilanz = "bs.ass.currAss"
+
+[[accounts]]
+number = "11100"
+name = "account.de_hgb.kasse"
+type = "asset"
+parent = "11000"
+tags = ["cash"]
+ebilanz = "bs.ass.currAss.cashEquiv.cash"
+
+[[accounts]]
+number = "11200"
+name = "account.de_hgb.bankkonto"
+type = "asset"
+parent = "11000"
+tags = ["bank"]
+ebilanz = "bs.ass.currAss.cashEquiv.bank"
+
+[[accounts]]
+number = "11300"
+name = "account.de_hgb.warenbestand"
+type = "asset"
+parent = "11000"
+tags = ["inventory"]
+ebilanz = "bs.ass.currAss.inventory.finishedAndMerch.merchandise"
+
+[[accounts]]
+number = "11400"
+name = "account.de_hgb.forderungen_ll"
+type = "asset"
+parent = "11000"
+tags = ["ar"]
+ebilanz = "bs.ass.currAss.receiv.trade"
+
+# No verified taxonomy position for input VAT on the asset side.
+[[accounts]]
+number = "11500"
+name = "account.de_hgb.ust_forderungen"
+type = "asset"
+parent = "11000"
+tags = ["vat-input"]
+
+[[accounts]]
+number = "11900"
+name = "account.de_hgb.rap_aktiv"
+type = "asset"
+parent = "11000"
+ebilanz = "bs.ass.prepaidExp"
+
+# --- Eigenkapital (equity) -------------------------------------------------
+
+[[accounts]]
+number = "20000"
+name = "account.de_hgb.eigenkapital"
+type = "equity"
+ebilanz = "bs.eqLiab.equity"
+
+[[accounts]]
+number = "20100"
+name = "account.de_hgb.gezeichnetes_kapital"
+type = "equity"
+parent = "20000"
+ebilanz = "bs.eqLiab.equity.subscribed"
+
+[[accounts]]
+number = "20200"
+name = "account.de_hgb.gewinnvortrag"
+type = "equity"
+parent = "20000"
+tags = ["retained-earnings"]
+ebilanz = "bs.eqLiab.equity.retainedEarnings"
+
+[[accounts]]
+number = "20300"
+name = "account.de_hgb.jahresergebnis"
+type = "equity"
+parent = "20000"
+ebilanz = "bs.eqLiab.equity.netIncome"
+
+# --- Rückstellungen (provisions) -------------------------------------------
+
+[[accounts]]
+number = "21000"
+name = "account.de_hgb.rueckstellungen"
+type = "liability"
+ebilanz = "bs.eqLiab.accruals"
+
+[[accounts]]
+number = "21100"
+name = "account.de_hgb.steuerrueckstellungen"
+type = "liability"
+parent = "21000"
+ebilanz = "bs.eqLiab.accruals.tax"
+
+[[accounts]]
+number = "21200"
+name = "account.de_hgb.sonstige_rueckstellungen"
+type = "liability"
+parent = "21000"
+ebilanz = "bs.eqLiab.accruals.other"
+
+# --- Verbindlichkeiten (liabilities) ----------------------------------------
+
+[[accounts]]
+number = "22000"
+name = "account.de_hgb.verbindlichkeiten"
+type = "liability"
+ebilanz = "bs.eqLiab.liab"
+
+[[accounts]]
+number = "22100"
+name = "account.de_hgb.verb_kreditinstitute"
+type = "liability"
+parent = "22000"
+ebilanz = "bs.eqLiab.liab.bank"
+
+[[accounts]]
+number = "22200"
+name = "account.de_hgb.verbindlichkeiten_ll"
+type = "liability"
+parent = "22000"
+tags = ["ap"]
+ebilanz = "bs.eqLiab.liab.trade"
+
+[[accounts]]
+number = "22300"
+name = "account.de_hgb.ust_verbindlichkeiten"
+type = "liability"
+parent = "22000"
+tags = ["vat-output"]
+ebilanz = "bs.eqLiab.liab.other.theroffTax.vat"
+
+[[accounts]]
+number = "22400"
+name = "account.de_hgb.sonstige_verbindlichkeiten"
+type = "liability"
+parent = "22000"
+ebilanz = "bs.eqLiab.liab.other"
+
+[[accounts]]
+number = "22500"
+name = "account.de_hgb.unklare_posten"
+type = "liability"
+parent = "22000"
+tags = ["suspense"]
+
+[[accounts]]
+number = "22900"
+name = "account.de_hgb.rap_passiv"
+type = "liability"
+ebilanz = "bs.eqLiab.defIncome"
+
+# --- Betriebliche und finanzielle Erträge (operating and financial income) --
+
+[[accounts]]
+number = "30000"
+name = "account.de_hgb.betriebliche_ertraege"
+type = "income"
+
+[[accounts]]
+number = "30100"
+name = "account.de_hgb.umsatzerloese_19"
+type = "income"
+parent = "30000"
+ebilanz = "is.netIncome.regular.operatingTC.grossTradingProfit.totalOutput.netSales"
+
+[[accounts]]
+number = "30200"
+name = "account.de_hgb.umsatzerloese_7"
+type = "income"
+parent = "30000"
+ebilanz = "is.netIncome.regular.operatingTC.grossTradingProfit.totalOutput.netSales"
+
+[[accounts]]
+number = "30300"
+name = "account.de_hgb.umsatzerloese_eu"
+type = "income"
+parent = "30000"
+ebilanz = "is.netIncome.regular.operatingTC.grossTradingProfit.totalOutput.netSales"
+
+[[accounts]]
+number = "30400"
+name = "account.de_hgb.umsatzerloese_drittland"
+type = "income"
+parent = "30000"
+ebilanz = "is.netIncome.regular.operatingTC.grossTradingProfit.totalOutput.netSales"
+
+[[accounts]]
+number = "30500"
+name = "account.de_hgb.sonstige_betriebliche_ertraege"
+type = "income"
+parent = "30000"
+ebilanz = "is.netIncome.regular.operatingTC.otherOpRevenue"
+
+[[accounts]]
+number = "31000"
+name = "account.de_hgb.finanzielle_ertraege"
+type = "income"
+
+[[accounts]]
+number = "31100"
+name = "account.de_hgb.zinsertraege"
+type = "income"
+parent = "31000"
+
+[[accounts]]
+number = "31200"
+name = "account.de_hgb.kursgewinne"
+type = "income"
+parent = "31000"
+tags = ["fx-gain"]
+
+# --- Betriebliche Aufwendungen (operating expenses) --------------------------
+
+[[accounts]]
+number = "40000"
+name = "account.de_hgb.betriebliche_aufwendungen"
+type = "expense"
+
+[[accounts]]
+number = "40100"
+name = "account.de_hgb.wareneinsatz"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.grossTradingProfit.materialServices.material.purchased"
+
+[[accounts]]
+number = "40200"
+name = "account.de_hgb.loehne_gehaelter"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.staff.salaries"
+
+[[accounts]]
+number = "40300"
+name = "account.de_hgb.soziale_abgaben"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.staff.social.socExp"
+
+[[accounts]]
+number = "40400"
+name = "account.de_hgb.raumkosten"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "40500"
+name = "account.de_hgb.versicherungen"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "40600"
+name = "account.de_hgb.fahrzeugkosten"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "40700"
+name = "account.de_hgb.werbekosten"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "40800"
+name = "account.de_hgb.kommunikation_edv"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "40900"
+name = "account.de_hgb.betriebliche_steuern"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.otherCost"
+
+[[accounts]]
+number = "41000"
+name = "account.de_hgb.abschreibungen_sachanlagen"
+type = "expense"
+parent = "40000"
+ebilanz = "is.netIncome.regular.operatingTC.deprAmort.fixAss.tan"
+
+[[accounts]]
+number = "41100"
+name = "account.de_hgb.rundungsdifferenzen"
+type = "expense"
+parent = "40000"
+tags = ["rounding"]
+
+# --- Finanzielle Aufwendungen und Steuern (financial expenses, taxes) --------
+
+[[accounts]]
+number = "42000"
+name = "account.de_hgb.finanzielle_aufwendungen"
+type = "expense"
+
+[[accounts]]
+number = "42100"
+name = "account.de_hgb.zinsaufwendungen"
+type = "expense"
+parent = "42000"
+ebilanz = "is.netIncome.regular.fin.netInterest.expenses"
+
+[[accounts]]
+number = "42200"
+name = "account.de_hgb.kursverluste"
+type = "expense"
+parent = "42000"
+tags = ["fx-loss"]
+
+[[accounts]]
+number = "43000"
+name = "account.de_hgb.steuern_einkommen_ertrag"
+type = "expense"
+ebilanz = "is.netIncome.tax"
