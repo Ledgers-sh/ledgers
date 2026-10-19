@@ -40,6 +40,13 @@ proptest = "1"
 # the same release the testing kit itself uses.
 pollster = "0.4"
 
+# Chart of accounts and country templates (issue #5): the workspace's own
+# money crate for currency validation, plus TOML parsing for the bundled
+# chart/mapping/i18n data files under templates/.
+ledgers-money = { path = "crates/ledgers-money" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

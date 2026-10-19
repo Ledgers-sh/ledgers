@@ -1,0 +1,35 @@
+[package]
+name = "ledgers-ledger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# The Postgres parity leg of the scenario matrix: native-only, opted into
+# by CI and a local postgres:16 (FZ_TEST_POSTGRES_URL). The lib itself
+# stays wasm-clean without it.
+postgres = ["cratefield-testing/postgres"]
+
+[dependencies]
+# The lib is wasm32-clean: core, the light port-conformance surface of the
+# testing kit (the workspace default — no harness graph), sea-query for
+# statements, the workspace money crate for currency validation, and
+# serde/toml for the bundled chart templates.
+cratefield-core = { workspace = true }
+cratefield-testing = { workspace = true }
+sea-query = { workspace = true }
+ledgers-money = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The harness (TestHarness over in-memory SQLite) for the scenario
+# matrix — the kit's default feature set; the lib never sees it.
+cratefield-testing = { workspace = true, features = ["harness"] }
+pollster = { workspace = true, features = ["macro"] }
+
+[lints]
+workspace = true

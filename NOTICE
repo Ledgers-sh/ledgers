@@ -4,4 +4,17 @@ Copyright (c) 2026 Factory Zero. Licensed under the MIT licence (see LICENSE).
 Bundled data sources and their licences are listed below as they are added.
 Each entry names the source, its date or version, and its licence.
 
-(none yet)
+E-Bilanz-Taxonomie 6.9 position identifiers (templates/de-hgb.toml)
+  Position identifiers of the German E-Bilanz taxonomy, version 6.9,
+  published with the BMF letter of 10 June 2025 (EStH, Anhang 7) and used
+  for ELSTER interoperability. Taxonomy © XBRL Deutschland e.V.,
+  https://www.xbrl.de / https://de.xbrl.org. Only the identifiers are
+  bundled, no taxonomy text. Per https://de.xbrl.org/disclaimer/, use
+  including commercial use is permitted provided the copyright notice is
+  retained.
+
+SKR03/SKR04 mapping numbers (templates/mappings/)
+  Bare DATEV Standardkontenrahmen account numbers used as the
+  industry-standard interchange interface for German bookkeeping exports.
+  No DATEV account names or other DATEV texts are bundled ("Nachdruck -
+  auch auszugsweise - nicht gestattet"); see templates/LICENSES.md.
