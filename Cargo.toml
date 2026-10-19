@@ -45,6 +45,7 @@ pollster = "0.4"
 # chart/mapping/i18n data files under templates/.
 ledgers-money = { path = "crates/ledgers-money" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.9"
 
 # Guard-statement helpers on the Database port (issue #40): every writing

@@ -16,19 +16,27 @@ postgres = ["cratefield-testing/postgres"]
 # The lib is wasm32-clean: core, the light port-conformance surface of the
 # testing kit (the workspace default — no harness graph), sea-query for
 # statements, the workspace money crate for currency validation, and
-# serde/toml for the bundled chart templates.
+# serde/toml for the bundled chart templates. The journal work adds the
+# guard-statement helpers (ledgers-db) and serde_json for the problem+json
+# extension members and the JSON columns; core does not re-export serde_json.
 cratefield-core = { workspace = true }
 cratefield-testing = { workspace = true }
 sea-query = { workspace = true }
 ledgers-money = { workspace = true }
+ledgers-db = { workspace = true }
+time = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 # The harness (TestHarness over in-memory SQLite) for the scenario
-# matrix — the kit's default feature set; the lib never sees it.
+# matrix — the kit's default feature set; the lib never sees it — plus
+# the guard foundation's knobs the scenarios turn directly (period
+# status, the retry policy, the genesis hash).
 cratefield-testing = { workspace = true, features = ["harness"] }
+ledgers-db = { workspace = true }
 pollster = { workspace = true, features = ["macro"] }
 
 [lints]
