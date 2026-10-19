@@ -83,7 +83,11 @@ surface as `GuardError::Conflict` (contention), never as a refusal.
 - The 1 000-post proof (100 threads, one journal, SQLite and Postgres)
   commits every post with numbers exactly `1..=1000` and an unforked
   chain; the limit proof commits exactly 200 of 1 000 and refuses the
-  rest as `NOT NULL`, never as conflict.
+  rest as `NOT NULL`, never as conflict. A post whose retry budget
+  exhausts is resubmitted by the test exactly as a caller would on
+  `Conflict`, after checking it left no entry, line or audit event;
+  the meter and the numbering then count only committed posts, which
+  proves an exhausted batch spent no allowance and burned no number.
 - Two measured findings shape deployments: retries need **jitter**
   (a plain ladder keeps a conflicted herd synchronised; the jitter
   belongs in the injected sleeper), and the **budget must fit the
@@ -92,5 +96,18 @@ surface as `GuardError::Conflict` (contention), never as a refusal.
   ~200 of 1 000 posts under a 100-thread herd, while a 40-attempt
   budget commits all of them. `RetryPolicy` is data; size it for the
   herd you actually run.
+- **Exhaustion is a legitimate outcome, not a defect.** No attempt
+  budget outlasts every machine: on Postgres each attempt reads the
+  chain head and submits its batch through two separate pool
+  checkouts, so under a herd the head is usually stale by the time the
+  batch runs and the attempts a post needs scale with server speed.
+  The first CI run of the Postgres leg drained in 18.9 s (vs ~2.7 s on
+  a workstation) and one post of 1 000 exhausted a 40-attempt budget.
+  What the design guarantees is that exhaustion is a clean, retryable
+  `GuardError::Conflict` — nothing written, no number gap — and that
+  is what the proofs assert; "zero exhaustions" would assert the
+  runner's speed. Contention that large on one company chain is a
+  deployment shape to avoid (serialise writers per company upstream),
+  not one to absorb with an ever larger budget.
 - The library never sleeps or blocks itself (injected sleep keeps it
   wasm-clean for the Workers runtime).
