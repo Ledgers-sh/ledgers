@@ -86,6 +86,12 @@ static ISO_4217: [CurrencyDef; crate::currency::TABLE_LEN] = [
         active: true,
     },
     CurrencyDef {
+        code: "ANG",
+        numeric: 532,
+        exponent: 2,
+        active: false,
+    },
+    CurrencyDef {
         code: "AOA",
         numeric: 973,
         exponent: 2,
@@ -142,6 +148,12 @@ static ISO_4217: [CurrencyDef; crate::currency::TABLE_LEN] = [
     CurrencyDef {
         code: "BEF",
         numeric: 56,
+        exponent: 2,
+        active: false,
+    },
+    CurrencyDef {
+        code: "BGN",
+        numeric: 975,
         exponent: 2,
         active: false,
     },
@@ -482,6 +494,12 @@ static ISO_4217: [CurrencyDef; crate::currency::TABLE_LEN] = [
         active: true,
     },
     CurrencyDef {
+        code: "HRK",
+        numeric: 191,
+        exponent: 2,
+        active: false,
+    },
+    CurrencyDef {
         code: "HTG",
         numeric: 332,
         exponent: 2,
@@ -642,6 +660,12 @@ static ISO_4217: [CurrencyDef; crate::currency::TABLE_LEN] = [
         numeric: 426,
         exponent: 2,
         active: true,
+    },
+    CurrencyDef {
+        code: "LTL",
+        numeric: 440,
+        exponent: 2,
+        active: false,
     },
     CurrencyDef {
         code: "LUF",
@@ -1348,7 +1372,7 @@ static ISO_4217: [CurrencyDef; crate::currency::TABLE_LEN] = [
 ];
 
 /// The number of entries in [`ISO_4217`].
-pub(crate) const TABLE_LEN: usize = 215;
+pub(crate) const TABLE_LEN: usize = 219;
 
 /// An ISO 4217 currency, active or historic, interned in the static table.
 ///
@@ -1394,8 +1418,9 @@ impl Currency {
     ///
     /// Numeric codes are unique among active currencies, but ISO reissues
     /// numbers across eras, so a numeric may match both an active and a
-    /// historic currency: the **active** match wins. The current table
-    /// happens to contain no such collision.
+    /// historic currency: the **active** match wins. Live example: 532
+    /// is both XCG (active since 2025) and ANG (the guilder it replaced),
+    /// and resolves to XCG.
     ///
     /// # Errors
     /// [`MoneyError::UnknownNumericCode`] if no table entry has this
@@ -1554,12 +1579,12 @@ mod tests {
             Currency::from_numeric(9999),
             Err(MoneyError::UnknownNumericCode { numeric: 9999 })
         ));
-        // Active ZWG (924) and historic ZWL (932) both resolve; today's
-        // table has no numeric shared between an active and a historic
-        // entry, so the active-wins rule has no live example — it exists
-        // for the next era's reissued numerics.
+        // Active ZWG (924) and historic ZWL (932) both resolve.
         assert!(Currency::from_numeric(924).unwrap().is_active());
         assert!(!Currency::from_numeric(932).unwrap().is_active());
+        // 532 is shared by active XCG and historic ANG: the active one wins.
+        assert_eq!(Currency::from_numeric(532).unwrap(), code("XCG").unwrap());
+        assert_eq!(code("ANG").unwrap().numeric(), 532);
     }
 
     #[test]

@@ -182,6 +182,24 @@ pub async fn import_template(
             number: clash.number.clone(),
         });
     }
+    // The chart brings exactly one carrier of every required system tag
+    // (lint above), so an existing account already carrying one would
+    // leave the company with two. Refuse that before writing: the import
+    // batch is atomic, but the post-import check below runs after it has
+    // committed and could only report the problem, not undo it.
+    let duplicated: Vec<Violation> = REQUIRED_SYSTEM_TAGS
+        .iter()
+        .filter(|tag| existing.iter().any(|row| row.has_tag(tag)))
+        .map(|&tag| Violation {
+            kind: ViolationKind::DuplicateSystemAccount { tag },
+            account: None,
+        })
+        .collect();
+    if !duplicated.is_empty() {
+        return Err(AccountsError::TemplateRejected {
+            violations: duplicated,
+        });
+    }
 
     let accounts: Vec<Account> = chart
         .in_dependency_order()

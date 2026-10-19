@@ -92,6 +92,7 @@ pub async fn scenarios(db: &dyn Database) {
     deleting_is_not_an_operation(db).await;
     creating_under_a_missing_parent_fails(db).await;
     imports_are_parents_first_and_one_shot(db).await;
+    import_refuses_a_second_system_account_before_writing(db).await;
 }
 
 async fn insert_find_and_derived_state(db: &dyn Database) {
@@ -345,5 +346,52 @@ async fn imports_are_parents_first_and_one_shot(db: &dyn Database) {
     assert!(
         matches!(err, AccountsError::TemplateRejected { .. }),
         "{err:?}"
+    );
+}
+
+async fn import_refuses_a_second_system_account_before_writing(db: &dyn Database) {
+    // A ledger that already has a rounding account (number not in the
+    // chart, so no number collision): importing a chart that brings its
+    // own rounding account must be refused up front, writing nothing —
+    // not committed and then reported as a violation.
+    const THIRD_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FC";
+    commands::create_account(
+        db,
+        THIRD_COMPANY,
+        AccountDraft {
+            number: "9000".to_owned(),
+            name_key: "account.inline.own-rounding".to_owned(),
+            account_type: AccountType::Expense,
+            normal_balance: None,
+            currency: None,
+            parent: None,
+            tags: vec!["rounding".to_owned()],
+        },
+        NOW.to_owned(),
+    )
+    .await
+    .expect("create the pre-existing rounding account");
+
+    let chart = chart::parse_chart(INLINE_CHART).expect("inline chart parses");
+    let err = commands::import_template(db, THIRD_COMPANY, &chart, LATER.to_owned())
+        .await
+        .unwrap_err();
+    match &err {
+        AccountsError::TemplateRejected { violations } => assert!(
+            violations.iter().any(|v| matches!(
+                v.kind,
+                ledgers_ledger::lint::ViolationKind::DuplicateSystemAccount { tag: "rounding" }
+            )),
+            "{err:?}"
+        ),
+        other => panic!("expected TemplateRejected, got {other:?}"),
+    }
+    let accounts = commands::list_accounts(db, THIRD_COMPANY, true)
+        .await
+        .expect("list the company's accounts");
+    assert_eq!(
+        accounts.len(),
+        1,
+        "the refused import wrote nothing: {accounts:?}"
     );
 }
