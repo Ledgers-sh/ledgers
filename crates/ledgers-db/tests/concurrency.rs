@@ -208,6 +208,8 @@ fn hammer(
                                 amount_minor: -100,
                             },
                         ],
+                        human: true,
+                        period_override: None,
                         agent_subject: subject.to_owned(),
                         daily_limit,
                     };

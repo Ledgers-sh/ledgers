@@ -1,9 +1,9 @@
-//! The ledger module: how the chart-of-accounts schema is declared to the
-//! harness. It serves no routes yet — the command surface (CLI, MCP,
-//! HTTP) arrives with `ledgers-commands` in M1 (docs/PLAN.md §6, §7) —
-//! but it carries the migrations and the table declaration, so a venture
-//! composition (and `fz doctor`) sees the account schema with nothing
-//! hidden behind a domain crate.
+//! The ledger module: how the chart-of-accounts and fiscal-year schema
+//! is declared to the harness. It serves no routes yet — the command
+//! surface (CLI, MCP, HTTP) arrives with `ledgers-commands` in M1
+//! (docs/PLAN.md §6, §7) — but it carries the migrations and the table
+//! declarations, so a venture composition (and `fz doctor`) sees the
+//! schema with nothing hidden behind a domain crate.
 
 use cratefield_core::axum;
 use cratefield_core::{Config, ConfigError, Migrations, Module, ModuleContext, Port};
@@ -33,7 +33,7 @@ impl Module for LedgerModule {
     // error, and doctor cross-checks the created tables against these
     // declarations, so the list cannot drift from the migrations.
     fn tables(&self) -> &'static [&'static str] {
-        &["account"]
+        &["account", "fiscal_year", "fiscal_year_opening_balance"]
     }
 
     fn migrations(&self) -> Migrations {

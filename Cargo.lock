@@ -945,10 +945,12 @@ version = "0.1.0"
 dependencies = [
  "cratefield-core",
  "cratefield-testing",
+ "ledgers-db",
  "ledgers-money",
  "pollster",
  "sea-query",
  "serde",
+ "sha2 0.10.9",
  "thiserror",
  "toml",
 ]

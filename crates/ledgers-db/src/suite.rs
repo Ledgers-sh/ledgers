@@ -27,7 +27,8 @@
 //! ```sql
 //! -- 1. numbering: provision (idempotent), bump, insert reading the counter
 //! -- 2. the entry's lines
-//! -- 3. period-open guard (fails closed: unknown period = closed)
+//! -- 3. period guard (open to all; soft-closed to people only;
+//! --    closed or unknown to no one)
 //! -- 4. balanced guard (single currency, zero sum)
 //! -- 5. releases for both probes
 //! -- 6. the daily-limit consume (harness Usage, NOT NULL refusal)
@@ -109,13 +110,23 @@ pub struct PostInput {
     /// The fiscal year the numbering counter is scoped to.
     pub fiscal_year: i64,
     /// ISO 8601 calendar date, `"YYYY-MM-DD"` — names the posting
-    /// period and the usage-meter day.
+    /// period unless `period_override` says otherwise, and the
+    /// usage-meter day.
     pub entry_date: String,
     /// ISO 8601 UTC timestamp bound from code, never `NOW()`.
     pub created_at: String,
     /// The entry's lines; the balanced guard requires at least the
     /// zero sum over them.
     pub lines: Vec<DemoLine>,
+    /// Who is posting: a person (`true`) or an agent key (`false`) —
+    /// the period guard admits a person into a `soft-closed` period
+    /// and refuses an agent key there.
+    pub human: bool,
+    /// The period the guard checks: `None` derives `"YYYY-MM"` from
+    /// `entry_date`; `Some(period)` checks that period instead — the
+    /// adjustment-period path, an entry dated in one month posted into
+    /// another the operator left open for adjustments.
+    pub period_override: Option<String>,
     /// Who the daily limit is charged to (the agent subject).
     pub agent_subject: String,
     /// The daily allowance for `agent_subject` under `meter = "post"`.
@@ -138,7 +149,10 @@ pub async fn create_demo_tables(db: &dyn Database) -> Result<(), DbError> {
 /// Builds the reference posting batch for `input` (see the module docs
 /// for the statement order and what each guard proves). The only
 /// pre-batch read is the audit head — which is why a retry, re-running
-/// this whole function, is correct.
+/// this whole function, is correct. The period guard checks
+/// `input.period_override` when set — the adjustment-period path —
+/// else the entry date's own month, and admits a `soft-closed` period
+/// only when `input.human` says a person is posting.
 ///
 /// # Errors
 ///
@@ -146,12 +160,13 @@ pub async fn create_demo_tables(db: &dyn Database) -> Result<(), DbError> {
 /// built — when `entry_date` is not a real `"YYYY-MM-DD"` calendar
 /// date.
 pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<Statement>, DbError> {
-    let posting_period = period::period_of_date(&input.entry_date).ok_or_else(|| {
+    let derived_period = period::period_of_date(&input.entry_date).ok_or_else(|| {
         DbError::Query(format!(
             "entry_date {} is not a YYYY-MM-DD calendar date",
             input.entry_date
         ))
     })?;
+    let posting_period = input.period_override.clone().unwrap_or(derived_period);
     let day = posting_day(&input.entry_date)?;
     let head = chain::read_head(db, &input.journal_id).await?;
 
@@ -205,19 +220,20 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
         ));
     }
 
-    // 3. The period-open guard: fails closed, so a closed OR unknown
-    //    period aborts the batch after the lines were written — and the
-    //    abort rolls them back.
+    // 3. The period guard: `open` admits anyone, `soft-closed` only a
+    //    person, `closed` (or no row — the guard fails closed) no one.
+    //    The abort rolls back the lines written above with it.
     let period_key = guard::guard_key(&[
-        "period-open",
+        "period-postable",
         input.journal_id.as_str(),
         posting_period.as_str(),
         input.entry_id.as_str(),
     ]);
-    statements.push(period::assert_open_statement(
+    statements.push(period::assert_postable_statement(
         &period_key,
         &input.journal_id,
         &posting_period,
+        input.human,
     ));
 
     // 4. The balanced guard: single currency and a zero sum over this
@@ -273,8 +289,9 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
 /// # Errors
 ///
 /// [`GuardError::Conflict`] when the retry budget ran out on races;
-/// [`GuardError::Database`] when a guard refused (closed period, spent
-/// allowance, unbalanced lines) or the engine failed.
+/// [`GuardError::Database`] when a guard refused (a closed period, a
+/// soft-closed period refusing an agent key, a spent allowance,
+/// unbalanced lines) or the engine failed.
 pub async fn post(
     db: &dyn Database,
     input: &PostInput,
@@ -297,6 +314,7 @@ pub async fn assert_guard_conformance(db: &dyn Database) {
     numbering_round_trip(db).await;
     closed_period_rejects(db).await;
     unknown_period_rejects(db).await;
+    period_states_gate_posting(db).await;
     unbalanced_lines_reject(db).await;
     mixed_currency_rejects(db).await;
     daily_limit_rejects(db).await;
@@ -389,6 +407,128 @@ pub async fn unknown_period_rejects(db: &dyn Database) {
     );
     assert_eq!(entry_count(db, JOURNAL).await, 0, "no entry survived");
     assert_eq!(audit_count(db, JOURNAL).await, 0, "no audit event survived");
+}
+
+/// The three period states gate posting exactly as policy demands:
+/// `open` admits a person and an agent key alike; `soft-closed` admits
+/// the person and refuses the agent key; `closed` refuses both — a post
+/// dated in a closed period fails even when called directly on the
+/// domain service — and so does a period with no row at all (the guard
+/// fails closed). The override path guards the period it names, not
+/// the entry date's: with `"2026-04"` closed by then, a soft-closed
+/// `"2026-13"` adjustment period still takes the person's entry dated
+/// `"2026-04-10"` and still refuses the agent key's.
+///
+/// # Panics
+///
+/// Panics when any leg posts or refuses the wrong way, or when the
+/// committed audit events, metered posts or entry numbers do not read
+/// back exactly the four that should exist.
+pub async fn period_states_gate_posting(db: &dyn Database) {
+    const JOURNAL: &str = "jrn-periods";
+    const AGENT: &str = "agent-periods";
+    create_demo_tables(db).await.expect("create demo tables");
+    // The scenario's fixture: the balanced entry, posted by `human`
+    // (a person) or by an agent key.
+    let posted_by = |entry_id: &str, human: bool| PostInput {
+        human,
+        ..balanced_input(entry_id, JOURNAL, AGENT, 1000)
+    };
+
+    // Open: a person and an agent key both post.
+    open_period(db, JOURNAL, "2026-04").await;
+    for (who, human) in [("person", true), ("agent", false)] {
+        let input = posted_by(&format!("e-states-open-{who}"), human);
+        post(db, &input, RetryPolicy::default(), no_sleep)
+            .await
+            .unwrap_or_else(|err| panic!("an open period admits {who}: {err}"));
+    }
+
+    // Soft-closed: the person still posts, the agent key is refused.
+    set_period_status(db, JOURNAL, "2026-04", period::STATUS_SOFT_CLOSED).await;
+    expect_refusal(
+        db,
+        &posted_by("e-states-soft-agent", false),
+        "a soft-closed period refuses an agent key",
+    )
+    .await;
+    post(
+        db,
+        &posted_by("e-states-soft-person", true),
+        RetryPolicy::default(),
+        no_sleep,
+    )
+    .await
+    .expect("a soft-closed period still admits a person");
+
+    // Closed: nobody posts — a person calling the domain service
+    // directly is refused exactly like the agent key.
+    set_period_status(db, JOURNAL, "2026-04", period::STATUS_CLOSED).await;
+    for (who, human) in [("person", true), ("agent", false)] {
+        expect_refusal(
+            db,
+            &posted_by(&format!("e-states-closed-{who}"), human),
+            "a closed period refuses person and agent alike",
+        )
+        .await;
+    }
+
+    // No accounting_period row at all (2026-05 was never opened): the
+    // guard fails closed, again for both — the derived period comes
+    // from the shifted entry date.
+    for (who, human) in [("person", true), ("agent", false)] {
+        expect_refusal(
+            db,
+            &PostInput {
+                entry_date: "2026-05-10".to_owned(),
+                ..posted_by(&format!("e-states-unknown-{who}"), human)
+            },
+            "an unknown period refuses person and agent alike",
+        )
+        .await;
+    }
+
+    // The override path: guards "2026-13" (soft-closed), not the
+    // derived "2026-04" (closed) — the agent key is refused into the
+    // adjustment period, the person's entry dated into the closed
+    // month still commits.
+    set_period_status(db, JOURNAL, "2026-13", period::STATUS_SOFT_CLOSED).await;
+    expect_refusal(
+        db,
+        &PostInput {
+            period_override: Some("2026-13".to_owned()),
+            ..posted_by("e-states-adj-agent", false)
+        },
+        "the override path refuses an agent key into the adjustment period",
+    )
+    .await;
+    post(
+        db,
+        &PostInput {
+            period_override: Some("2026-13".to_owned()),
+            ..posted_by("e-states-adj-person", true)
+        },
+        RetryPolicy::default(),
+        no_sleep,
+    )
+    .await
+    .expect("the override path admits a person into the adjustment period");
+
+    assert_eq!(
+        audit_count(db, JOURNAL).await,
+        4,
+        "one audit event per committed post"
+    );
+    assert_eq!(
+        used_for(db, AGENT).await,
+        Some(4),
+        "exactly the four committed posts spent allowance"
+    );
+    assert_eq!(
+        entry_numbers(db, JOURNAL).await,
+        vec![1, 2, 3, 4],
+        "the four committed posts stay gapless across the refusals"
+    );
 }
 
 /// Lines summing to +5 and −4 abort the batch: the balanced guard fires
@@ -643,6 +783,23 @@ pub async fn usage_table_matches(db: &dyn Database) {
 /// `std::thread` (the concurrency tests pass the real sleeper).
 fn no_sleep(_: Duration) {}
 
+/// Posts `input` expecting the refusal: the error must be a fired
+/// guard ([`GuardError::Database`] — the probe's `NOT NULL`), never a
+/// conflict, or the scenario panics with `why`.
+///
+/// # Panics
+///
+/// Panics when the post succeeds or fails as anything but a refusal.
+async fn expect_refusal(db: &dyn Database, input: &PostInput, why: &str) {
+    let err = post(db, input, RetryPolicy::default(), no_sleep)
+        .await
+        .expect_err(why);
+    assert!(
+        matches!(err, GuardError::Database(_)),
+        "the refusal is a fired guard, not a conflict: {err:?}"
+    );
+}
+
 /// A balanced two-line entry in USD under `journal` and `agent`, posted
 /// on the scenario fixture date.
 fn balanced_input(entry_id: &str, journal: &str, agent: &str, daily_limit: u64) -> PostInput {
@@ -666,6 +823,8 @@ fn balanced_input(entry_id: &str, journal: &str, agent: &str, daily_limit: u64) 
                 amount_minor: -100,
             },
         ],
+        human: true,
+        period_override: None,
         agent_subject: agent.to_owned(),
         daily_limit,
     }
@@ -674,9 +833,19 @@ fn balanced_input(entry_id: &str, journal: &str, agent: &str, daily_limit: u64) 
 /// Marks a period open for `journal` (the demo collapses the company
 /// scope onto the journal id).
 async fn open_period(db: &dyn Database, journal: &str, period: &str) {
-    db.execute(&period::set_status_statement(journal, period, "open"))
+    set_period_status(db, journal, period, period::STATUS_OPEN).await;
+}
+
+/// Sets a period's status for `journal` (the demo collapses the company
+/// scope onto the journal id).
+///
+/// # Panics
+///
+/// Panics when the status write fails.
+async fn set_period_status(db: &dyn Database, journal: &str, period: &str, status: &str) {
+    db.execute(&period::set_status_statement(journal, period, status))
         .await
-        .unwrap_or_else(|err| panic!("open {period} for {journal}: {err}"));
+        .unwrap_or_else(|err| panic!("set {period} to {status} for {journal}: {err}"));
 }
 
 /// The UTC midnight instant of a `"YYYY-MM-DD"` date — the usage
