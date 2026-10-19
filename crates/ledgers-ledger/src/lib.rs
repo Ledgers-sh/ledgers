@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::float_arithmetic)]
-//! The chart of accounts for Ledgers — docs/PLAN.md §6, the
-//! `ledgers-ledger` row ("Chart of accounts, journals, entries, periods,
-//! reversals, numbering, dimensions"): this crate lands the accounts
-//! part; journals and periods build on it.
+//! The chart of accounts and the fiscal-year/period machinery for
+//! Ledgers — docs/PLAN.md §6, the `ledgers-ledger` row ("Chart of
+//! accounts, journals, entries, periods, reversals, numbering,
+//! dimensions"): this crate owns the accounts part and the periods
+//! part (fiscal years, soft-close/close/reopen, the year-end close);
+//! the entry tables and their posting engine live in [`journal`] and
+//! [`posting`]; this crate's period machinery reaches them through the
+//! [`journal_port::Journal`] port, which [`ledger_journal::EntryJournal`]
+//! implements over the posting batch.
 //!
 //! # The rules this crate owns
 //!
@@ -27,46 +32,70 @@
 //! - **Currencies are validated by `ledgers-money`** wherever a code
 //!   string is accepted; `Currency` values in the domain types have
 //!   passed `Currency::from_code` by construction.
-//! - **No money arithmetic here yet.** Balances arrive with the journal;
-//!   when they do they will be `ledgers-money` integer minor units,
-//!   which is why this crate denies `clippy::float_arithmetic` from day
-//!   one (CONTRIBUTING.md, "Money crates").
+//! - **Closed periods reject postings, and reopening is human-only**
+//!   (§3 rule 4). The refusal itself lives in the posting batch's
+//!   period-postable guard (the [`journal_port::Journal`] implementation's
+//!   contract); this crate owns the states, the transitions and their
+//!   audit trail ([`period`]).
+//! - **Money is exact here too.** Balances and the year-end close
+//!   compute in `ledgers-money` integer minor units with checked
+//!   arithmetic only, which is why this crate denies
+//!   `clippy::float_arithmetic` from day one (CONTRIBUTING.md, "Money
+//!   crates").
 //!
 //! # Storage
 //!
-//! The `account` table follows the storage foundation's conventions
-//! (ULID-free natural key `(company_id, number)`, ISO 8601 TEXT
-//! timestamps, portable SQL) with one deliberate difference: no
-//! cross-module foreign key to `company(id)`, because module application
-//! order is undefined — see the migration's comments. Migrations are
-//! embedded from `migrations/sqlite/NNNN_name.sql`, exposed as
-//! [`SQLITE_MIGRATIONS`], compile-checked by
-//! [`cratefield_core::assert_migration_set`], and declared to the harness
-//! by [`LedgerModule`].
+//! The `account`, `fiscal_year` and `fiscal_year_opening_balance`
+//! tables follow the storage foundation's conventions (natural keys,
+//! ISO 8601 TEXT timestamps, portable SQL) with one deliberate
+//! difference: no cross-module foreign keys, because module application
+//! order is undefined — see the migrations' comments. Period rows live
+//! in ledgers-db's `accounting_period` table (the guard foundation
+//! owns the write-time check; this crate owns the administration).
+//! Migrations are embedded from `migrations/sqlite/NNNN_name.sql`,
+//! exposed as [`SQLITE_MIGRATIONS`], compile-checked by
+//! [`cratefield_core::assert_migration_set`], and declared to the
+//! harness by [`LedgerModule`].
 
 pub mod account;
 pub mod chart;
+pub mod close;
 pub mod commands;
 pub mod entry;
 pub mod error;
+pub mod fiscal;
 pub mod i18n;
 pub mod journal;
+pub mod journal_port;
+pub mod ledger_journal;
 pub mod lint;
 pub mod mapping;
 pub mod module;
+pub mod period;
 pub mod posting;
 pub mod store;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
 pub use chart::{ChartAccount, ChartTemplate};
+pub use close::{
+    Blocker, CloseCheck, CloseCheckContext, CloseCheckRegistry, CloseReport,
+    DraftEntriesCloseCheck, gather_blockers,
+};
 pub use commands::ImportReport;
 pub use entry::{Entry, EntryDraft, Fx, JournalError, Line, Side};
 pub use error::AccountsError;
+pub use fiscal::{FiscalYear, FiscalYearSpec};
 pub use i18n::{I18N_DE_TOML, I18N_EN_TOML, I18N_ID_TOML};
 pub use journal::{Journal, JournalDraft, JournalKind};
+pub use journal_port::{AccountBalance, BoxFuture, Journal as JournalPort, NewEntry, NewEntryLine};
+pub use ledger_journal::EntryJournal;
 pub use lint::{REQUIRED_SYSTEM_TAGS, Violation, ViolationKind, lint_chart};
 pub use mapping::{SKR03_MAPPING_TOML, SKR04_MAPPING_TOML};
 pub use module::LedgerModule;
+pub use period::{
+    Actor, PeriodState, YearEndReport, close_fiscal_year, close_period, fiscal_year,
+    fiscal_year_periods, open_fiscal_year, period_state, reopen_period, soft_close_period,
+};
 pub use posting::{PostContext, PostedEntry, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry};
 
 /// The generic small-business chart (`templates/generic-sme.toml`).
@@ -80,9 +109,9 @@ pub const DE_HGB_TOML: &str = include_str!(concat!(
     "/../../templates/de-hgb.toml"
 ));
 
-/// The chart and journal migrations, in apply order: the portable set
-/// (SQLite dialect, lint-checked, runs on D1, rusqlite and — for the
-/// tables — Postgres).
+/// The chart, fiscal-year and journal migrations, in apply order: the
+/// portable set (SQLite dialect, lint-checked, runs on D1, rusqlite and
+/// — for the tables — Postgres).
 pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
     cratefield_core::SqlMigration::new(
         "0001",
@@ -93,6 +122,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "journal",
         include_str!("../migrations/sqlite/0002_journal.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "fiscal_year",
+        include_str!("../migrations/sqlite/0003_fiscal_year.sql"),
     ),
 ];
 
@@ -110,6 +144,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "journal",
         include_str!("../migrations/postgres/0002_journal.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "fiscal_year",
+        include_str!("../migrations/postgres/0003_fiscal_year.sql"),
     ),
 ];
 
@@ -158,11 +197,13 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 2);
+            assert_eq!(set.len(), 3);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
             assert_eq!(set[1].name, "journal");
+            assert_eq!(set[2].id, "0003");
+            assert_eq!(set[2].name, "fiscal_year");
         }
     }
 

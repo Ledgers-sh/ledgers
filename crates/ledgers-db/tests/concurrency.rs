@@ -266,6 +266,8 @@ fn hammer(db: &Arc<dyn Database>, journal: &str, subject: &str, daily_limit: u64
                                 amount_minor: -100,
                             },
                         ],
+                        human: true,
+                        period_override: None,
                         agent_subject: subject.to_owned(),
                         daily_limit,
                     };

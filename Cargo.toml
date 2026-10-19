@@ -55,6 +55,11 @@ ledgers-db = { path = "crates/ledgers-db" }
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"
 
+# Fiscal years, periods, close and reopen (issue #7): SHA-256 for the
+# interim audit-event hashes ledgers-ledger stamps until ledgers-audit
+# (#9) owns hashing and verification.
+sha2 = "0.10"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

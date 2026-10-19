@@ -36,17 +36,39 @@ use crate::entry::{Entry, JournalError, Line, iso_date_string};
 use cratefield_core::{Database, DbError, Statement};
 use ledgers_db::chain;
 use ledgers_db::guard;
+use ledgers_db::limit;
 use ledgers_db::numbering;
 use ledgers_db::outbox::OUTBOX_TABLE;
-use ledgers_db::period;
+use ledgers_db::period::{self, assert_postable_statement};
 use ledgers_db::retry::{self, RetryPolicy};
 use ledgers_money::Currency;
 use sea_query::Value as SeaValue;
 use std::collections::BTreeMap;
 use std::time::Duration;
+use time::{Date, Month, OffsetDateTime};
 
 /// The outbox topic a posted entry announces itself on.
 pub const TOPIC_ENTRY_POSTED: &str = "journal.entry.posted";
+
+/// The usage meter the port-level daily allowance is charged under. The
+/// same name `ledgers_db::suite` posts under.
+const METER_POST: &str = "post";
+
+/// What a port-level post adds to the entries batch. The default is the
+/// entries API's own posting: the period the posting date names, admitted
+/// only while `open`, with no daily allowance.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PostOptions {
+    /// The period to post into instead of the one the posting date
+    /// names: the one way an entry names an adjustment period.
+    pub period_override: Option<String>,
+    /// Whether a person drives the post: a `soft-closed` period admits
+    /// person posts only (`ledgers_db::period::assert_postable_statement`).
+    pub human: bool,
+    /// `(subject, limit)`: one post is charged to `subject` under the
+    /// `post` meter, which refuses past `limit` a UTC day.
+    pub daily_limit: Option<(String, u64)>,
+}
 
 /// The entry table, as declared by [`crate::module::LedgerModule`].
 const ENTRY_TABLE: &str = "journal_entry";
@@ -223,12 +245,30 @@ pub async fn plan_post_batch(
     raw: &RawEntry,
     ctx: &PostContext,
 ) -> Result<Vec<Statement>, DbError> {
+    plan_post_batch_with(db, raw, ctx, &PostOptions::default()).await
+}
+
+/// [`plan_post_batch`] with the port-level [`PostOptions`] applied: the
+/// period override, the person-side period guard, and the daily
+/// allowance consume.
+///
+/// # Errors
+/// As [`plan_post_batch`], plus [`DbError`] when `created_at` does not
+/// start with a `YYYY-MM-DD` date and a daily allowance is requested.
+#[doc(hidden)]
+pub async fn plan_post_batch_with(
+    db: &dyn Database,
+    raw: &RawEntry,
+    ctx: &PostContext,
+    options: &PostOptions,
+) -> Result<Vec<Statement>, DbError> {
     let head = chain::read_head(db, &raw.company_id).await?;
     let period_of = |column: &str, value: &str| -> Result<String, DbError> {
         period::period_of_date(value)
             .ok_or_else(|| DbError::Query(format!("{column} is not a YYYY-MM-DD date: {value:?}")))
     };
-    let posting_period = period_of("posting_date", &raw.posting_date)?;
+    let derived_period = period_of("posting_date", &raw.posting_date)?;
+    let posting_period = options.period_override.clone().unwrap_or(derived_period);
     period_of("document_date", &raw.document_date)?;
     let vat_period = period_of("tax_point_date", &raw.tax_point_date)?;
 
@@ -249,7 +289,12 @@ pub async fn plan_post_batch(
     }
 
     // 3–8. The write-time checks and their releases.
-    statements.extend(guard_statements(raw, ctx, &posting_period));
+    let day = options
+        .daily_limit
+        .as_ref()
+        .map(|_| meter_day(&ctx.recorded_at))
+        .transpose()?;
+    statements.extend(guard_statements(raw, ctx, &posting_period, options, day));
 
     // 9. The audit append: claims head.seq + 1 against this batch's
     //    work. A stale head takes a unique violation; retry re-plans.
@@ -340,7 +385,13 @@ fn entry_insert_statement(raw: &RawEntry, ctx: &PostContext, vat_period: &str) -
 /// base sums to zero, a single transaction currency sums to zero; a
 /// mixed-currency entry — a genuine FX trade — escapes the third
 /// conjunct through `<> 1` and balances in base only, by design).
-fn guard_statements(raw: &RawEntry, ctx: &PostContext, posting_period: &str) -> Vec<Statement> {
+fn guard_statements(
+    raw: &RawEntry,
+    ctx: &PostContext,
+    posting_period: &str,
+    options: &PostOptions,
+    day: Option<OffsetDateTime>,
+) -> Vec<Statement> {
     let entry_id = ctx.entry_id.as_str();
     let company = raw.company_id.as_str();
     let owned = |key: &str, table: &str, id: &str| {
@@ -360,8 +411,12 @@ fn guard_statements(raw: &RawEntry, ctx: &PostContext, posting_period: &str) -> 
     if let Some(reverses) = raw.reverses.as_deref() {
         statements.push(owned(&reverses_key, ENTRY_TABLE, reverses));
     }
+    statements.push(if options.human {
+        assert_postable_statement(&period_key, company, posting_period, true)
+    } else {
+        period::assert_open_statement(&period_key, company, posting_period)
+    });
     statements.extend([
-        period::assert_open_statement(&period_key, company, posting_period),
         guard::assert_statement(
             &accounts_key,
             "(SELECT COUNT(*) FROM journal_line WHERE entry_id = ?\n\
@@ -384,6 +439,15 @@ fn guard_statements(raw: &RawEntry, ctx: &PostContext, posting_period: &str) -> 
                 SeaValue::from(entry_id),
             ],
         ),
+    ]);
+    // The daily allowance: the usage meter's guarded upsert, beside the
+    // work it pays for; a spent allowance fails NOT NULL in this batch.
+    if let (Some((subject, limit)), Some(day)) = (&options.daily_limit, day) {
+        statements.push(limit::daily_consume_statement(
+            subject, METER_POST, day, 1, *limit,
+        ));
+    }
+    statements.extend([
         guard::release_statement(&journal_key),
         guard::release_statement(&reverses_key),
         guard::release_statement(&period_key),
@@ -435,10 +499,28 @@ pub async fn post_raw_entry(
     policy: RetryPolicy,
     sleep: impl FnMut(Duration),
 ) -> Result<PostedEntry, JournalError> {
+    post_raw_entry_with(db, raw, ctx, policy, sleep, &PostOptions::default()).await
+}
+
+/// [`post_raw_entry`] with the port-level [`PostOptions`]: the same
+/// batch, with the period override, person-side guard and daily
+/// allowance applied. The refusal attribution honours the same options.
+///
+/// # Errors
+/// As [`post_entry`].
+#[doc(hidden)]
+pub async fn post_raw_entry_with(
+    db: &dyn Database,
+    raw: &RawEntry,
+    ctx: &PostContext,
+    policy: RetryPolicy,
+    sleep: impl FnMut(Duration),
+    options: &PostOptions,
+) -> Result<PostedEntry, JournalError> {
     if let Err(err) = retry::run_batch_with_retry(
         db,
         policy,
-        async || plan_post_batch(db, raw, ctx).await,
+        || plan_post_batch_with(db, raw, ctx, options),
         sleep,
     )
     .await
@@ -448,7 +530,7 @@ pub async fn post_raw_entry(
             ledgers_db::GuardError::Database(db_error) if is_guard_refusal(&db_error) => {
                 // Reads after a failed write (ADR 0004): the batch is
                 // gone; these only choose which error the caller reads.
-                diagnose_refusal(db, raw)
+                diagnose_refusal(db, raw, options)
                     .await
                     .unwrap_or(JournalError::Database(db_error))
             }
@@ -481,7 +563,11 @@ fn is_guard_refusal(err: &DbError) -> bool {
 /// nothing attributable is found (an unbalanced raw entry, or a read
 /// that itself failed) — the caller then keeps the original database
 /// error, which is the honest answer for both.
-async fn diagnose_refusal(db: &dyn Database, raw: &RawEntry) -> Option<JournalError> {
+async fn diagnose_refusal(
+    db: &dyn Database,
+    raw: &RawEntry,
+    options: &PostOptions,
+) -> Option<JournalError> {
     async fn scalar(db: &dyn Database, statement: Statement) -> Option<i64> {
         let rows = db.query(&statement).await.ok()?;
         rows.first().and_then(|row| row.get::<i64>("n"))
@@ -521,7 +607,11 @@ async fn diagnose_refusal(db: &dyn Database, raw: &RawEntry) -> Option<JournalEr
             entry: reverses.to_owned(),
         });
     }
-    if let Some(posting_period) = period::period_of_date(&raw.posting_date) {
+    let posting_period = options
+        .period_override
+        .clone()
+        .or_else(|| period::period_of_date(&raw.posting_date));
+    if let Some(posting_period) = posting_period {
         let rows = db
             .query(&Statement::with_values(
                 "SELECT status FROM accounting_period\n\
@@ -537,7 +627,7 @@ async fn diagnose_refusal(db: &dyn Database, raw: &RawEntry) -> Option<JournalEr
         let open = rows
             .first()
             .and_then(|row| row.get::<String>("status"))
-            .is_some_and(|status| status == "open");
+            .is_some_and(|status| status == "open" || (options.human && status == "soft-closed"));
         if !open {
             return Some(JournalError::PeriodNotOpen {
                 period: posting_period,
@@ -565,6 +655,27 @@ async fn diagnose_refusal(db: &dyn Database, raw: &RawEntry) -> Option<JournalEr
         }
     }
     None
+}
+
+/// The usage-meter day of a post: the UTC day it is made (`created_at`),
+/// never the accounting date — the same rule `ledgers_db::suite` applies,
+/// so an agent cannot pick a fresh allowance by backdating.
+fn meter_day(created_at: &str) -> Result<OffsetDateTime, DbError> {
+    let bad = || {
+        DbError::Query(format!(
+            "created_at {created_at} does not start with a YYYY-MM-DD date"
+        ))
+    };
+    let date = created_at
+        .get(..10)
+        .filter(|date| period::period_of_date(date).is_some())
+        .ok_or_else(bad)?;
+    let year: i32 = date[0..4].parse().map_err(|_| bad())?;
+    let month: u8 = date[5..7].parse().map_err(|_| bad())?;
+    let day: u8 = date[8..10].parse().map_err(|_| bad())?;
+    let month = Month::try_from(month).map_err(|_| bad())?;
+    let calendar = Date::from_calendar_date(year, month, day).map_err(|_| bad())?;
+    Ok(calendar.midnight().assume_utc())
 }
 
 /// The number the batch assigned, read back after commit. A missing

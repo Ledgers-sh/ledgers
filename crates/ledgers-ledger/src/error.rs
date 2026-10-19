@@ -109,11 +109,143 @@ pub enum AccountsError {
     #[error("accounts are never deleted; archive instead (docs/PLAN.md §3 rule 3)")]
     DeleteUnsupported,
 
+    /// A fiscal-year spec failed validation (month or label out of
+    /// range); `reason` names the field and its bounds.
+    #[error("invalid fiscal year: {reason}")]
+    InvalidFiscalYear {
+        /// What was wrong, field and bounds included.
+        reason: String,
+    },
+
+    /// A fiscal year with this label already exists for the company
+    /// (the table is keyed by `(company_id, label)`).
+    #[error("fiscal year already exists: {label}")]
+    FiscalYearExists {
+        /// The conflicting label.
+        label: i64,
+    },
+
+    /// No fiscal year with this label exists for the company.
+    #[error("fiscal year not found: {label}")]
+    FiscalYearMissing {
+        /// The label that was looked up.
+        label: i64,
+    },
+
+    /// The fiscal year after this one does not exist, so the year-end
+    /// close has nowhere to carry its opening balances to. Open the next
+    /// year first.
+    #[error("next fiscal year missing: {label} (open it before closing into it)")]
+    NextFiscalYearMissing {
+        /// The missing year's label (the closed year's label plus one).
+        label: i64,
+    },
+
+    /// The fiscal year being opened overlaps one the company already
+    /// has — spans may not share a day.
+    #[error("fiscal year {label} ({starts_on}..={ends_on}) overlaps an existing fiscal year")]
+    FiscalYearOverlap {
+        /// The label that was being opened.
+        label: i64,
+        /// The rejected year's inclusive start.
+        starts_on: String,
+        /// The rejected year's inclusive end.
+        ends_on: String,
+    },
+
+    /// A period is not in the state the requested transition needs
+    /// (closing a closed year's stragglers, reopening an open period,
+    /// year-end with prior periods still open).
+    #[error("period {period} is {from}, not valid for {to}")]
+    PeriodStateInvalid {
+        /// The period id whose state refused the transition.
+        period: String,
+        /// The state the period is actually in.
+        from: crate::period::PeriodState,
+        /// The transition's target state.
+        to: crate::period::PeriodState,
+    },
+
+    /// The action is reserved for a person; an agent key can never
+    /// perform it (docs/PLAN.md §5: closing or reopening a period is
+    /// human-only, enforced server-side).
+    #[error("action {action:?} is human-only; an agent key cannot perform it")]
+    HumanOnly {
+        /// The refused action's name (`"close_period"`, ...).
+        action: String,
+    },
+
+    /// A reason is required and the empty/whitespace-only string given
+    /// is not one.
+    #[error("a non-empty reason is required")]
+    ReasonRequired,
+
+    /// A supplied reason is malformed: longer than 512 characters or
+    /// containing control characters (reasons live on one audit line).
+    #[error("invalid reason: {reason}")]
+    InvalidReason {
+        /// What was wrong with it.
+        reason: &'static str,
+    },
+
+    /// The close was refused: every registered check ran and at least
+    /// one found blockers. The report lists every blocker type with
+    /// counts and links; a person may override with a reason, an agent
+    /// may not.
+    #[error("{report}")]
+    CloseBlocked {
+        /// The complete blocker report.
+        report: crate::close::CloseReport,
+    },
+
+    /// The company's chart has no usable retained-earnings account: the
+    /// year-end close needs exactly one leaf, unarchived account tagged
+    /// `retained-earnings`.
+    #[error("no single leaf unarchived retained-earnings account in company {company_id}")]
+    RetainedEarningsMissing {
+        /// The company whose chart lacks the account.
+        company_id: String,
+    },
+
+    /// A guard batch exhausted its retry budget on races it kept losing
+    /// (`ledgers_db::GuardError::Conflict`, decomposed so this enum
+    /// stays `Clone`); surface as contention, not as a refusal.
+    #[error("the batch still conflicts after {attempts} attempts")]
+    Conflict {
+        /// The attempts made, including the first.
+        attempts: u32,
+    },
+
+    /// A stored period status is not one of the three states — a row
+    /// this crate's state machine never wrote. Fail-loud, not guess.
+    #[error("unknown period status: {value:?} (expected open|soft-closed|closed)")]
+    UnknownPeriodStatus {
+        /// The status string as stored.
+        value: String,
+    },
+
     /// A statement failed on the `Database` port.
     #[error(transparent)]
     Database(#[from] cratefield_core::DbError),
 
+    /// An exact-money operation failed — overflow at the storage
+    /// boundary or a currency mismatch while building a close.
+    #[error(transparent)]
+    Money(#[from] ledgers_money::MoneyError),
+
     /// A bundled or supplied TOML file could not be parsed at all.
     #[error(transparent)]
     Template(#[from] toml::de::Error),
+}
+
+impl From<ledgers_db::GuardError> for AccountsError {
+    /// Decomposes the retry helper's error so this enum stays `Clone`
+    /// and `PartialEq`: conflicts keep their attempt count, database
+    /// refusals pass through unchanged.
+    fn from(err: ledgers_db::GuardError) -> Self {
+        match err {
+            ledgers_db::GuardError::Conflict { attempts } => Self::Conflict { attempts },
+            ledgers_db::GuardError::Database(db) => Self::Database(db),
+        }
+    }
 }

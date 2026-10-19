@@ -17,15 +17,18 @@ postgres = ["cratefield-testing/postgres"]
 # testing kit (the workspace default — no harness graph), sea-query for
 # statements, the workspace money crate for currency validation, and
 # serde/toml for the bundled chart templates. The journal work adds the
-# guard-statement helpers (ledgers-db) and serde_json for the problem+json
-# extension members and the JSON columns; core does not re-export serde_json.
+# guard-statement helpers (ledgers-db: periods, chain, retry), serde_json
+# for the problem+json extension members and the JSON columns, and SHA-256
+# for the interim audit hashes (sha2) — all wasm-clean; core does not
+# re-export serde_json.
 cratefield-core = { workspace = true }
 cratefield-testing = { workspace = true }
+ledgers-db = { workspace = true }
 sea-query = { workspace = true }
 ledgers-money = { workspace = true }
-ledgers-db = { workspace = true }
 time = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
