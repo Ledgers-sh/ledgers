@@ -28,7 +28,7 @@ const EXPECTED_ACTIVE: usize = 174;
 
 /// Curated historic codes (a subset of ISO 4217 List Three; see the
 /// currency module docs).
-const EXPECTED_HISTORIC: usize = 41;
+const EXPECTED_HISTORIC: usize = 45;
 
 /// One line per production-table entry, in the same (code-sorted) order:
 /// `CODE NUM EXP ACTIVE`.
@@ -38,6 +38,7 @@ AFA 4 2 historic
 AFN 971 2 active
 ALL 8 2 active
 AMD 51 2 active
+ANG 532 2 historic
 AOA 973 2 active
 ARS 32 2 active
 ATS 40 2 historic
@@ -48,6 +49,7 @@ BAM 977 2 active
 BBD 52 2 active
 BDT 50 2 active
 BEF 56 2 historic
+BGN 975 2 historic
 BHD 48 3 active
 BIF 108 0 active
 BMD 60 2 active
@@ -104,6 +106,7 @@ GTQ 320 2 active
 GYD 328 2 active
 HKD 344 2 active
 HNL 340 2 active
+HRK 191 2 historic
 HTG 332 2 active
 HUF 348 2 active
 IDR 360 2 active
@@ -131,6 +134,7 @@ LBP 422 2 active
 LKR 144 2 active
 LRD 430 2 active
 LSL 426 2 active
+LTL 440 2 historic
 LUF 442 2 historic
 LVL 428 2 historic
 LYD 434 3 active
@@ -363,6 +367,16 @@ fn the_issues_named_examples() {
     assert!(!zwl.is_active(), "ZWL was replaced by ZWG in 2024");
     assert_eq!(zwl.exponent(), 2);
     assert_eq!(zwl.numeric(), 932);
+
+    // Retired codes are kept, never deleted: every currency the euro
+    // replaced (Croatia 2023, Bulgaria 2026 included) and ANG, which XCG
+    // replaced in 2025, still parse so old entries in them keep loading.
+    for (code, numeric) in [("BGN", 975), ("HRK", 191), ("LTL", 440), ("ANG", 532)] {
+        let c = Currency::from_code(code).unwrap_or_else(|e| panic!("{code}: {e}"));
+        assert!(!c.is_active(), "{code} is retired");
+        assert_eq!(c.exponent(), 2, "{code} exponent");
+        assert_eq!(c.numeric(), numeric, "{code} numeric");
+    }
 
     // More spot checks from the issue.
     for (code, exp) in [

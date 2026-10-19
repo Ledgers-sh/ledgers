@@ -40,8 +40,9 @@
 //! `tests/iso4217_table.rs`, then update the table in `src/currency.rs`,
 //! the fixture, `EXPECTED_ACTIVE` and both retrieval dates in the same
 //! change. **Never delete a code**: a retired code moves from active to
-//! historic so journal entries denominated in it keep parsing. The most
-//! recent example is ZWG replacing ZWL in 2024 — ZWL is in the table with
+//! historic so journal entries denominated in it keep parsing. Recent
+//! examples: ZWG replacing ZWL (2024), XCG replacing ANG (2025) and the
+//! euro replacing BGN (2026) — ZWL, ANG and BGN are in the table with
 //! `active = false`.
 //!
 //! # The `crypto` Cargo feature
