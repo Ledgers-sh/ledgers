@@ -37,6 +37,7 @@ impl Module for DbModule {
             "accounting_period",
             "audit_event",
             "agent_usage",
+            "outbox",
         ]
     }
 

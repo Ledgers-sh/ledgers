@@ -1,0 +1,97 @@
+#![allow(dead_code)]
+//! Shared scaffolding for the ledgers-ledger integration tests: the
+//! invented company fixtures (AGENTS.md — never a real firm), the
+//! scenario chart, and the small read helpers every matrix file
+//! asserts with.
+
+use cratefield_core::{Database, Statement};
+use ledgers_ledger::account::{AccountDraft, AccountType};
+use ledgers_ledger::commands;
+use sea_query::Value as SeaValue;
+
+/// The single-company fixture every scenario posts for.
+pub const COMPANY_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+/// A second company, for the cross-company refusals: its journal and
+/// entries must be invisible to the first company's posts.
+pub const OTHER_COMPANY_ID: &str = "01OTHERCOMPANY000000000000A";
+pub const NOW: &str = "2026-02-01T09:00:00Z";
+pub const POSTED_AT: &str = "2026-04-10T10:00:00Z";
+pub const FY: i64 = 2026;
+
+/// The chart the scenarios post against: bank, payables, FX loss,
+/// sales.
+pub const CHART: [(&str, &str, AccountType); 4] = [
+    ("1010", "account.inline.bank", AccountType::Asset),
+    ("1400", "account.inline.payables", AccountType::Liability),
+    ("3000", "account.inline.fx-loss", AccountType::Expense),
+    ("4000", "account.inline.sales", AccountType::Income),
+];
+
+/// Creates the scenario chart for `company_id`. The scenarios share one
+/// database per dialect leg, so a chart that already exists (this
+/// company's, from an earlier scenario) is left as it is.
+pub async fn create_chart(db: &dyn Database, company_id: &str) {
+    for (number, name_key, account_type) in CHART {
+        let created = commands::create_account(
+            db,
+            company_id,
+            AccountDraft {
+                number: number.to_owned(),
+                name_key: name_key.to_owned(),
+                account_type,
+                normal_balance: None,
+                currency: None,
+                parent: None,
+                tags: Vec::new(),
+            },
+            NOW.to_owned(),
+        )
+        .await;
+        if let Err(err) = created
+            && !matches!(err, ledgers_ledger::AccountsError::AccountExists { .. })
+        {
+            panic!("create account {number} for {company_id}: {err}");
+        }
+    }
+}
+
+/// Marks one period open for `company_id`.
+pub async fn open_period(db: &dyn Database, company_id: &str, period: &str) {
+    db.execute(&ledgers_db::period::set_status_statement(
+        company_id, period, "open",
+    ))
+    .await
+    .unwrap_or_else(|err| panic!("open {period} for {company_id}: {err}"));
+}
+
+/// `COUNT(*)` over `table` filtered by one TEXT column.
+pub async fn count(db: &dyn Database, table: &str, column: &str, value: &str) -> i64 {
+    let rows = db
+        .query(&Statement::with_values(
+            format!("SELECT COUNT(*) AS n FROM {table} WHERE {column} = ?"),
+            vec![SeaValue::from(value)],
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("count {table}: {err}"));
+    rows.first()
+        .and_then(|row| row.get::<i64>("n"))
+        .expect("a count row")
+}
+
+/// The journal's counter value: `None` when no row exists — a refused
+/// batch rolls its provisioning back, so "no counter" is the shape an
+/// untouched sequence takes.
+pub async fn counter_value(db: &dyn Database, journal_id: &str, fiscal_year: i64) -> Option<i64> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT next_number FROM numbering_counter WHERE journal_id = ? AND fiscal_year = ?"
+                .to_owned(),
+            vec![
+                SeaValue::from(journal_id),
+                SeaValue::BigInt(Some(fiscal_year)),
+            ],
+        ))
+        .await
+        .expect("read the counter");
+    rows.first().and_then(|row| row.get::<i64>("next_number"))
+}

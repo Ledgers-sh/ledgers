@@ -55,6 +55,7 @@ pub mod guard;
 pub mod limit;
 pub mod module;
 pub mod numbering;
+pub mod outbox;
 pub mod period;
 pub mod retry;
 pub mod suite;
@@ -63,14 +64,20 @@ pub use module::DbModule;
 pub use retry::{GuardError, RetryPolicy};
 
 /// The guard-statement migrations: the numbering counter, the probe
-/// table, period status, the audit chain's spine and the usage meter's
-/// table, in apply order.
-pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+/// table, period status, the audit chain's spine, the usage meter's
+/// table and the outbox queue, in apply order.
+pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "guards",
         include_str!("../migrations/sqlite/0001_guards.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "outbox",
+        include_str!("../migrations/sqlite/0002_outbox.sql"),
+    ),
+];
 
 // Compile-time check on the set: ids run contiguously from 0001 in the
 // order they are listed (cratefield-core, `assert_migration_set`).
@@ -84,9 +91,11 @@ mod tests {
     fn the_migration_set_is_contiguous() {
         // assert_migration_set already ran at compile time; this pins
         // the set's shape for readers.
-        assert_eq!(SQLITE_MIGRATIONS.len(), 1);
+        assert_eq!(SQLITE_MIGRATIONS.len(), 2);
         assert_eq!(SQLITE_MIGRATIONS[0].id, "0001");
         assert_eq!(SQLITE_MIGRATIONS[0].name, "guards");
+        assert_eq!(SQLITE_MIGRATIONS[1].id, "0002");
+        assert_eq!(SQLITE_MIGRATIONS[1].name, "outbox");
     }
 
     #[test]
