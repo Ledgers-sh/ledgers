@@ -5,6 +5,8 @@
 //! asserts with.
 
 use cratefield_core::{Database, Statement};
+use ledgers_audit::{Actor, AuditContext};
+use ledgers_ledger::LedgerModule;
 use ledgers_ledger::account::{AccountDraft, AccountType};
 use ledgers_ledger::commands;
 use sea_query::Value as SeaValue;
@@ -17,6 +19,48 @@ pub const OTHER_COMPANY_ID: &str = "01OTHERCOMPANY000000000000A";
 pub const NOW: &str = "2026-02-01T09:00:00Z";
 pub const POSTED_AT: &str = "2026-04-10T10:00:00Z";
 pub const FY: i64 = 2026;
+
+/// The scenario's person id and the agent key it also acts as. Invented
+/// fixtures (AGENTS.md), never a real user or key.
+const PERSON_ID: &str = "usr_01HQZX9K3M7VN2P4R6T8W0Y1B3";
+const KEY_ID: &str = "key_01HQZX9K3M7VN2P4R6T8W0Y1B5";
+
+/// Counters behind the audit ids, so every call site gets a **fresh**
+/// event id without a clock or a random source.
+static PERSON_EVENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static AGENT_EVENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A ULID-shaped id with a fresh counter value, so two contexts never
+/// share an event id and an audit chain stays append-only.
+fn event_id(counter: &std::sync::atomic::AtomicU64) -> String {
+    let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("01HQZX9K3M7VN2P4R6T8W0{n:06X}")
+}
+
+/// An [`AuditContext`] for a **person** — the actor the human-only
+/// commands (close, reopen, year-end close) accept.
+pub fn person() -> AuditContext {
+    AuditContext::new(
+        Actor::Person {
+            person_id: PERSON_ID.to_owned(),
+        },
+        "req_01HQZX9K3M7VN2P4R6T8W0Y1B4",
+        event_id(&PERSON_EVENT),
+    )
+}
+
+/// An [`AuditContext`] for an **agent key** — refused by every
+/// human-only command.
+pub fn agent() -> AuditContext {
+    AuditContext::new(
+        Actor::Agent {
+            key_id: KEY_ID.to_owned(),
+            tier: "post-within-limits".to_owned(),
+        },
+        "req_01HQZX9K3M7VN2P4R6T8W0Y1B4",
+        event_id(&AGENT_EVENT),
+    )
+}
 
 /// The chart the scenarios post against: bank, payables, FX loss,
 /// sales.
@@ -45,6 +89,7 @@ pub async fn create_chart(db: &dyn Database, company_id: &str) {
                 tags: Vec::new(),
             },
             NOW.to_owned(),
+            &person(),
         )
         .await;
         if let Err(err) = created
@@ -62,6 +107,22 @@ pub async fn open_period(db: &dyn Database, company_id: &str, period: &str) {
     ))
     .await
     .unwrap_or_else(|err| panic!("open {period} for {company_id}: {err}"));
+}
+
+/// A SQLite harness over both modules — the ledger's own tables and
+/// ledgers-db's guards, chain and outbox. Every table a command writes,
+/// `audit_event` included, exists after this.
+pub fn harness() -> cratefield_testing::TestHarness {
+    cratefield_testing::TestHarness::new(vec![
+        Box::new(LedgerModule),
+        Box::new(ledgers_db::DbModule),
+    ])
+}
+
+/// Gives `company_id` the shared chart, so a case that posts or closes
+/// has accounts to move money between.
+pub async fn mount(db: &dyn Database, company_id: &str) {
+    create_chart(db, company_id).await;
 }
 
 /// `COUNT(*)` over `table` filtered by one TEXT column.

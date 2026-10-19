@@ -20,6 +20,7 @@
 
 use cratefield_core::Database;
 use cratefield_testing::TestHarness;
+use ledgers_audit::{Actor, AuditContext};
 use ledgers_db::{DbModule, RetryPolicy};
 use ledgers_ledger::chart;
 use ledgers_ledger::close::CloseCheckRegistry;
@@ -29,7 +30,7 @@ use ledgers_ledger::journal::{self, JournalDraft, JournalKind};
 use ledgers_ledger::journal_port::{Journal, NewEntry, NewEntryLine};
 use ledgers_ledger::posting::{PostContext, post_entry};
 use ledgers_ledger::{
-    AccountsError, Actor, Entry, EntryDraft, EntryJournal, JournalError, LedgerModule, PeriodState,
+    AccountsError, Entry, EntryDraft, EntryJournal, JournalError, LedgerModule, PeriodState,
     close_fiscal_year, close_period, commands, open_fiscal_year, period_state, reopen_period,
     soft_close_period,
 };
@@ -94,10 +95,47 @@ fn eur() -> Currency {
     Currency::from_code("EUR").expect("EUR is in the currency table")
 }
 
-fn person() -> Actor {
-    Actor::Person {
-        id: "owner-1".to_owned(),
+/// The audit contexts the scenarios post under. The event id is fresh
+/// per call, so one company can be written to as often as the test
+/// likes.
+fn person() -> AuditContext {
+    AuditContext::new(actor(true), request(), event_id())
+}
+
+fn agent() -> AuditContext {
+    AuditContext::new(actor(false), request(), event_id())
+}
+
+/// The actor behind either context: the fixture's owner, or the agent
+/// key the port treats as machine traffic.
+fn actor(human: bool) -> Actor {
+    if human {
+        Actor::Person {
+            person_id: "owner-1".to_owned(),
+        }
+    } else {
+        Actor::Agent {
+            key_id: "key-fiscal-1".to_owned(),
+            tier: "post-within-limits".to_owned(),
+        }
     }
+}
+
+/// The context matching a port entry's human flag.
+fn context(human: bool) -> AuditContext {
+    if human { person() } else { agent() }
+}
+
+fn request() -> String {
+    "req_01FISCALONJOURNAL0000000001".to_owned()
+}
+
+fn event_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!(
+        "01FISCALONJOURNAL{:012}",
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
 }
 
 fn eur_major(major: i128) -> Amount {
@@ -178,7 +216,7 @@ fn fiscal_close_and_reopen_run_over_the_real_journal() {
 
 async fn scenarios(db: &dyn Database) {
     let template = chart::parse_chart(CHART).expect("the chart parses");
-    commands::import_template(db, COMPANY, &template, NOW.to_owned())
+    commands::import_template(db, COMPANY, &template, NOW.to_owned(), &person())
         .await
         .expect("import the chart");
     journal::create_journal(
@@ -191,6 +229,7 @@ async fn scenarios(db: &dyn Database) {
         },
         JOURNAL_ID,
         NOW,
+        &person(),
     )
     .await
     .expect("create the general journal");
@@ -203,6 +242,7 @@ async fn scenarios(db: &dyn Database) {
             has_adjustment_period: false,
         },
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("open fiscal 2026");
@@ -217,6 +257,7 @@ async fn scenarios(db: &dyn Database) {
                 [("1010", 100), ("4000", -100)],
                 false,
             ),
+            &agent(),
         )
         .await
         .expect("an open period admits the port post");
@@ -244,8 +285,8 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
             port,
             &CloseCheckRegistry::new(),
             None,
-            &person(),
             NOW.to_owned(),
+            &person(),
         )
         .await
         .expect("a person closes April"),
@@ -257,6 +298,7 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
         &api_ctx("1"),
         RetryPolicy::default(),
         no_sleep,
+        &agent(),
     )
     .await
     .expect_err("a closed period refuses the entries API");
@@ -275,6 +317,7 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
                     [("1010", 5), ("4000", -5)],
                     human,
                 ),
+                &context(human),
             )
             .await
             .expect_err("a closed period refuses the port for everyone");
@@ -291,8 +334,8 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
             COMPANY,
             "2026-04",
             "owner reopened for a correction",
+            NOW.to_owned(),
             &person(),
-            NOW.to_owned()
         )
         .await
         .expect("a person reopens April"),
@@ -304,6 +347,7 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
         &api_ctx("2"),
         RetryPolicy::default(),
         no_sleep,
+        &agent(),
     )
     .await
     .expect("a reopened period admits the entries API");
@@ -312,7 +356,7 @@ async fn close_and_reopen(db: &dyn Database, port: &EntryJournal) {
 /// Soft close: agents are refused, a person still posts through the port.
 async fn soft_close(db: &dyn Database, port: &EntryJournal) {
     assert_eq!(
-        soft_close_period(db, COMPANY, "2026-04", &person(), NOW.to_owned())
+        soft_close_period(db, COMPANY, "2026-04", NOW.to_owned(), &person())
             .await
             .expect("a person soft-closes April"),
         PeriodState::SoftClosed
@@ -329,6 +373,7 @@ async fn soft_close(db: &dyn Database, port: &EntryJournal) {
         &api_ctx("3"),
         RetryPolicy::default(),
         no_sleep,
+        &agent(),
     )
     .await
     .expect_err("a soft-closed period refuses the agent-side entries API");
@@ -345,6 +390,7 @@ async fn soft_close(db: &dyn Database, port: &EntryJournal) {
             [("1010", 7), ("4000", -7)],
             true,
         ),
+        &person(),
     )
     .await
     .expect("a person posts into a soft-closed period through the port");
@@ -355,6 +401,7 @@ async fn soft_close(db: &dyn Database, port: &EntryJournal) {
             [("1010", 7), ("4000", -7)],
             false,
         ),
+        &agent(),
     )
     .await
     .expect_err("an agent-side port post stays refused in a soft-closed period");
@@ -377,8 +424,8 @@ async fn year_end(db: &dyn Database, port: &EntryJournal) {
                 port,
                 &CloseCheckRegistry::new(),
                 None,
-                &person(),
                 NOW.to_owned(),
+                &person(),
             )
             .await
             .unwrap_or_else(|err| panic!("close {period}: {err}"));
@@ -395,6 +442,7 @@ async fn year_end(db: &dyn Database, port: &EntryJournal) {
             has_adjustment_period: false,
         },
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("open fiscal 2027");
@@ -405,8 +453,8 @@ async fn year_end(db: &dyn Database, port: &EntryJournal) {
         port,
         &CloseCheckRegistry::new(),
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("the year-end close runs over the real journal");
@@ -433,8 +481,8 @@ async fn year_end(db: &dyn Database, port: &EntryJournal) {
         port,
         &CloseCheckRegistry::new(),
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("a rerun of the year-end close is idempotent");

@@ -5,8 +5,11 @@
 //! loop the testing kit documents, the same shape as
 //! `ledgers-storage`'s conformance matrix.
 
+mod common;
+
 use cratefield_core::Database;
 use cratefield_testing::TestHarness;
+use ledgers_db::DbModule;
 use ledgers_ledger::account::{AccountDraft, AccountType, NormalBalance};
 use ledgers_ledger::error::AccountsError;
 use ledgers_ledger::{LedgerModule, chart, commands};
@@ -68,7 +71,7 @@ tags = ["rounding"]
 
 #[test]
 fn account_scenarios_on_every_available_dialect() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule)]) {
+    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
         // The scenarios panic with their own diagnosis on failure. Fresh
         // module instances per dialect: all_dialects runs the factory
         // once per leg.
@@ -109,6 +112,7 @@ async fn insert_find_and_derived_state(db: &dyn Database) {
             tags: vec!["bank".to_owned()],
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .expect("create the parent account");
@@ -129,6 +133,7 @@ async fn insert_find_and_derived_state(db: &dyn Database) {
             tags: Vec::new(),
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .expect("create the child account");
@@ -157,6 +162,7 @@ async fn insert_find_and_derived_state(db: &dyn Database) {
             tags: Vec::new(),
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .unwrap_err();
@@ -192,6 +198,7 @@ async fn listing_order_and_archived_filter(db: &dyn Database) {
             tags: Vec::new(),
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .expect("create a third account");
@@ -207,7 +214,7 @@ async fn listing_order_and_archived_filter(db: &dyn Database) {
         "rows stay company-scoped"
     );
 
-    commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned())
+    commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned(), &common::person())
         .await
         .expect("archive the third account");
     let live = commands::list_accounts(db, COMPANY_ID, false)
@@ -226,18 +233,21 @@ async fn listing_order_and_archived_filter(db: &dyn Database) {
 }
 
 async fn archive_is_idempotent(db: &dyn Database) {
-    let once = commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned())
-        .await
-        .expect("archiving an archived account succeeds");
+    let once =
+        commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned(), &common::person())
+            .await
+            .expect("archiving an archived account succeeds");
     assert!(once.account.archived);
-    let twice = commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned())
-        .await
-        .expect("the second archive is idempotent");
+    let twice =
+        commands::archive_account(db, COMPANY_ID, "1020", LATER.to_owned(), &common::person())
+            .await
+            .expect("the second archive is idempotent");
     assert_eq!(once, twice, "the account comes back unchanged");
 
-    let missing = commands::archive_account(db, COMPANY_ID, "8888", LATER.to_owned())
-        .await
-        .unwrap_err();
+    let missing =
+        commands::archive_account(db, COMPANY_ID, "8888", LATER.to_owned(), &common::person())
+            .await
+            .unwrap_err();
     assert_eq!(
         missing,
         AccountsError::AccountNotFound {
@@ -247,7 +257,7 @@ async fn archive_is_idempotent(db: &dyn Database) {
 }
 
 async fn deleting_is_not_an_operation(db: &dyn Database) {
-    let err = commands::delete_account(db, COMPANY_ID, "1010")
+    let err = commands::delete_account(db, COMPANY_ID, "1010", NOW.to_owned(), &common::person())
         .await
         .unwrap_err();
     assert_eq!(err, AccountsError::DeleteUnsupported);
@@ -272,6 +282,7 @@ async fn creating_under_a_missing_parent_fails(db: &dyn Database) {
             tags: Vec::new(),
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .unwrap_err();
@@ -294,9 +305,15 @@ async fn imports_are_parents_first_and_one_shot(db: &dyn Database) {
     // the earlier scenarios wrote (also proof of company scoping).
     const SECOND_COMPANY: &str = "01ARZ3NDEKTSV4RRFFQ69G5FB";
     let chart = chart::parse_chart(INLINE_CHART).expect("inline chart parses");
-    let report = commands::import_template(db, SECOND_COMPANY, &chart, NOW.to_owned())
-        .await
-        .expect("import the chart");
+    let report = commands::import_template(
+        db,
+        SECOND_COMPANY,
+        &chart,
+        NOW.to_owned(),
+        &common::person(),
+    )
+    .await
+    .expect("import the chart");
     assert_eq!(report.template_id, "inline");
     assert_eq!(
         report.created,
@@ -329,9 +346,15 @@ async fn imports_are_parents_first_and_one_shot(db: &dyn Database) {
     }
 
     // Imports are for fresh ledgers: the same chart again is refused.
-    let err = commands::import_template(db, SECOND_COMPANY, &chart, LATER.to_owned())
-        .await
-        .unwrap_err();
+    let err = commands::import_template(
+        db,
+        SECOND_COMPANY,
+        &chart,
+        LATER.to_owned(),
+        &common::person(),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, AccountsError::AccountExists { .. }),
         "{err:?}"
@@ -340,9 +363,15 @@ async fn imports_are_parents_first_and_one_shot(db: &dyn Database) {
     // A structurally broken chart never touches the database.
     let mut broken = chart.clone();
     broken.accounts[0].parent = Some("9999".to_owned());
-    let err = commands::import_template(db, SECOND_COMPANY, &broken, LATER.to_owned())
-        .await
-        .unwrap_err();
+    let err = commands::import_template(
+        db,
+        SECOND_COMPANY,
+        &broken,
+        LATER.to_owned(),
+        &common::person(),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, AccountsError::TemplateRejected { .. }),
         "{err:?}"
@@ -368,14 +397,21 @@ async fn import_refuses_a_second_system_account_before_writing(db: &dyn Database
             tags: vec!["rounding".to_owned()],
         },
         NOW.to_owned(),
+        &common::person(),
     )
     .await
     .expect("create the pre-existing rounding account");
 
     let chart = chart::parse_chart(INLINE_CHART).expect("inline chart parses");
-    let err = commands::import_template(db, THIRD_COMPANY, &chart, LATER.to_owned())
-        .await
-        .unwrap_err();
+    let err = commands::import_template(
+        db,
+        THIRD_COMPANY,
+        &chart,
+        LATER.to_owned(),
+        &common::person(),
+    )
+    .await
+    .unwrap_err();
     match &err {
         AccountsError::TemplateRejected { violations } => assert!(
             violations.iter().any(|v| matches!(

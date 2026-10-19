@@ -49,12 +49,12 @@ const TOTAL: usize = WORKERS * POSTS_PER_WORKER;
 /// workers and the read-backs agree.
 const JOURNAL_ID: &str = "01JCJ000000000000000000000000000";
 
-/// The herd-sized budget of the guard-foundation proof: forty attempts
-/// over the doubling ladder capped at 250 ms, which outlasts the ~12 s
-/// a hundred threads need to drain one journal through the numbering
-/// row lock on Postgres.
+/// The herd-sized budget of the guard-foundation proof: increased to 60
+/// attempts over the doubling ladder capped at 250 ms, which outlasts the
+/// contention from the numbering row lock AND the audit chain append on
+/// Postgres (the ~12 s base case is now joined by parallel audit writes).
 const HERD_POLICY: RetryPolicy = RetryPolicy {
-    max_attempts: 40,
+    max_attempts: 60,
     base_delay: Duration::from_millis(10),
     max_delay: Duration::from_millis(250),
 };
@@ -63,6 +63,9 @@ const HERD_POLICY: RetryPolicy = RetryPolicy {
 fn a_thousand_journal_posts_stay_gapless_linked_and_emitted() {
     for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
         pollster::block_on(set_up(&kit.db));
+        // The fixtures (the chart, the journal) are audited too, so the
+        // chain starts with them; the posts follow.
+        let setup_events = pollster::block_on(chain_rows(&*kit.db)).len();
         let started = Instant::now();
         let (ok, conflicts, refused) = hammer(&kit.db);
         let elapsed = started.elapsed();
@@ -90,7 +93,7 @@ fn a_thousand_journal_posts_stay_gapless_linked_and_emitted() {
         );
 
         let events = pollster::block_on(chain_rows(&*kit.db));
-        assert_linked_from_genesis(&events, TOTAL);
+        assert_linked_from_genesis(&events, setup_events + TOTAL);
 
         let emitted = pollster::block_on(outbox_count(&*kit.db));
         assert_eq!(
@@ -114,6 +117,7 @@ async fn set_up(db: &Arc<dyn Database>) {
         },
         JOURNAL_ID,
         NOW,
+        &common::person(),
     )
     .await
     .expect("create the journal");
@@ -147,8 +151,12 @@ fn hammer(db: &Arc<dyn Database>) -> (usize, usize, usize) {
                     // rung, so a herd that conflicted together wakes
                     // spread over [delay, 2×delay) instead of as one
                     // wave.
-                    let outcome =
-                        pollster::block_on(post_entry(db, &entry, &ctx, HERD_POLICY, |delay| {
+                    let outcome = pollster::block_on(post_entry(
+                        db,
+                        &entry,
+                        &ctx,
+                        HERD_POLICY,
+                        |delay| {
                             sleeps += 1;
                             let rung = u64::try_from(delay.as_nanos())
                                 .expect("a positive rung")
@@ -159,7 +167,9 @@ fn hammer(db: &Arc<dyn Database>) -> (usize, usize, usize) {
                             std::thread::sleep(Duration::from_nanos(
                                 rung + (ticket.wrapping_mul(6_364_136_223_846_793_005) % rung),
                             ));
-                        }));
+                        },
+                        &common::person(),
+                    ));
                     match outcome {
                         Ok(_) => ok += 1,
                         Err(JournalError::Conflict { .. }) => conflicts += 1,
@@ -260,8 +270,9 @@ async fn outbox_count(db: &dyn Database) -> i64 {
         .expect("a count row")
 }
 
-/// Seqs run exactly `1..=expected`, each `prev_hash` equals the row
-/// before's `hash`, the first anchored on the genesis hash.
+/// The chain holds exactly `expected` events, `seqs` run exactly
+/// `1..=expected`, each `prev_hash` equals the row before's `hash`, the
+/// first anchored on the genesis hash.
 fn assert_linked_from_genesis(events: &[(i64, String, String)], expected: usize) {
     assert_eq!(events.len(), expected, "one event per committed post");
     let mut previous_hash = chain::GENESIS_HASH.to_owned();
