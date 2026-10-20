@@ -10,7 +10,7 @@ repository = "https://github.com/Ledgers-sh/ledgers"
 
 [workspace.dependencies]
 # One Cratefield release round, pinned exactly, bumped together in one PR (docs/adr/0001).
-cratefield-core = "=0.10.0"
+cratefield-core = "=0.10.1"
 cratefield-runtime-cloudflare = "=0.5.0"
 cratefield-runtime-native = "=0.4.4"
 # The workspace default for the testing kit is its light, wasm-clean surface
@@ -23,7 +23,7 @@ cratefield-testing = { version = "=0.5.3", default-features = false, features = 
 # The `fz` CLI (doctor, migration collection); 0.7.0 is the release of the
 # same round (requires core ^0.9). Not depended on by a crate yet — pinned
 # here so the tooling tasks inherit the round instead of re-resolving it.
-cratefield-cli = "=0.7.1"
+cratefield-cli = "=0.7.2"
 # The query builder cratefield-core renders statements with; the exact
 # version core 0.9.0 pins, with the same features (SQLite dialect,
 # thread-safe), so the workspace graph holds one sea-query.
