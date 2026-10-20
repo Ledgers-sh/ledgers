@@ -955,6 +955,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-fx"
+version = "0.1.0"
+dependencies = [
+ "cratefield-core",
+ "cratefield-testing",
+ "ledgers-audit",
+ "ledgers-db",
+ "ledgers-ledger",
+ "ledgers-money",
+ "pollster",
+ "sea-query",
+ "serde_json",
+ "thiserror",
+ "time",
+]
+
+[[package]]
 name = "ledgers-ledger"
 version = "0.1.0"
 dependencies = [
