@@ -230,21 +230,25 @@ pub struct PostedEntry {
 }
 
 /// Plans the posting batch for one raw entry (see the module docs for
-/// the statement order). The only pre-batch read is the audit head —
+/// the statement order). The only pre-batch reads are the audit head and
+/// the numbering counter (to guarantee the number inside the batch) —
 /// which is why a retry, re-running this whole function, is correct.
 /// Both periods derive and all three dates validate here, so even the
 /// raw path cannot post a `vat_period` that disagrees with its tax
 /// point or a malformed date.
 ///
+/// Returns the expected entry number so the caller can return it after
+/// commit without a separate read.
+///
 /// # Errors
-/// [`DbError`] when the head read fails or a date is not ISO
+/// [`DbError`] when the head read or counter read fails, or a date is not ISO
 /// `"YYYY-MM-DD"`.
 #[doc(hidden)]
 pub async fn plan_post_batch(
     db: &dyn Database,
     raw: &RawEntry,
     ctx: &PostContext,
-) -> Result<Vec<Statement>, DbError> {
+) -> Result<(Vec<Statement>, i64), DbError> {
     plan_post_batch_with(db, raw, ctx, &PostOptions::default()).await
 }
 
@@ -261,8 +265,17 @@ pub async fn plan_post_batch_with(
     raw: &RawEntry,
     ctx: &PostContext,
     options: &PostOptions,
-) -> Result<Vec<Statement>, DbError> {
+) -> Result<(Vec<Statement>, i64), DbError> {
     let head = chain::read_head(db, &raw.company_id).await?;
+
+    // Read the numbering counter and compute the expected number inside
+    // the batch. The counter's idempotent provision (in the batch) ensures
+    // it exists by the time we use it.
+    let current_number = numbering::read_counter(db, &raw.journal_id, ctx.fiscal_year)
+        .await?
+        .unwrap_or(0);
+    let expected_number = current_number + 1;
+
     let period_of = |column: &str, value: &str| -> Result<String, DbError> {
         period::period_of_date(value)
             .ok_or_else(|| DbError::Query(format!("{column} is not a YYYY-MM-DD date: {value:?}")))
@@ -272,16 +285,35 @@ pub async fn plan_post_batch_with(
     period_of("document_date", &raw.document_date)?;
     let vat_period = period_of("tax_point_date", &raw.tax_point_date)?;
 
-    let mut statements = Vec::with_capacity(raw.lines.len() + 12);
+    let mut statements = Vec::with_capacity(raw.lines.len() + 15);
 
-    // 1. Gapless numbering: provision (idempotent), bump, insert
-    //    reading the counter (see `entry_insert_statement`).
+    // 1. Gapless numbering: provision (idempotent), bump, insert with
+    //    literal number, then guard to verify the counter matches.
     statements.push(numbering::provision_statement(
         &raw.journal_id,
         ctx.fiscal_year,
     ));
     statements.push(numbering::bump_statement(&raw.journal_id, ctx.fiscal_year));
-    statements.push(entry_insert_statement(raw, ctx, &vat_period));
+    statements.push(entry_insert_statement(
+        raw,
+        ctx,
+        &vat_period,
+        expected_number,
+    ));
+
+    // The guard after the insert verifies the counter equals expected_number:
+    // the counter only grows and every number ≤ counter is already taken in
+    // journal_entry for that (journal, fiscal year), so if another post won
+    // the race, the counter was already ≥ expected_number, our INSERT hit the
+    // unique constraint, and retry re-planned with fresh reads. This guard
+    // ensures the counter is exactly what we expected, preventing gaps.
+    let counter_guard_key = guard::guard_key(&["counter-advanced", &ctx.entry_id]);
+    statements.push(numbering::assert_counter_advanced_statement(
+        &counter_guard_key,
+        &raw.journal_id,
+        ctx.fiscal_year,
+        expected_number,
+    ));
 
     // 2. The lines, 1-based, in order.
     for (index, line) in raw.lines.iter().enumerate() {
@@ -312,10 +344,7 @@ pub async fn plan_post_batch_with(
     ));
 
     // 10. The outbox enqueue: the event exists exactly when the posting
-    //     commits. The payload names the entry, never its number — the
-    //     number is read back after the commit, and a retried batch may
-    //     take a different one; a drainer that needs it joins on
-    //     entry_id.
+    //     commits. The payload names the entry and its number.
     statements.push(
         cratefield_core::Outbox::new(OUTBOX_TABLE).enqueue_statement(
             &ctx.outbox_id,
@@ -326,38 +355,32 @@ pub async fn plan_post_batch_with(
         ),
     );
 
-    Ok(statements)
+    // 11. Release the counter guard at the very end.
+    statements.push(guard::release_statement(&counter_guard_key));
+
+    Ok((statements, expected_number))
 }
 
-/// The `journal_entry` insert: [`numbering::insert_with_number`] reads
-/// the counter the same batch just advanced, so the entry's NOT NULL
-/// number comes from the row in the same transaction — a refused batch
-/// (any later statement aborting) rolls the bump back with it and
-/// leaves no hole in the sequence.
-fn entry_insert_statement(raw: &RawEntry, ctx: &PostContext, vat_period: &str) -> Statement {
-    numbering::insert_with_number(
-        ENTRY_TABLE,
-        &[
-            "id",
-            "company_id",
-            "journal_id",
-            "fiscal_year",
-            "status",
-            "document_date",
-            "posting_date",
-            "tax_point_date",
-            "vat_period",
-            "recorded_at",
-            "description",
-            "source_documents",
-            "reverses",
-            "base_currency",
-        ],
+/// The `journal_entry` insert: uses a literal number computed before the
+/// batch (avoiding the read-after-commit race of issue #71), followed by
+/// a guard statement verifying the counter is at the expected value.
+fn entry_insert_statement(
+    raw: &RawEntry,
+    ctx: &PostContext,
+    vat_period: &str,
+    number: i64,
+) -> Statement {
+    Statement::with_values(
+        format!(
+            "INSERT INTO {ENTRY_TABLE} (id, company_id, journal_id, fiscal_year, number, status, document_date, posting_date, tax_point_date, vat_period, recorded_at, description, source_documents, reverses, base_currency) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ),
         vec![
             SeaValue::from(ctx.entry_id.as_str()),
             SeaValue::from(raw.company_id.as_str()),
             SeaValue::from(raw.journal_id.as_str()),
             SeaValue::BigInt(Some(ctx.fiscal_year)),
+            SeaValue::BigInt(Some(number)),
             SeaValue::from("posted"),
             SeaValue::from(raw.document_date.as_str()),
             SeaValue::from(raw.posting_date.as_str()),
@@ -369,9 +392,6 @@ fn entry_insert_statement(raw: &RawEntry, ctx: &PostContext, vat_period: &str) -
             SeaValue::from(raw.reverses.as_deref()),
             SeaValue::from(raw.base_currency.as_str()),
         ],
-        "number",
-        &raw.journal_id,
-        ctx.fiscal_year,
     )
 }
 
@@ -459,17 +479,29 @@ fn guard_statements(
 
 /// Posts one validated entry: converts it to storage shape, plans and
 /// submits the batch under `policy` (retrying — re-planning — on
-/// unique-violation races), then reads the assigned number back.
-/// `sleep` is the caller's back-off; the library itself never sleeps.
+/// unique-violation races). The entry's number is computed before the
+/// batch and guaranteed by a guard statement inside it, so no post-commit
+/// read is needed. `sleep` is the caller's back-off; the library itself
+/// never sleeps.
 ///
 /// This is the only production path to a posted entry. There is no
 /// update and no delete — not here, not anywhere in this crate.
+///
+/// **Outcome contract:** `Ok(posted)` means the entry is committed with
+/// that `posted.number`. `Err(Database)` means the outcome is unknown to
+/// the caller — the batch may or may not have committed. To resolve
+/// ambiguity, resubmit with the same `ctx.entry_id` (the idempotency key):
+/// if the original post committed, this call returns the original
+/// [`PostedEntry`]; if it did not, this call posts it (never duplicated).
+/// Never resubmit with a fresh `entry_id` after an error.
 ///
 /// # Errors
 /// [`JournalError::Conflict`] when the retry budget ran out on races;
 /// the guard refusals mapped to their domain variants
 /// ([`JournalError::PeriodNotOpen`], [`JournalError::UnknownAccount`],
 /// [`JournalError::ForeignJournal`], [`JournalError::ForeignReversal`]);
+/// [`JournalError::EntryIdAlreadyUsed`] when the `entry_id` was already
+/// posted to a different journal (a misuse of the idempotency key);
 /// [`JournalError::Database`] for anything the diagnostics could not
 /// attribute; [`JournalError::Money`] when an amount does not fit the
 /// storage width during conversion.
@@ -487,6 +519,10 @@ pub async fn post_entry(
 /// Posts one **raw** entry: the same batch, no validation in front —
 /// the test path that proves the SQL guards refuse bad rows alone.
 /// Production code uses [`post_entry`].
+///
+/// Resubmits with the same `ctx.entry_id` (idempotency key) return the
+/// original [`PostedEntry`] if it committed, or allow reposting if the
+/// first attempt failed; the outcome is deterministic, never duplicated.
 ///
 /// # Errors
 /// As [`post_entry`]; an unattributable refusal stays
@@ -506,8 +542,13 @@ pub async fn post_raw_entry(
 /// batch, with the period override, person-side guard and daily
 /// allowance applied. The refusal attribution honours the same options.
 ///
+/// Idempotent by entry_id: a resubmit with the same entry_id returns the
+/// original [`PostedEntry`] if it committed, or allows reposting if the
+/// first attempt failed.
+///
 /// # Errors
-/// As [`post_entry`].
+/// As [`post_entry`], plus [`JournalError::EntryIdAlreadyUsed`] when the
+/// entry_id was already posted to a different journal.
 #[doc(hidden)]
 pub async fn post_raw_entry_with(
     db: &dyn Database,
@@ -517,16 +558,93 @@ pub async fn post_raw_entry_with(
     sleep: impl FnMut(Duration),
     options: &PostOptions,
 ) -> Result<PostedEntry, JournalError> {
-    if let Err(err) = retry::run_batch_with_retry(
+    // Idempotent resubmit: checked inside each attempt's planning. If the
+    // entry already exists and belongs to this journal/fiscal year, we return
+    // an empty statement list (which batch_atomic commits as a no-op), then
+    // return the stashed original. If it exists in a different journal, we
+    // fail immediately. Each attempt re-plans with fresh reads, so this
+    // handles races: if two concurrent posts use the same entry_id, the
+    // loser's PK violation on journal_entry.id is retried, and the next plan
+    // finds the original and returns it — never posting twice.
+    let expected_number = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let stashed_entry = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let expected_number_ref = expected_number.clone();
+    let stashed_entry_ref = stashed_entry.clone();
+
+    match retry::run_batch_with_retry(
         db,
         policy,
-        || plan_post_batch_with(db, raw, ctx, options),
+        || {
+            let en = expected_number_ref.clone();
+            let se = stashed_entry_ref.clone();
+            async move {
+                // Check if an entry with this id already exists (idempotency).
+                // Note: we convert JournalError to DbError so the error can be
+                // processed by the retry logic (only unique violations retry).
+                let existing = read_posted_entry(db, &ctx.entry_id, &raw.company_id)
+                    .await
+                    .map_err(|je| DbError::Query(je.to_string()))?;
+
+                if let Some(existing_entry) = existing {
+                    if existing_entry.journal_id == raw.journal_id
+                        && existing_entry.fiscal_year == ctx.fiscal_year
+                    {
+                        // Safe idempotent resubmit: stash the entry and return
+                        // an empty statement list (batch_atomic on empty is Ok).
+                        *se.lock().unwrap() = Some(existing_entry);
+                        return Ok(Vec::new());
+                    }
+                    // The entry_id was used for a different journal/year: that's an error.
+                    return Err(DbError::Query(format!(
+                        "entry_id {} already posted to different journal",
+                        ctx.entry_id
+                    )));
+                }
+
+                // Not an idempotent resubmit: plan the batch normally.
+                let (stmts, num) = plan_post_batch_with(db, raw, ctx, options).await?;
+                *en.lock().unwrap() = Some(num);
+                Ok(stmts)
+            }
+        },
         sleep,
     )
     .await
     {
-        return Err(match err {
+        Ok(()) => {
+            // If we stashed an entry (idempotent resubmit), return it.
+            // Otherwise, return a new PostedEntry with the expected_number.
+            if let Some(existing) = stashed_entry.lock().unwrap().take() {
+                Ok(existing)
+            } else {
+                // Batch committed atomically: entry, lines, chain, outbox, and
+                // counter bump all committed. The number came from the pre-batch
+                // counter read; the literal INSERT ensures it matches. No
+                // post-commit read is needed (issue #71).
+                let number = expected_number
+                    .lock()
+                    .unwrap()
+                    .expect("planner set expected_number");
+                Ok(PostedEntry {
+                    entry_id: ctx.entry_id.clone(),
+                    journal_id: raw.journal_id.clone(),
+                    fiscal_year: ctx.fiscal_year,
+                    number,
+                    recorded_at: ctx.recorded_at.clone(),
+                })
+            }
+        }
+        Err(err) => Err(match err {
             ledgers_db::GuardError::Conflict { attempts } => JournalError::Conflict { attempts },
+            ledgers_db::GuardError::Database(db_error)
+                if db_error
+                    .to_string()
+                    .contains("already posted to different journal") =>
+            {
+                JournalError::EntryIdAlreadyUsed {
+                    entry_id: ctx.entry_id.clone(),
+                }
+            }
             ledgers_db::GuardError::Database(db_error) if is_guard_refusal(&db_error) => {
                 // Reads after a failed write (ADR 0004): the batch is
                 // gone; these only choose which error the caller reads.
@@ -535,16 +653,8 @@ pub async fn post_raw_entry_with(
                     .unwrap_or(JournalError::Database(db_error))
             }
             ledgers_db::GuardError::Database(db_error) => JournalError::Database(db_error),
-        });
+        }),
     }
-    let number = read_number(db, &ctx.entry_id).await?;
-    Ok(PostedEntry {
-        entry_id: ctx.entry_id.clone(),
-        journal_id: raw.journal_id.clone(),
-        fiscal_year: ctx.fiscal_year,
-        number,
-        recorded_at: ctx.recorded_at.clone(),
-    })
 }
 
 /// Whether a failed statement was a guard probe's `NOT NULL` refusal
@@ -678,23 +788,30 @@ fn meter_day(created_at: &str) -> Result<OffsetDateTime, DbError> {
     Ok(calendar.midnight().assume_utc())
 }
 
-/// The number the batch assigned, read back after commit. A missing
-/// row here means the committed entry is not readable — an engine
-/// failure, not a domain condition.
-async fn read_number(db: &dyn Database, entry_id: &str) -> Result<i64, JournalError> {
+/// Reads a posted entry by id (idempotency lookup). Returns the entry
+/// with all its identifiers and number, or `None` if not found.
+async fn read_posted_entry(
+    db: &dyn Database,
+    entry_id: &str,
+    company_id: &str,
+) -> Result<Option<PostedEntry>, JournalError> {
     let rows = db
         .query(&Statement::with_values(
-            format!("SELECT number FROM {ENTRY_TABLE} WHERE id = ?"),
-            vec![SeaValue::from(entry_id)],
+            format!("SELECT journal_id, fiscal_year, number, recorded_at FROM {ENTRY_TABLE} WHERE id = ? AND company_id = ?"),
+            vec![SeaValue::from(entry_id), SeaValue::from(company_id)],
         ))
         .await?;
-    rows.first()
-        .and_then(|row| row.get::<i64>("number"))
-        .ok_or_else(|| {
-            JournalError::Database(DbError::Query(format!(
-                "posted entry {entry_id} has no readable number"
-            )))
-        })
+    Ok(rows.first().map(|row| PostedEntry {
+        entry_id: entry_id.to_owned(),
+        journal_id: row.get::<String>("journal_id").expect("journal_id is text"),
+        fiscal_year: row
+            .get::<i64>("fiscal_year")
+            .expect("fiscal_year is an integer"),
+        number: row.get::<i64>("number").expect("number is an integer"),
+        recorded_at: row
+            .get::<String>("recorded_at")
+            .expect("recorded_at is text"),
+    }))
 }
 
 /// The INSERT for one line: `(entry_id, line_no, …)`, signed minor

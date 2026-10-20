@@ -567,6 +567,17 @@ pub enum JournalError {
         entry: String,
     },
 
+    /// The entry id was already used to post an entry to a different
+    /// journal. Entry ids are idempotency keys: a resubmit with the same
+    /// id returns the original entry (if it posted) or lets it post again
+    /// (if the first attempt failed). Reusing an id across different
+    /// journals is not a resubmit but a misuse of the key.
+    #[error("entry id {entry_id} already posted to a different journal")]
+    EntryIdAlreadyUsed {
+        /// The entry id that was already posted.
+        entry_id: String,
+    },
+
     /// The batch still conflicted after every retry attempt —
     /// contention, not refusal.
     #[error("posting still conflicts after {attempts} attempts")]
@@ -713,6 +724,9 @@ impl JournalError {
             JournalError::ForeignReversal { entry } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("entry", entry.clone()),
+            JournalError::EntryIdAlreadyUsed { entry_id } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("entryId", entry_id.clone()),
             JournalError::Conflict { attempts } => Problem::new(&JOURNAL_POST_CONFLICT)
                 .with_detail(self.to_string())
                 .with_extension("attempts", u64::from(*attempts)),
