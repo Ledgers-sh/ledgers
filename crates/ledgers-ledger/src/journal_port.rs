@@ -79,7 +79,7 @@ pub struct NewEntry {
     /// batch's balanced guard is the backstop).
     pub lines: Vec<NewEntryLine>,
     /// The audit subject posting (`"person:{id}"` / `"agent:{key_id}"`
-    /// — see [`crate::period::Actor::subject`]).
+    /// — see [`crate::period::subject`]).
     pub actor_subject: String,
     /// Whether a person (not an agent key) drives this post: the
     /// period-postable guard admits `soft-closed` periods for persons
@@ -159,7 +159,8 @@ pub trait Journal: Send + Sync {
     /// posted, gapless number included. The period-postable guard MUST
     /// run inside the `batch_atomic` (module docs): that is what makes
     /// a closed period's rejection a property of the domain service
-    /// rather than of each caller's discipline.
+    /// rather than of each caller's discipline. The `audit` context is
+    /// the identity the post's audit event records.
     ///
     /// # Errors
     /// [`AccountsError::Database`] when a guard fires — a closed
@@ -170,6 +171,7 @@ pub trait Journal: Send + Sync {
         &'a self,
         db: &'a dyn cratefield_core::Database,
         entry: &'a NewEntry,
+        audit: &'a ledgers_audit::AuditContext,
     ) -> BoxFuture<'a, Result<PostedEntry, AccountsError>>;
 
     /// Finds one posted entry by id, or `None` — the crash-recovery
@@ -189,12 +191,14 @@ pub trait Journal: Send + Sync {
     /// creating it under `code` and `name` when absent, and is a no-op
     /// when it already exists. The year-end close's closing journal is
     /// one per fiscal year, so nothing else provisions it; the close
-    /// calls this before posting.
+    /// calls this before posting. `audit` is the identity the creation's
+    /// audit event records, and is unused when the journal exists.
     ///
     /// # Errors
     /// [`AccountsError::Database`] when the write or read fails, or
     /// when `code` is already taken by a different journal in the
     /// company.
+    #[allow(clippy::too_many_arguments)]
     fn ensure_journal<'a>(
         &'a self,
         db: &'a dyn cratefield_core::Database,
@@ -203,5 +207,6 @@ pub trait Journal: Send + Sync {
         code: &'a str,
         name: &'a str,
         created_at: &'a str,
+        audit: &'a ledgers_audit::AuditContext,
     ) -> BoxFuture<'a, Result<(), AccountsError>>;
 }

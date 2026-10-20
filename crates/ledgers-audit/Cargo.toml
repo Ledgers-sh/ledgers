@@ -1,0 +1,41 @@
+[package]
+name = "ledgers-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# The Postgres parity leg of the scenario matrix: native-only, opted into
+# by CI and a local postgres:16 (FZ_TEST_POSTGRES_URL). The lib itself
+# stays wasm-clean without it.
+postgres = ["cratefield-testing/postgres"]
+
+[dependencies]
+# The lib is wasm-clean: the guard foundation's chain, outbox table and
+# retry policy (ledgers-db) on the harness Database port, serde/serde_json
+# for the event shape and the canonical-JSON value tree, sea-query for
+# the export query's bound values, SHA-256 for the chain hash, thiserror
+# for the error enums. No clock, no filesystem, no threads: ids and
+# timestamps are always injected, so a Workers runtime can run the whole
+# chain.
+cratefield-core = { workspace = true }
+ledgers-db = { workspace = true }
+sea-query = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The harness (TestHarness over in-memory SQLite) for the scenario
+# matrix — the kit's default feature set; the lib never sees it — plus
+# pollster for the matrix's block-on and the guard foundation this crate
+# appends to.
+cratefield-testing = { workspace = true, features = ["harness"] }
+ledgers-db = { workspace = true }
+pollster = { workspace = true, features = ["macro"] }
+
+[lints]
+workspace = true

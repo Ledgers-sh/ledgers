@@ -104,6 +104,7 @@ async fn fixtures(db: &dyn Database, journal_code: &str, period: &str) -> String
         },
         &format!("01J{journal_code}000000000000000000000"),
         NOW,
+        &common::person(),
     )
     .await
     .unwrap_or_else(|err| panic!("create journal {journal_code}: {err}"));
@@ -187,6 +188,7 @@ async fn journal_lifecycle(db: &dyn Database) {
         },
         "01JANOTHERJOURNAL0000000000000000",
         NOW,
+        &common::person(),
     )
     .await
     .unwrap_err();
@@ -226,6 +228,7 @@ async fn journal_lifecycle(db: &dyn Database) {
         },
         "01JBADCODEJOURNAL000000000000000",
         NOW,
+        &common::person(),
     )
     .await
     .unwrap_err();
@@ -246,9 +249,16 @@ async fn balanced_posts_are_numbered_gaplessly(db: &dyn Database) {
             COMPANY_ID,
         )
         .expect("the draft validates");
-        let posted = post_entry(db, &entry, &ctx("NJ", n), RetryPolicy::default(), no_sleep)
-            .await
-            .unwrap_or_else(|err| panic!("post {n}: {err}"));
+        let posted = post_entry(
+            db,
+            &entry,
+            &ctx("NJ", n),
+            RetryPolicy::default(),
+            no_sleep,
+            &common::person(),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("post {n}: {err}"));
         assert_eq!(posted.number, i64::try_from(n).expect("small"));
         assert_eq!(posted.recorded_at, POSTED_AT);
         assert_eq!(posted.fiscal_year, FY);
@@ -359,9 +369,16 @@ async fn the_fx_bill_payment_posts_and_its_missing_leg_is_refused(db: &dyn Datab
         COMPANY_ID,
     )
     .expect("the FX bill payment validates");
-    let posted = post_entry(db, &entry, &ctx("FJ", 1), RetryPolicy::default(), no_sleep)
-        .await
-        .expect("the FX bill payment posts");
+    let posted = post_entry(
+        db,
+        &entry,
+        &ctx("FJ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect("the FX bill payment posts");
     assert_eq!(posted.number, 1);
 
     let rows = db
@@ -416,9 +433,16 @@ async fn closed_and_unknown_periods_refuse(db: &dyn Database) {
     .expect("close the period");
     let entry =
         Entry::from_draft(draft_march(&journal_id), COMPANY_ID).expect("the draft validates");
-    let err = post_entry(db, &entry, &ctx("CJ", 1), RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("a closed period refuses the post");
+    let err = post_entry(
+        db,
+        &entry,
+        &ctx("CJ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("a closed period refuses the post");
     assert_eq!(
         err,
         JournalError::PeriodNotOpen {
@@ -435,9 +459,16 @@ async fn closed_and_unknown_periods_refuse(db: &dyn Database) {
     // fails closed exactly as for a closed one.
     let journal_id = fixtures(db, "UJ", "2026-04").await;
     let entry = Entry::from_draft(draft_may(&journal_id), COMPANY_ID).expect("the draft validates");
-    let err = post_entry(db, &entry, &ctx("UJ", 2), RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("an unknown period refuses the post");
+    let err = post_entry(
+        db,
+        &entry,
+        &ctx("UJ", 2),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("an unknown period refuses the post");
     assert_eq!(
         err,
         JournalError::PeriodNotOpen {
@@ -472,9 +503,16 @@ async fn unknown_and_archived_accounts_refuse(db: &dyn Database) {
         COMPANY_ID,
     )
     .expect("the domain does not know the chart");
-    let err = post_entry(db, &entry, &ctx("AJ", 1), RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("an unknown account refuses the post");
+    let err = post_entry(
+        db,
+        &entry,
+        &ctx("AJ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("an unknown account refuses the post");
     assert_eq!(
         err,
         JournalError::UnknownAccount {
@@ -487,7 +525,7 @@ async fn unknown_and_archived_accounts_refuse(db: &dyn Database) {
     );
 
     // Archived account: present in the chart, retired from posting.
-    commands::archive_account(db, COMPANY_ID, "3000", NOW.to_owned())
+    commands::archive_account(db, COMPANY_ID, "3000", NOW.to_owned(), &common::person())
         .await
         .expect("archive the FX-loss account");
     let entry = Entry::from_draft(
@@ -501,9 +539,16 @@ async fn unknown_and_archived_accounts_refuse(db: &dyn Database) {
         COMPANY_ID,
     )
     .expect("the domain does not know the archive bit");
-    let err = post_entry(db, &entry, &ctx("AJ", 2), RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("an archived account refuses the post");
+    let err = post_entry(
+        db,
+        &entry,
+        &ctx("AJ", 2),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("an archived account refuses the post");
     assert_eq!(
         err,
         JournalError::UnknownAccount {
@@ -538,6 +583,7 @@ async fn a_foreign_journal_refuses_without_touching_their_numbering(db: &dyn Dat
         },
         "01JBJ00000000000000000000000000",
         NOW,
+        &common::person(),
     )
     .await
     .expect("create the other company's journal");
@@ -556,9 +602,16 @@ async fn a_foreign_journal_refuses_without_touching_their_numbering(db: &dyn Dat
         COMPANY_ID,
     )
     .expect("the draft validates — ownership is the database's to check");
-    let err = post_entry(db, &entry, &ctx("XJ", 1), RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("a foreign journal refuses the post");
+    let err = post_entry(
+        db,
+        &entry,
+        &ctx("XJ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("a foreign journal refuses the post");
     assert_eq!(
         err,
         JournalError::ForeignJournal {
@@ -599,6 +652,7 @@ async fn a_cross_company_reversal_refuses(db: &dyn Database) {
         &ctx("XJ", 2),
         RetryPolicy::default(),
         no_sleep,
+        &common::person(),
     )
     .await
     .expect("post the original");
@@ -628,6 +682,7 @@ async fn a_cross_company_reversal_refuses(db: &dyn Database) {
         &ctx("BJ", 1),
         RetryPolicy::default(),
         no_sleep,
+        &common::person(),
     )
     .await
     .expect_err("a cross-company reversal refuses the post");
@@ -657,6 +712,7 @@ async fn a_cross_company_reversal_refuses(db: &dyn Database) {
 /// number, and leave nothing behind; the next good post takes number 1.
 /// The balance refusal has no domain variant on this path, so it
 /// surfaces as the database error it is.
+#[allow(clippy::too_many_lines)]
 async fn the_db_guard_alone_rejects_unbalanced_lines_without_consuming_a_number(db: &dyn Database) {
     let journal_id = fixtures(db, "RJ", "2026-04").await;
     let raw_line = |account: &str, minor: i64| RawLine {
@@ -684,9 +740,16 @@ async fn the_db_guard_alone_rejects_unbalanced_lines_without_consuming_a_number(
     };
 
     let first = ctx("RJ", 1);
-    let err = post_raw_entry(db, &raw, &first, RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("the SQL guard refuses unbalanced lines on its own");
+    let err = post_raw_entry(
+        db,
+        &raw,
+        &first,
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("the SQL guard refuses unbalanced lines on its own");
     assert!(
         matches!(err, JournalError::Database(_)),
         "the fired guard is a refusal, never a conflict: {err:?}"
@@ -711,9 +774,16 @@ async fn the_db_guard_alone_rejects_unbalanced_lines_without_consuming_a_number(
         lines: vec![raw_line("1010", 100)],
         ..raw
     };
-    let err = post_raw_entry(db, &one_line, &single, RetryPolicy::default(), no_sleep)
-        .await
-        .expect_err("a one-line entry is refused");
+    let err = post_raw_entry(
+        db,
+        &one_line,
+        &single,
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("a one-line entry is refused");
     assert!(matches!(err, JournalError::Database(_)));
 
     // The next good post takes number 1 — no gap was left — and its
@@ -730,9 +800,16 @@ async fn the_db_guard_alone_rejects_unbalanced_lines_without_consuming_a_number(
         COMPANY_ID,
     )
     .expect("valid");
-    let posted = post_entry(db, &entry, &third, RetryPolicy::default(), no_sleep)
-        .await
-        .expect("the next post succeeds");
+    let posted = post_entry(
+        db,
+        &entry,
+        &third,
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect("the next post succeeds");
     assert_eq!(posted.number, 1, "the sequence starts clean");
 
     let events = db
@@ -775,9 +852,16 @@ async fn posted_rows_are_immutable_at_the_storage_layer(db: &dyn Database) {
         COMPANY_ID,
     )
     .expect("valid");
-    let posted = post_entry(db, &entry, &ctx("IJ", 1), RetryPolicy::default(), no_sleep)
-        .await
-        .expect("post");
+    let posted = post_entry(
+        db,
+        &entry,
+        &ctx("IJ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect("post");
     let entry_id = posted.entry_id.clone();
 
     for sql in [
@@ -830,6 +914,7 @@ async fn reversals_read_back_through_the_reverses_relation(db: &dyn Database) {
         &ctx("VJ", 1),
         RetryPolicy::default(),
         no_sleep,
+        &common::person(),
     )
     .await
     .expect("post the original");
@@ -863,6 +948,7 @@ async fn reversals_read_back_through_the_reverses_relation(db: &dyn Database) {
         &ctx("VJ", 2),
         RetryPolicy::default(),
         no_sleep,
+        &common::person(),
     )
     .await
     .expect("post the reversal");

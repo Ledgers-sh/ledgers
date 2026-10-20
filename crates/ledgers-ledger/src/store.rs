@@ -29,9 +29,15 @@ use std::collections::HashMap;
 const TABLE: &str = "account";
 
 /// Renders the INSERT statement for one account row; the single writer
-/// both [`insert_account`] and [`insert_accounts_batch`] go through, so
-/// the two can never drift.
-fn insert_statement(account: &Account) -> Statement {
+/// [`insert_account_statement`] and every batch go through, so the
+/// standalone write and the batched one can never drift.
+///
+/// # Panics
+/// When `sea_query` rejects the column/value pairing — a programmer
+/// error (a column with no value, or the reverse), never a runtime
+/// condition. The columns and values are listed beside each other.
+#[must_use]
+pub fn insert_account_statement(account: &Account) -> Statement {
     let mut insert = Query::insert();
     insert.into_table(Alias::new(TABLE)).columns([
         Alias::new("company_id"),
@@ -71,7 +77,7 @@ fn insert_statement(account: &Account) -> Statement {
 /// [`AccountsError::Database`] when the statement fails (a duplicate
 /// number surfaces as a constraint error; commands pre-check and map).
 pub async fn insert_account(db: &dyn Database, account: &Account) -> Result<(), AccountsError> {
-    db.execute(&insert_statement(account))
+    db.execute(&insert_account_statement(account))
         .await
         .map_err(constraint_on(&account.number))?;
     Ok(())
@@ -91,7 +97,10 @@ pub async fn insert_accounts_batch(
     db: &dyn Database,
     accounts: &[Account],
 ) -> Result<(), AccountsError> {
-    let statements = accounts.iter().map(insert_statement).collect::<Vec<_>>();
+    let statements = accounts
+        .iter()
+        .map(insert_account_statement)
+        .collect::<Vec<_>>();
     db.batch_atomic(&statements)
         .await
         .map_err(|err| constraint_error(err, accounts.first().map(|a| a.number.as_str())))?;
@@ -221,6 +230,30 @@ pub async fn list_account_entries(
         .collect())
 }
 
+/// Renders the UPDATE that sets `archived` on one account, stamping
+/// `updated_at`. Returned as a statement so the archive can ride the
+/// same batch as its audit event; [`set_archived`] is the standalone
+/// form that can still report a missing row from its affected count.
+#[must_use]
+pub fn set_archived_statement(
+    company_id: &str,
+    number: &str,
+    archived: bool,
+    updated_at: &str,
+) -> Statement {
+    let mut update = Query::update();
+    update
+        .table(Alias::new(TABLE))
+        .value(
+            Alias::new("archived"),
+            sea_query::Value::BigInt(Some(i64::from(archived))),
+        )
+        .value(Alias::new("updated_at"), updated_at)
+        .and_where(Expr::col(Alias::new("company_id")).eq(company_id))
+        .and_where(Expr::col(Alias::new("number")).eq(number));
+    Statement::render(&update)
+}
+
 /// Sets `archived` on one account, stamping `updated_at`. Zero rows
 /// affected — the company and number match nothing — is
 /// [`AccountsError::AccountNotFound`].
@@ -235,17 +268,11 @@ pub async fn set_archived(
     archived: bool,
     updated_at: &str,
 ) -> Result<(), AccountsError> {
-    let mut update = Query::update();
-    update
-        .table(Alias::new(TABLE))
-        .value(
-            Alias::new("archived"),
-            sea_query::Value::BigInt(Some(i64::from(archived))),
-        )
-        .value(Alias::new("updated_at"), updated_at)
-        .and_where(Expr::col(Alias::new("company_id")).eq(company_id))
-        .and_where(Expr::col(Alias::new("number")).eq(number));
-    let affected = db.execute(&Statement::render(&update)).await?;
+    let affected = db
+        .execute(&set_archived_statement(
+            company_id, number, archived, updated_at,
+        ))
+        .await?;
     if affected == 0 {
         return Err(AccountsError::AccountNotFound {
             number: number.to_owned(),

@@ -65,23 +65,50 @@ pub use retry::{GuardError, RetryPolicy};
 
 /// The guard-statement migrations: the numbering counter, the probe
 /// table, period status, the audit chain's spine, the usage meter's
-/// table and the outbox queue, in apply order.
+/// table, the outbox queue and the audit chain's append-only triggers,
+/// in apply order.
+const GUARDS: cratefield_core::SqlMigration = cratefield_core::SqlMigration::new(
+    "0001",
+    "guards",
+    include_str!("../migrations/sqlite/0001_guards.sql"),
+);
+
+const OUTBOX: cratefield_core::SqlMigration = cratefield_core::SqlMigration::new(
+    "0002",
+    "outbox",
+    include_str!("../migrations/sqlite/0002_outbox.sql"),
+);
+
+/// The guard-statement migrations, in apply order.
 pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    GUARDS,
+    OUTBOX,
     cratefield_core::SqlMigration::new(
-        "0001",
-        "guards",
-        include_str!("../migrations/sqlite/0001_guards.sql"),
-    ),
-    cratefield_core::SqlMigration::new(
-        "0002",
-        "outbox",
-        include_str!("../migrations/sqlite/0002_outbox.sql"),
+        "0003",
+        "audit_event_append_only",
+        include_str!("../migrations/sqlite/0003_audit_event_append_only.sql"),
     ),
 ];
 
-// Compile-time check on the set: ids run contiguously from 0001 in the
-// order they are listed (cratefield-core, `assert_migration_set`).
+/// The Postgres set: the portable migrations *themselves* — a copy
+/// under `migrations/postgres/` would be a second statement of what
+/// the schema is, free to drift — and the one migration whose SQL is
+/// dialect-specific (the append-only triggers: `RAISE(ABORT, …)` on
+/// SQLite, a plpgsql function on Postgres).
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    GUARDS,
+    OUTBOX,
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "audit_event_append_only",
+        include_str!("../migrations/postgres/0003_audit_event_append_only.sql"),
+    ),
+];
+
+// Compile-time checks on both sets: ids run contiguously from 0001 in
+// the order they are listed (cratefield-core, `assert_migration_set`).
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);
 
 #[cfg(test)]
 mod tests {
@@ -90,22 +117,48 @@ mod tests {
     #[test]
     fn the_migration_set_is_contiguous() {
         // assert_migration_set already ran at compile time; this pins
-        // the set's shape for readers.
-        assert_eq!(SQLITE_MIGRATIONS.len(), 2);
-        assert_eq!(SQLITE_MIGRATIONS[0].id, "0001");
-        assert_eq!(SQLITE_MIGRATIONS[0].name, "guards");
-        assert_eq!(SQLITE_MIGRATIONS[1].id, "0002");
-        assert_eq!(SQLITE_MIGRATIONS[1].name, "outbox");
+        // the sets' shape for readers.
+        for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
+            assert_eq!(set.len(), 3);
+            assert_eq!(set[0].id, "0001");
+            assert_eq!(set[0].name, "guards");
+            assert_eq!(set[1].id, "0002");
+            assert_eq!(set[1].name, "outbox");
+            assert_eq!(set[2].id, "0003");
+            assert_eq!(set[2].name, "audit_event_append_only");
+        }
     }
 
     #[test]
     fn the_migration_stays_in_the_portable_subset() {
         // The workspace-wide gate in ledgers-storage's matrix lints this
         // file too; the crate checks its own migration so a standalone
-        // `cargo test -p ledgers-db` fails the same way.
-        assert!(
-            cratefield_core::lint_portable_sql(SQLITE_MIGRATIONS[0].sql).is_empty(),
-            "0001_guards.sql left the portable-SQL subset"
-        );
+        // `cargo test -p ledgers-db` fails the same way. The trigger
+        // file lints clean like ledgers-ledger's journal triggers do:
+        // the lint rejects portability escapes (NOW(), AUTOINCREMENT,
+        // json_extract, FTS5, backticks), and trigger DDL is not among
+        // them.
+        for migration in SQLITE_MIGRATIONS {
+            assert!(
+                cratefield_core::lint_portable_sql(migration.sql).is_empty(),
+                "{} left the portable-SQL subset",
+                migration.id
+            );
+        }
+    }
+
+    #[test]
+    fn the_postgres_set_overrides_only_the_dialect_sql() {
+        // If a fourth migration arrives, this is the test that says
+        // whether it needs a postgres copy.
+        for (portable, postgres) in SQLITE_MIGRATIONS.iter().zip(POSTGRES_MIGRATIONS) {
+            assert_eq!(
+                portable.id != "0003",
+                portable.sql == postgres.sql,
+                "migration {} must be the portable set's own SQL unless its SQL is \
+                 dialect-specific",
+                portable.id
+            );
+        }
     }
 }

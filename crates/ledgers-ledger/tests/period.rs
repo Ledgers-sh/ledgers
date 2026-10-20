@@ -23,6 +23,7 @@
 
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
+use ledgers_audit::{Actor, AuditContext, AuditEvent, Outcome};
 use ledgers_db::DbModule;
 use ledgers_db::chain;
 use ledgers_db::suite::{DemoLine, PostInput, create_demo_tables, plan_post};
@@ -35,8 +36,8 @@ use ledgers_ledger::journal_port::{
     AccountBalance, BoxFuture, Journal, NewEntry, NewEntryLine, PostedEntry,
 };
 use ledgers_ledger::period::{
-    Actor, PeriodState, YearEndReport, close_fiscal_year, close_period, fiscal_year,
-    fiscal_year_periods, open_fiscal_year, period_state, reopen_period, soft_close_period,
+    PeriodState, YearEndReport, close_fiscal_year, close_period, fiscal_year, fiscal_year_periods,
+    open_fiscal_year, period_state, reopen_period, soft_close_period,
 };
 use ledgers_ledger::{LedgerModule, chart, commands};
 use ledgers_money::{Amount, Currency};
@@ -112,16 +113,41 @@ fn eur() -> Currency {
     Currency::from_code("EUR").expect("EUR is in the currency table")
 }
 
-fn person() -> Actor {
-    Actor::Person {
-        id: "owner-1".to_owned(),
+fn person() -> AuditContext {
+    AuditContext::new(actor(true), request(), event_id())
+}
+
+fn agent() -> AuditContext {
+    AuditContext::new(actor(false), request(), event_id())
+}
+
+/// The actor behind either context. The `AuditContext` carries it, so
+/// a scenario picks one helper and the actor follows.
+fn actor(human: bool) -> Actor {
+    if human {
+        Actor::Person {
+            person_id: "owner-1".to_owned(),
+        }
+    } else {
+        Actor::Agent {
+            key_id: "key-1".to_owned(),
+            tier: "post-within-limits".to_owned(),
+        }
     }
 }
 
-fn agent() -> Actor {
-    Actor::Agent {
-        key_id: "key-1".to_owned(),
-    }
+fn request() -> String {
+    "req_01PERIODSCENARIO0000000001".to_owned()
+}
+
+/// A fresh event id per call, so one company can be written to as
+/// often as a scenario likes.
+fn event_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!(
+        "01PERIODSCENARIO{:012}",
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
 }
 
 fn calendar_year(label: i64) -> FiscalYearSpec {
@@ -232,7 +258,12 @@ impl Journal for DemoJournal {
         &'a self,
         db: &'a dyn Database,
         entry: &'a NewEntry,
+        audit: &'a AuditContext,
     ) -> BoxFuture<'a, Result<PostedEntry, AccountsError>> {
+        // The demo posts through ledgers-db's reference batch, which
+        // carries no audit trail of its own; the event is appended here
+        // so the period scenarios' chain reflects the port post.
+        let _ = audit;
         Box::pin(async move {
             let mut lines = Vec::with_capacity(entry.lines.len());
             for (index, line) in entry.lines.iter().enumerate() {
@@ -297,6 +328,7 @@ impl Journal for DemoJournal {
         _code: &'a str,
         _name: &'a str,
         _created_at: &'a str,
+        _audit: &'a AuditContext,
     ) -> BoxFuture<'a, Result<(), AccountsError>> {
         // The demo collapses the journal onto the company: nothing to provision.
         Box::pin(async { Ok(()) })
@@ -394,7 +426,7 @@ async fn setup(db: &dyn Database, company_id: &str) -> DemoJournal {
         .await
         .expect("create the demo tables");
     let template = chart::parse_chart(INLINE_CHART).expect("the inline chart parses");
-    commands::import_template(db, company_id, &template, NOW.to_owned())
+    commands::import_template(db, company_id, &template, NOW.to_owned(), &person())
         .await
         .expect("import the inline chart");
     DemoJournal::new(company_id)
@@ -408,7 +440,7 @@ fn entry(
     date: &str,
     period: Option<&str>,
     human: bool,
-    actor: &Actor,
+    actor: &AuditContext,
     lines: &[(&str, i128)],
 ) -> NewEntry {
     NewEntry {
@@ -429,25 +461,51 @@ fn entry(
                 amount: Amount::new(minor, eur()),
             })
             .collect(),
-        actor_subject: actor.subject(),
+        actor_subject: ledgers_ledger::subject(&actor.actor),
         human,
         daily_limit: 1000,
     }
 }
 
-/// The newest audit payload on the company's chain.
-async fn last_audit_payload(db: &dyn Database, company_id: &str) -> String {
+/// The newest audit event on the company's chain, parsed out of its
+/// JSON payload.
+async fn last_audit_event(db: &dyn Database, company_id: &str) -> AuditEvent {
+    // The demo journal's reference batch leaves its own placeholder
+    // rows on the chain; the period commands append the real
+    // `ledgers-audit` events after them. Walk back from the tail and
+    // return the newest one that parses as an audit event.
     let rows = db
         .query(&Statement::with_values(
-            "SELECT payload FROM audit_event WHERE company_id = ? ORDER BY seq DESC LIMIT 1"
-                .to_owned(),
+            "SELECT payload FROM audit_event WHERE company_id = ? ORDER BY seq DESC".to_owned(),
             vec![SeaValue::from(company_id)],
         ))
         .await
         .expect("read the audit tail");
-    rows.first()
-        .and_then(|row| row.get::<String>("payload"))
-        .expect("at least one audit event exists")
+    for row in &rows.rows {
+        if let Some(payload) = row.get::<String>("payload")
+            && let Ok(event) = serde_json::from_str::<AuditEvent>(&payload)
+        {
+            return event;
+        }
+    }
+    panic!("no ledgers-audit event on {company_id}'s chain");
+}
+
+/// The audit events naming `command` on the company's chain.
+async fn audit_events(db: &dyn Database, company_id: &str, command: &str) -> Vec<AuditEvent> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT payload FROM audit_event WHERE company_id = ? ORDER BY seq".to_owned(),
+            vec![SeaValue::from(company_id)],
+        ))
+        .await
+        .expect("read the audit chain");
+    rows.rows
+        .iter()
+        .filter_map(|row| row.get::<String>("payload"))
+        .filter_map(|payload| serde_json::from_str::<AuditEvent>(&payload).ok())
+        .filter(|event| event.command == command)
+        .collect()
 }
 
 /// The audit chain's head sequence for the company.
@@ -480,7 +538,7 @@ async fn lifecycle_and_opening_rules(db: &dyn Database) {
     let company = LIFECYCLE_COMPANY;
     setup(db, company).await;
 
-    let year = open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    let year = open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
     assert_eq!(year.starts_on, "2026-01-01");
@@ -504,7 +562,7 @@ async fn lifecycle_and_opening_rules(db: &dyn Database) {
 
     // A duplicate label refuses — the table is keyed by (company, label).
     assert_eq!(
-        open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned()).await,
+        open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person()).await,
         Err(AccountsError::FiscalYearExists { label: 2026 })
     );
 
@@ -515,7 +573,7 @@ async fn lifecycle_and_opening_rules(db: &dyn Database) {
         start_month: 12,
         has_adjustment_period: false,
     };
-    let refused = open_fiscal_year(db, company, overlapping, NOW.to_owned())
+    let refused = open_fiscal_year(db, company, overlapping, NOW.to_owned(), &person())
         .await
         .expect_err("overlapping spans refuse");
     assert!(
@@ -530,7 +588,7 @@ async fn lifecycle_and_opening_rules(db: &dyn Database) {
         start_month: 7,
         has_adjustment_period: true,
     };
-    open_fiscal_year(db, company, july, NOW.to_owned())
+    open_fiscal_year(db, company, july, NOW.to_owned(), &person())
         .await
         .expect("open the July-start year");
     let july_periods = fiscal_year_periods(db, company, 2027)
@@ -557,19 +615,19 @@ async fn lifecycle_and_opening_rules(db: &dyn Database) {
 async fn soft_close_is_human_only(db: &dyn Database) {
     let company = SOFT_CLOSE_COMPANY;
     let journal = setup(db, company).await;
-    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
 
     assert_eq!(
-        soft_close_period(db, company, "2026-03", &agent(), NOW.to_owned()).await,
+        soft_close_period(db, company, "2026-03", NOW.to_owned(), &agent()).await,
         Err(AccountsError::HumanOnly {
             action: "soft_close_period".to_owned()
         })
     );
 
     assert_eq!(
-        soft_close_period(db, company, "2026-03", &person(), NOW.to_owned())
+        soft_close_period(db, company, "2026-03", NOW.to_owned(), &person())
             .await
             .expect("a person soft-closes"),
         PeriodState::SoftClosed
@@ -581,14 +639,15 @@ async fn soft_close_is_human_only(db: &dyn Database) {
         PeriodState::SoftClosed
     );
 
-    let payload = last_audit_payload(db, company).await;
-    assert!(payload.contains("action=soft-close-period"), "{payload}");
-    assert!(payload.contains("period=2026-03"), "{payload}");
-    assert!(payload.contains("actor=person:owner-1"), "{payload}");
+    let event = last_audit_event(db, company).await;
+    assert_eq!(event.command, "period.soft_close", "{event:?}");
+    assert_eq!(event.outcome, Outcome::Allowed, "{event:?}");
+    assert_eq!(event.objects, ["2026-03"], "{event:?}");
+    assert_eq!(event.actor, actor(true), "{event:?}");
 
     // Idempotent: soft-closing a soft-closed period changes nothing.
     assert_eq!(
-        soft_close_period(db, company, "2026-03", &person(), NOW.to_owned())
+        soft_close_period(db, company, "2026-03", NOW.to_owned(), &person())
             .await
             .expect("soft close is idempotent"),
         PeriodState::SoftClosed
@@ -602,13 +661,13 @@ async fn soft_close_is_human_only(db: &dyn Database) {
         &journal,
         &CloseCheckRegistry::new(),
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("close the soft-closed period");
     assert_eq!(
-        soft_close_period(db, company, "2026-03", &person(), NOW.to_owned()).await,
+        soft_close_period(db, company, "2026-03", NOW.to_owned(), &person()).await,
         Err(AccountsError::PeriodStateInvalid {
             period: "2026-03".to_owned(),
             from: PeriodState::Closed,
@@ -624,7 +683,7 @@ async fn soft_close_is_human_only(db: &dyn Database) {
 async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) {
     let company = CHECKS_COMPANY;
     let journal = setup(db, company).await;
-    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
 
@@ -641,8 +700,8 @@ async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) 
         &journal,
         &checks,
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect_err("an unoverridden blocked close refuses");
@@ -684,8 +743,8 @@ async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) 
         &journal,
         &checks,
         Some("controller reviewed the open FX position"),
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("an overridden close lands");
@@ -695,12 +754,14 @@ async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) 
             .expect("state after the override"),
         PeriodState::Closed
     );
-    let payload = last_audit_payload(db, company).await;
-    assert!(payload.contains("action=close-period"), "{payload}");
-    assert!(payload.contains("override=1"), "{payload}");
-    assert!(
-        payload.contains("reason=controller reviewed the open FX position"),
-        "{payload}"
+    let event = last_audit_event(db, company).await;
+    assert_eq!(event.command, "period.close", "{event:?}");
+    assert_eq!(event.outcome, Outcome::Allowed, "{event:?}");
+    assert_eq!(event.objects, ["2026-03"], "{event:?}");
+    assert_eq!(
+        event.reason.as_deref(),
+        Some("controller reviewed the open FX position"),
+        "the override reason rides the event, not just its hash: {event:?}"
     );
 
     // Closing a closed period is a no-op: same answer, nothing written.
@@ -714,8 +775,8 @@ async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) 
             &journal,
             &checks,
             None,
+            NOW.to_owned(),
             &person(),
-            NOW.to_owned()
         )
         .await
         .expect("closing a closed period is a no-op"),
@@ -729,10 +790,11 @@ async fn close_gathers_every_check_and_overrides_with_reason(db: &dyn Database) 
 /// nobody opened) refuses everyone — and every refusal rolls the whole
 /// batch back, so the audit chain and the gapless numbering never move
 /// for a refused post.
+#[allow(clippy::too_many_lines)]
 async fn posting_respects_period_states(db: &dyn Database) {
     let company = POSTING_COMPANY;
     let journal = setup(db, company).await;
-    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
 
@@ -741,6 +803,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
         .post(
             db,
             &entry(company, "e1", "2026-03-10", None, false, &agent(), sale),
+            &person(),
         )
         .await
         .expect("an agent posts into an open period");
@@ -749,12 +812,13 @@ async fn posting_respects_period_states(db: &dyn Database) {
         .post(
             db,
             &entry(company, "e2", "2026-03-11", None, true, &person(), sale),
+            &person(),
         )
         .await
         .expect("a person posts into an open period");
     assert_eq!(second.number, 2);
 
-    soft_close_period(db, company, "2026-03", &person(), NOW.to_owned())
+    soft_close_period(db, company, "2026-03", NOW.to_owned(), &person())
         .await
         .expect("soft-close the period");
 
@@ -762,6 +826,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
         .post(
             db,
             &entry(company, "e3", "2026-03-12", None, false, &agent(), sale),
+            &person(),
         )
         .await;
     assert!(
@@ -773,6 +838,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
         .post(
             db,
             &entry(company, "e3", "2026-03-12", None, true, &person(), sale),
+            &person(),
         )
         .await
         .expect("a person still posts into a soft-closed period");
@@ -785,8 +851,8 @@ async fn posting_respects_period_states(db: &dyn Database) {
         &journal,
         &CloseCheckRegistry::new(),
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("hard-close the period");
@@ -799,6 +865,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
             .post(
                 db,
                 &entry(company, "e4", "2026-03-20", None, human, &actor, sale),
+                &person(),
             )
             .await;
         assert!(refused.is_err(), "a closed period refuses the {label}");
@@ -809,6 +876,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
         .post(
             db,
             &entry(company, "e5", "2026-04-02", None, true, &person(), sale),
+            &person(),
         )
         .await
         .expect("the next open period still posts");
@@ -830,6 +898,7 @@ async fn posting_respects_period_states(db: &dyn Database) {
                 &person(),
                 sale,
             ),
+            &person(),
         )
         .await;
     assert!(adjustment.is_err(), "a period nobody opened refuses");
@@ -856,10 +925,11 @@ async fn posting_balances_read_back(journal: &DemoJournal, db: &dyn Database, co
 /// an open period is not reopenable, a closed one reopens and audits
 /// the reason, posting works again, and a period nobody opened fails
 /// the in-batch guard rather than materializing.
+#[allow(clippy::too_many_lines)]
 async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
     let company = REOPEN_COMPANY;
     let journal = setup(db, company).await;
-    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
 
@@ -869,8 +939,8 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
             company,
             "2026-02",
             "fix the invoice",
+            NOW.to_owned(),
             &agent(),
-            NOW.to_owned()
         )
         .await,
         Err(AccountsError::HumanOnly {
@@ -878,11 +948,11 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
         })
     );
     assert_eq!(
-        reopen_period(db, company, "2026-02", "", &person(), NOW.to_owned()).await,
+        reopen_period(db, company, "2026-02", "", NOW.to_owned(), &person()).await,
         Err(AccountsError::ReasonRequired)
     );
     assert_eq!(
-        reopen_period(db, company, "2026-02", "   ", &person(), NOW.to_owned()).await,
+        reopen_period(db, company, "2026-02", "   ", NOW.to_owned(), &person()).await,
         Err(AccountsError::ReasonRequired)
     );
 
@@ -893,8 +963,8 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
             company,
             "2026-02",
             "late invoice",
+            NOW.to_owned(),
             &person(),
-            NOW.to_owned()
         )
         .await,
         Err(AccountsError::PeriodStateInvalid {
@@ -911,8 +981,8 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
         &journal,
         &CloseCheckRegistry::new(),
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("close February");
@@ -923,19 +993,21 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
             company,
             "2026-02",
             "  late supplier invoice arrived  ",
+            NOW.to_owned(),
             &person(),
-            NOW.to_owned()
         )
         .await
         .expect("a person reopens with a reason"),
         PeriodState::Open
     );
-    let payload = last_audit_payload(db, company).await;
-    assert!(payload.contains("action=reopen-period"), "{payload}");
-    assert!(payload.contains("period=2026-02"), "{payload}");
-    assert!(
-        payload.contains("reason=late supplier invoice arrived"),
-        "the audited reason is the trimmed one: {payload}"
+    let event = last_audit_event(db, company).await;
+    assert_eq!(event.command, "period.reopen", "{event:?}");
+    assert_eq!(event.outcome, Outcome::Allowed, "{event:?}");
+    assert_eq!(event.objects, ["2026-02"], "{event:?}");
+    assert_eq!(
+        event.reason.as_deref(),
+        Some("late supplier invoice arrived"),
+        "the audited reason is the trimmed one: {event:?}"
     );
 
     let posted = journal
@@ -950,13 +1022,14 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
                 &person(),
                 &[("1010", 12_000), ("2000", -12_000)],
             ),
+            &person(),
         )
         .await
         .expect("posting works again after the reopen");
     assert_eq!(posted.number, 1);
 
     // Reopening a period with no row fails the in-batch guard.
-    let unknown = reopen_period(db, company, "2031-01", "probe", &person(), NOW.to_owned()).await;
+    let unknown = reopen_period(db, company, "2031-01", "probe", NOW.to_owned(), &person()).await;
     assert!(
         matches!(unknown, Err(AccountsError::Database(_))),
         "an unopened period fails the guard: {unknown:?}"
@@ -972,7 +1045,7 @@ async fn reopen_is_human_reasoned_and_audited(db: &dyn Database) {
 async fn year_end_close_end_to_end(db: &dyn Database) {
     let company = YEAR_END_COMPANY;
     let journal = setup(db, company).await;
-    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2026), NOW.to_owned(), &person())
         .await
         .expect("open fiscal 2026");
 
@@ -990,6 +1063,7 @@ async fn year_end_close_end_to_end(db: &dyn Database) {
                 &person(),
                 &[("1010", 100_000), ("2000", -100_000)],
             ),
+            &person(),
         )
         .await
         .expect("post the sale");
@@ -1005,6 +1079,7 @@ async fn year_end_close_end_to_end(db: &dyn Database) {
                 &person(),
                 &[("3000", 25_000), ("1010", -25_000)],
             ),
+            &person(),
         )
         .await
         .expect("post the costs");
@@ -1032,8 +1107,8 @@ async fn year_end_must_be_ready(
             journal,
             &CloseCheckRegistry::new(),
             None,
-            &person(),
             NOW.to_owned(),
+            &person(),
         )
         .await
         .unwrap_or_else(|err| panic!("close 2026-{month:02}: {err}"));
@@ -1048,8 +1123,8 @@ async fn year_end_must_be_ready(
             journal,
             &CloseCheckRegistry::new(),
             None,
+            NOW.to_owned(),
             &person(),
-            NOW.to_owned()
         )
         .await,
         Err(AccountsError::NextFiscalYearMissing { label: 2027 })
@@ -1060,7 +1135,7 @@ async fn year_end_must_be_ready(
     let mut checks = CloseCheckRegistry::new();
     checks.register(Box::new(DraftEntriesCloseCheck));
     checks.register(Box::new(FxStubCheck { pending: 3 }));
-    open_fiscal_year(db, company, calendar_year(2027), NOW.to_owned())
+    open_fiscal_year(db, company, calendar_year(2027), NOW.to_owned(), &person())
         .await
         .expect("open the next fiscal year");
     let refused = close_fiscal_year(
@@ -1070,8 +1145,8 @@ async fn year_end_must_be_ready(
         journal,
         &checks,
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect_err("the FX check blocks the year-end close");
@@ -1112,8 +1187,8 @@ async fn year_end_lands_and_carries(
         journal,
         checks,
         Some("positions reviewed against year-end rates"),
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("the overridden year-end close lands");
@@ -1229,8 +1304,8 @@ async fn year_end_rerun_writes_nothing(
         journal,
         checks,
         None,
-        &person(),
         NOW.to_owned(),
+        &person(),
     )
     .await
     .expect("the rerun returns the stored report");
@@ -1238,22 +1313,18 @@ async fn year_end_rerun_writes_nothing(
     assert_eq!(entry_count(db, company).await, entries_before);
     assert_eq!(head_seq(db, company).await, seq_before);
 
-    // The year-end payload audited the override too.
-    let payloads = db
-        .query(&Statement::with_values(
-            "SELECT payload FROM audit_event WHERE company_id = ? AND payload LIKE '%close-fiscal-year%'".to_owned(),
-            vec![SeaValue::from(company)],
-        ))
-        .await
-        .expect("read the year-end audit events");
-    let text = payloads
-        .first()
-        .and_then(|row| row.get::<String>("payload"))
-        .expect("the year-end close audited");
-    assert!(text.contains("action=close-fiscal-year"), "{text}");
-    assert!(text.contains("opening-balances=2"), "{text}");
-    assert!(
-        text.contains("reason=positions reviewed against year-end rates"),
-        "{text}"
+    // The year-end event audited the override too.
+    let closes = audit_events(db, company, "fiscal_year.close").await;
+    let event = closes.first().expect("the year-end close audited");
+    assert_eq!(event.outcome, Outcome::Allowed, "{event:?}");
+    assert_eq!(
+        event.objects,
+        vec!["2026".to_owned(), report.closing_entry.entry_id.clone()],
+        "the year and the closing entry it posted: {event:?}"
+    );
+    assert_eq!(
+        event.reason.as_deref(),
+        Some("positions reviewed against year-end rates"),
+        "{event:?}"
     );
 }

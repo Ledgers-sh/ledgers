@@ -7,7 +7,7 @@
 //! does not re-narrate):
 //!
 //! ```sql
-//! -- 1. numbering: provision (idempotent), bump, insert reading the counter
+//! -- 1. numbering: provision (idempotent), bump, insert the literal number
 //! -- 2. the entry's lines
 //! -- 3. journal-ownership guard (the journal belongs to the posting company)
 //! -- 4. reversal-target guard, when the entry reverses one (same company)
@@ -34,6 +34,7 @@
 
 use crate::entry::{Entry, JournalError, Line, iso_date_string};
 use cratefield_core::{Database, DbError, Statement};
+use ledgers_audit::{AuditConfig, AuditContext, AuditRecord, Outcome, append_statements};
 use ledgers_db::chain;
 use ledgers_db::guard;
 use ledgers_db::limit;
@@ -49,6 +50,9 @@ use time::{Date, Month, OffsetDateTime};
 
 /// The outbox topic a posted entry announces itself on.
 pub const TOPIC_ENTRY_POSTED: &str = "journal.entry.posted";
+
+/// The audited command name a post records under.
+const COMMAND_POST: &str = "journal.post_entry";
 
 /// The usage meter the port-level daily allowance is charged under. The
 /// same name `ledgers_db::suite` posts under.
@@ -241,15 +245,16 @@ pub struct PostedEntry {
 /// commit without a separate read.
 ///
 /// # Errors
-/// [`DbError`] when the head read or counter read fails, or a date is not ISO
-/// `"YYYY-MM-DD"`.
+/// [`DbError`] when the head read or counter read fails, a date is not ISO
+/// `"YYYY-MM-DD"`, or the audit event cannot be canonicalised.
 #[doc(hidden)]
 pub async fn plan_post_batch(
     db: &dyn Database,
     raw: &RawEntry,
     ctx: &PostContext,
+    audit: &AuditContext,
 ) -> Result<(Vec<Statement>, i64), DbError> {
-    plan_post_batch_with(db, raw, ctx, &PostOptions::default()).await
+    plan_post_batch_with(db, raw, ctx, &PostOptions::default(), audit).await
 }
 
 /// [`plan_post_batch`] with the port-level [`PostOptions`] applied: the
@@ -265,6 +270,7 @@ pub async fn plan_post_batch_with(
     raw: &RawEntry,
     ctx: &PostContext,
     options: &PostOptions,
+    audit: &AuditContext,
 ) -> Result<(Vec<Statement>, i64), DbError> {
     let head = chain::read_head(db, &raw.company_id).await?;
 
@@ -328,20 +334,29 @@ pub async fn plan_post_batch_with(
         .transpose()?;
     statements.extend(guard_statements(raw, ctx, &posting_period, options, day));
 
-    // 9. The audit append: claims head.seq + 1 against this batch's
-    //    work. A stale head takes a unique violation; retry re-plans.
-    //    The hash is the sequencing placeholder — the real digest is
-    //    `ledgers-audit`'s to compute; here only linkage matters (the
-    //    same stance the guard suite's demo takes).
-    let seq = head.seq + 1;
-    let hash = format!("pending:{seq}:{}", ctx.entry_id);
-    statements.push(chain::append_statement(
-        &raw.company_id,
-        &head,
-        &hash,
-        &ctx.entry_id,
-        &ctx.recorded_at,
-    ));
+    // 9. The audit event: a real `ledgers-audit` record of the post —
+    //    who acted, the entry it touched, the input's hash — appended
+    //    at head.seq + 1 in this same batch, so it exists exactly when
+    //    the posting does. A stale head takes a unique violation;
+    //    retry re-plans.
+    statements.extend(
+        append_statements(
+            &raw.company_id,
+            &head,
+            audit,
+            &AuditRecord::from_input(
+                COMMAND_POST,
+                &entry_input(raw, expected_number),
+                Outcome::Allowed,
+                vec![ctx.entry_id.clone(), raw.journal_id.clone()],
+                None,
+            ),
+            &ctx.recorded_at,
+            &AuditConfig::default(),
+        )
+        .map_err(|err| DbError::Query(err.to_string()))?
+        .statements,
+    );
 
     // 10. The outbox enqueue: the event exists exactly when the posting
     //     commits. The payload names the entry and its number.
@@ -359,6 +374,25 @@ pub async fn plan_post_batch_with(
     statements.push(guard::release_statement(&counter_guard_key));
 
     Ok((statements, expected_number))
+}
+
+/// The audited command's input: the entry as storage saw it, number
+/// included. Only the hash of this is stored (`AuditRecord::from_input`),
+/// never the value — an entry's description and memos are data that need
+/// not be replicated into the audit log.
+fn entry_input(raw: &RawEntry, number: i64) -> serde_json::Value {
+    serde_json::json!({
+        "journalId": raw.journal_id,
+        "number": number,
+        "documentDate": raw.document_date,
+        "postingDate": raw.posting_date,
+        "taxPointDate": raw.tax_point_date,
+        "baseCurrency": raw.base_currency,
+        "description": raw.description,
+        "sourceDocuments": raw.source_documents,
+        "reverses": raw.reverses,
+        "lines": raw.lines.len(),
+    })
 }
 
 /// The `journal_entry` insert: uses a literal number computed before the
@@ -511,9 +545,10 @@ pub async fn post_entry(
     ctx: &PostContext,
     policy: RetryPolicy,
     sleep: impl FnMut(Duration),
+    audit: &AuditContext,
 ) -> Result<PostedEntry, JournalError> {
     let raw = RawEntry::from_entry(entry)?;
-    post_raw_entry(db, &raw, ctx, policy, sleep).await
+    post_raw_entry(db, &raw, ctx, policy, sleep, audit).await
 }
 
 /// Posts one **raw** entry: the same batch, no validation in front —
@@ -534,8 +569,9 @@ pub async fn post_raw_entry(
     ctx: &PostContext,
     policy: RetryPolicy,
     sleep: impl FnMut(Duration),
+    audit: &AuditContext,
 ) -> Result<PostedEntry, JournalError> {
-    post_raw_entry_with(db, raw, ctx, policy, sleep, &PostOptions::default()).await
+    post_raw_entry_with(db, raw, ctx, policy, sleep, &PostOptions::default(), audit).await
 }
 
 /// [`post_raw_entry`] with the port-level [`PostOptions`]: the same
@@ -557,6 +593,7 @@ pub async fn post_raw_entry_with(
     policy: RetryPolicy,
     sleep: impl FnMut(Duration),
     options: &PostOptions,
+    audit: &AuditContext,
 ) -> Result<PostedEntry, JournalError> {
     // Idempotent resubmit: checked inside each attempt's planning. If the
     // entry already exists and belongs to this journal/fiscal year, we return
@@ -591,6 +628,7 @@ pub async fn post_raw_entry_with(
                     {
                         // Safe idempotent resubmit: stash the entry and return
                         // an empty statement list (batch_atomic on empty is Ok).
+                        // No audit event is appended: the original post has one.
                         *se.lock().unwrap() = Some(existing_entry);
                         return Ok(Vec::new());
                     }
@@ -602,7 +640,7 @@ pub async fn post_raw_entry_with(
                 }
 
                 // Not an idempotent resubmit: plan the batch normally.
-                let (stmts, num) = plan_post_batch_with(db, raw, ctx, options).await?;
+                let (stmts, num) = plan_post_batch_with(db, raw, ctx, options, audit).await?;
                 *en.lock().unwrap() = Some(num);
                 Ok(stmts)
             }

@@ -28,6 +28,8 @@ fn idempotent_resubmit_returns_same_entry_and_posts_nothing_new() {
     for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
+            // The fixtures are audited too: count the chain from here.
+            let setup_events = count_chain_events(kit.db.as_ref(), COMPANY_ID).await;
             let entry = the_entry(JOURNAL_1);
             let ctx = test_ctx(
                 "01ENTRYIDEM0000000000000000000",
@@ -35,14 +37,28 @@ fn idempotent_resubmit_returns_same_entry_and_posts_nothing_new() {
             );
             let policy = RetryPolicy::default();
 
-            let first = post_entry(kit.db.as_ref(), &entry, &ctx, policy, |_| {})
-                .await
-                .expect("post");
+            let first = post_entry(
+                kit.db.as_ref(),
+                &entry,
+                &ctx,
+                policy,
+                |_| {},
+                &common::person(),
+            )
+            .await
+            .expect("post");
 
             for _ in 0..3 {
-                let result = post_entry(kit.db.as_ref(), &entry, &ctx, policy, |_| {})
-                    .await
-                    .expect("resubmit");
+                let result = post_entry(
+                    kit.db.as_ref(),
+                    &entry,
+                    &ctx,
+                    policy,
+                    |_| {},
+                    &common::person(),
+                )
+                .await
+                .expect("resubmit");
                 assert_eq!(result, first);
             }
 
@@ -56,7 +72,7 @@ fn idempotent_resubmit_returns_same_entry_and_posts_nothing_new() {
             );
             assert_eq!(
                 pollster::block_on(count_chain_events(kit.db.as_ref(), COMPANY_ID)),
-                1
+                setup_events + 1
             );
             assert_eq!(pollster::block_on(count_outbox(kit.db.as_ref())), 1);
         });
@@ -80,6 +96,7 @@ fn entry_id_already_used_in_different_journal_is_rejected() {
                 &ctx1,
                 policy,
                 |_| {},
+                &common::person(),
             )
             .await
             .expect("post");
@@ -90,6 +107,7 @@ fn entry_id_already_used_in_different_journal_is_rejected() {
                 &ctx2,
                 policy,
                 |_| {},
+                &common::person(),
             )
             .await
             .expect_err("cross-journal reuse fails");
@@ -120,7 +138,7 @@ fn a_failure_after_commit_still_reports_the_number() {
                 "01ENTRY_FAIL_AFTER_COMMIT_0001",
                 "01OUTBOX_FAIL_AFTER_COMMIT_001",
             );
-            let r1 = post_entry(&w1, &entry, &ctx1, policy, |_| {})
+            let r1 = post_entry(&w1, &entry, &ctx1, policy, |_| {}, &common::person())
                 .await
                 .expect("post");
             assert_eq!(r1.number, 1);
@@ -131,7 +149,7 @@ fn a_failure_after_commit_still_reports_the_number() {
                 "01ENTRY_FAIL_AFTER_COMMIT_0002",
                 "01OUTBOX_FAIL_AFTER_COMMIT_002",
             );
-            let r2 = post_entry(&w2, &entry, &ctx2, policy, |_| {})
+            let r2 = post_entry(&w2, &entry, &ctx2, policy, |_| {}, &common::person())
                 .await
                 .expect("second");
             assert_eq!(r2.number, 2);
@@ -144,6 +162,8 @@ fn an_ambiguous_commit_resubmitted_with_the_same_id_returns_the_original() {
     for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
+            // The fixtures are audited too: count the chain from here.
+            let setup_events = count_chain_events(kit.db.as_ref(), COMPANY_ID).await;
             let entry = the_entry(JOURNAL_1);
             let ctx = test_ctx(
                 "01ENTRY_AMBIGUOUS_COMMIT_000001",
@@ -152,14 +172,21 @@ fn an_ambiguous_commit_resubmitted_with_the_same_id_returns_the_original() {
             let policy = RetryPolicy::default();
 
             let wrapper = FailureWrapper::new(kit.db.clone(), FailMode::AfterBatch);
-            let err = post_entry(&wrapper, &entry, &ctx, policy, |_| {})
+            let err = post_entry(&wrapper, &entry, &ctx, policy, |_| {}, &common::person())
                 .await
                 .expect_err("fails");
             assert!(matches!(err, JournalError::Database(_)));
 
-            let result = post_entry(kit.db.as_ref(), &entry, &ctx, policy, |_| {})
-                .await
-                .expect("resubmit");
+            let result = post_entry(
+                kit.db.as_ref(),
+                &entry,
+                &ctx,
+                policy,
+                |_| {},
+                &common::person(),
+            )
+            .await
+            .expect("resubmit");
             assert_eq!(result.number, 1);
             assert_eq!(result.entry_id, ctx.entry_id);
 
@@ -173,7 +200,7 @@ fn an_ambiguous_commit_resubmitted_with_the_same_id_returns_the_original() {
             );
             assert_eq!(
                 pollster::block_on(count_chain_events(kit.db.as_ref(), COMPANY_ID)),
-                1
+                setup_events + 1
             );
             assert_eq!(pollster::block_on(count_outbox(kit.db.as_ref())), 1);
         });
@@ -301,6 +328,7 @@ async fn set_up_journal(db: &Arc<dyn Database>, journal_id: &str) {
         },
         journal_id,
         NOW,
+        &common::person(),
     )
     .await
     .expect("create journal");

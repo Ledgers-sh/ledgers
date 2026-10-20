@@ -73,6 +73,7 @@ pub mod mapping;
 pub mod module;
 pub mod period;
 pub mod posting;
+pub mod registry;
 pub mod store;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
@@ -94,9 +95,10 @@ pub use mapping::{SKR03_MAPPING_TOML, SKR04_MAPPING_TOML};
 pub use module::LedgerModule;
 pub use period::{
     Actor, PeriodState, YearEndReport, close_fiscal_year, close_period, fiscal_year,
-    fiscal_year_periods, open_fiscal_year, period_state, reopen_period, soft_close_period,
+    fiscal_year_periods, open_fiscal_year, period_state, reopen_period, soft_close_period, subject,
 };
 pub use posting::{PostContext, PostedEntry, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry};
+pub use registry::{COMMANDS, CommandKind, CommandSpec, EXEMPT};
 
 /// The generic small-business chart (`templates/generic-sme.toml`).
 pub const GENERIC_SME_TOML: &str = include_str!(concat!(

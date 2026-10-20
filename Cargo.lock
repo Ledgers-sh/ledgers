@@ -928,6 +928,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-audit"
+version = "0.1.0"
+dependencies = [
+ "cratefield-core",
+ "cratefield-testing",
+ "ledgers-db",
+ "pollster",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "ledgers-db"
 version = "0.1.0"
 dependencies = [
@@ -945,13 +960,13 @@ version = "0.1.0"
 dependencies = [
  "cratefield-core",
  "cratefield-testing",
+ "ledgers-audit",
  "ledgers-db",
  "ledgers-money",
  "pollster",
  "sea-query",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "thiserror",
  "time",
  "toml",

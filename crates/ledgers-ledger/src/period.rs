@@ -27,24 +27,24 @@
 //!
 //! Close and reopen are **human-only** ([`Actor`]; an agent key gets
 //! [`AccountsError::HumanOnly`]) — enforced here, in the library, so no
-//! adapter can route around it. A reopen needs a reason, audited; a
-//! close blocked by registered checks can be forced by a person with an
-//! override reason, audited with it (see [`crate::close`]).
+//! adapter can route around it. The actor comes from the
+//! [`AuditContext`] the caller threads in, so what the gate checks and
+//! what the audit event records are the same identity. A refusal is not
+//! silent: it writes exactly one `denied` event before returning the
+//! error. A reopen needs a reason, audited; a close blocked by
+//! registered checks can be forced by a person with an override reason,
+//! audited with it (see [`crate::close`]).
 //!
-//! # The audit chain (interim)
+//! # The audit chain
 //!
-//! Each transition appends one event to ledgers-db's `audit_event`
-//! spine: `seq = head.seq + 1`, `prev_hash` linked, and `hash` =
-//! [`audit_hash`] — lowercase-hex SHA-256 over
-//! `"ledgers-audit-v1|{seq}|{prev_hash}|{payload}|{created_at}"`.
-//! Payloads are single-line `key=value` text ending with the reason
-//! when one applies. **This scheme is interim**: `ledgers-audit` (#9)
-//! owns hashing and verification, and may adopt this exact recipe or
-//! migrate it — the statement of record for migrating is: hash the
-//! pipe-joined five-field string with the `ledgers-audit-v1` tag,
-//! seq-carrying, prev-hash-chaining, payload and created-at bound from
-//! code; everything needed to re-derive or re-hash lives in the stored
-//! row.
+//! Each transition appends one `ledgers-audit` event to the
+//! `audit_event` spine in the **same batch as the transition it
+//! records** — so a period's state and the claim that it changed never
+//! disagree. The event names the command (`period.close`,
+//! `fiscal_year.close`, …), hashes the input rather than storing it,
+//! and carries the objects touched and the reason when one applies.
+//! Hashing, canonical JSON and the offline verifier are
+//! `ledgers-audit`'s; this crate only decides what the event says.
 //!
 //! # The year-end close
 //!
@@ -67,13 +67,13 @@ use crate::fiscal::{self, FiscalYear, FiscalYearSpec, RETAINED_EARNINGS_TAG};
 use crate::journal_port::{Journal, NewEntry, NewEntryLine, PostedEntry};
 use crate::store;
 use cratefield_core::{Database, DbError, Statement};
+use ledgers_audit::{AuditConfig, AuditContext, AuditRecord, Outcome, append_statements, record};
 use ledgers_db::chain;
 use ledgers_db::guard;
 use ledgers_db::period as db_period;
 use ledgers_db::retry::{self, RetryPolicy};
 use ledgers_money::{Amount, Currency};
 use sea_query::Value as SeaValue;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -138,37 +138,20 @@ impl std::str::FromStr for PeriodState {
 }
 
 /// Who is acting — the policy input every human-only transition checks.
-/// Server-side, always: an agent key never becomes a person by asking
-/// differently (docs/PLAN.md §5).
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Actor {
-    /// A person, identified by their user id.
-    Person {
-        /// The person's id.
-        id: String,
-    },
-    /// An agent key.
-    Agent {
-        /// The key's id.
-        key_id: String,
-    },
-}
+/// Re-exported from `ledgers-audit`, which owns the recorded form: a
+/// `person` with a `person_id`, or an `agent` with a `key_id` and the
+/// tier it was granted. One type, so what the gate checks and what the
+/// chain records are the same thing.
+pub use ledgers_audit::Actor;
 
-impl Actor {
-    /// Whether a person (not an agent key) is acting — the gate for
-    /// close, reopen and year-end close.
-    #[must_use]
-    pub fn is_human(&self) -> bool {
-        matches!(self, Self::Person { .. })
-    }
-
-    /// The audit subject label: `"person:{id}"` or `"agent:{key_id}"`.
-    #[must_use]
-    pub fn subject(&self) -> String {
-        match self {
-            Self::Person { id } => format!("person:{id}"),
-            Self::Agent { key_id } => format!("agent:{key_id}"),
-        }
+/// The subject label the daily allowance is charged under:
+/// `"person:{person_id}"` or `"agent:{key_id}"` — the human-readable
+/// side of the actor the audit event already names in full.
+#[must_use]
+pub fn subject(actor: &Actor) -> String {
+    match actor {
+        Actor::Person { person_id } => format!("person:{person_id}"),
+        Actor::Agent { key_id, .. } => format!("agent:{key_id}"),
     }
 }
 
@@ -201,29 +184,42 @@ pub fn validate_reason(reason: &str) -> Result<&str, AccountsError> {
     Ok(trimmed)
 }
 
-// ==== The interim audit hash ====
-
-/// The interim audit-event hash: lowercase hex SHA-256 over
-/// `"ledgers-audit-v1|{seq}|{prev_hash}|{payload}|{created_at}"`. See
-/// the module docs for the precise scheme `ledgers-audit` (#9) adopts
-/// or migrates; the inputs are exactly the row's own columns.
-fn audit_hash(seq: i64, prev_hash: &str, payload: &str, created_at: &str) -> String {
-    let input = format!("ledgers-audit-v1|{seq}|{prev_hash}|{payload}|{created_at}");
-    let digest = Sha256::digest(input.as_bytes());
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        // Writing to a String cannot fail; the result is discarded by
-        // design, not by oversight.
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex
-}
+// ==== The audit chain ====
 
 /// The library's sleep: none. Retries re-plan without backing off —
 /// the wasm-clean rule (ADR 0004) is that the library never sleeps or
 /// blocks; callers that can block pass their own sleeper.
 fn no_sleep(_: Duration) {}
+
+/// The one `denied` event a human-only refusal owes the chain.
+///
+/// A failure to record the refusal is returned in its place: an
+/// unaudited denial is the worse outcome, and a command that "probably
+/// denied" is not a decision a caller can rely on.
+async fn deny(
+    db: &dyn Database,
+    company_id: &str,
+    audit: &AuditContext,
+    command: &str,
+    input: serde_json::Value,
+    objects: Vec<String>,
+    at: &str,
+) -> Result<(), AccountsError> {
+    record(
+        db,
+        &AuditConfig::default(),
+        company_id,
+        audit,
+        &AuditRecord::from_input(command, &input, Outcome::Denied, objects, None)
+            .with_reason("human-only action"),
+        at,
+        RetryPolicy::default(),
+        no_sleep,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|err| AccountsError::Database(DbError::Query(err.to_string())))
+}
 
 // ==== Store helpers (raw statements, suite.rs style) ====
 
@@ -386,16 +382,18 @@ async fn count_span_overlaps(
         .unwrap_or_default())
 }
 
-/// Runs one guarded status transition with its audit append: guard
+/// Runs one guarded status transition with its audit event: guard
 /// probe → upsert → probe release → chain append, re-reading the head
 /// inside the build closure so a retry sequels onto a fresh chain.
+#[allow(clippy::too_many_arguments)]
 async fn transition_with_audit(
     db: &dyn Database,
     company_id: &str,
     probe: Statement,
     probe_key: String,
     set_status: Statement,
-    payload: &str,
+    audit: &AuditContext,
+    record: &AuditRecord,
     now: &str,
 ) -> Result<(), AccountsError> {
     retry::run_batch_with_retry(
@@ -404,16 +402,25 @@ async fn transition_with_audit(
         || {
             let (probe, probe_key, set_status) =
                 (probe.clone(), probe_key.clone(), set_status.clone());
+            let (audit, record) = (audit.clone(), record.clone());
             async move {
                 let head = chain::read_head(db, company_id).await?;
-                let seq = head.seq + 1;
-                let hash = audit_hash(seq, &head.hash, payload, now);
-                Ok(vec![
+                let appended = append_statements(
+                    company_id,
+                    &head,
+                    &audit,
+                    &record,
+                    now,
+                    &AuditConfig::default(),
+                )
+                .map_err(|err| DbError::Query(err.to_string()))?;
+                let mut statements = vec![
                     probe.clone(),
                     set_status.clone(),
                     guard::release_statement(&probe_key),
-                    chain::append_statement(company_id, &head, &hash, payload, now),
-                ])
+                ];
+                statements.extend(appended.statements);
+                Ok(statements)
             }
         },
         no_sleep,
@@ -577,7 +584,8 @@ impl YearEndReport {
 /// Opens a fiscal year: validates the spec, refuses a duplicate label
 /// or an overlapping span (pre-reads for the message; the batch's
 /// overlap guard is the enforcement), then commits ONE batch — overlap
-/// guard → `fiscal_year` insert → every period row materialized `open`.
+/// guard → `fiscal_year` insert → every period row materialized `open`
+/// → the `fiscal_year.open` audit event.
 /// Materializing is what makes posting possible at all: a missing
 /// period row is closed by the posting guard's fail-closed design, so
 /// [`open_fiscal_year`] is the only thing that ever opens a period.
@@ -593,6 +601,7 @@ pub async fn open_fiscal_year(
     company_id: &str,
     spec: FiscalYearSpec,
     now: String,
+    audit: &AuditContext,
 ) -> Result<FiscalYear, AccountsError> {
     spec.validate()?;
     if read_fiscal_year_row(db, company_id, spec.label)
@@ -622,7 +631,7 @@ pub async fn open_fiscal_year(
         closing_entry_id: None,
         year_end_report: None,
         created_at: now.clone(),
-        updated_at: now,
+        updated_at: now.clone(),
     };
     let periods = fiscal::period_ids(&spec);
     let probe_key = guard::guard_key(&["fy-no-overlap", company_id, &spec.label.to_string()]);
@@ -654,12 +663,35 @@ pub async fn open_fiscal_year(
                 insert.clone(),
                 probe_key.clone(),
             );
+            let audited = AuditRecord::from_input(
+                "fiscal_year.open",
+                &serde_json::json!({
+                    "label": spec.label,
+                    "startMonth": spec.start_month,
+                    "hasAdjustmentPeriod": spec.has_adjustment_period,
+                }),
+                Outcome::Allowed,
+                vec![spec.label.to_string()],
+                None,
+            );
+            let (audit, now) = (audit.clone(), now.clone());
             async move {
-                let mut statements = Vec::with_capacity(3 + open_statements.len());
+                let head = chain::read_head(db, company_id).await?;
+                let appended = append_statements(
+                    company_id,
+                    &head,
+                    &audit,
+                    &audited,
+                    &now,
+                    &AuditConfig::default(),
+                )
+                .map_err(|err| DbError::Query(err.to_string()))?;
+                let mut statements = Vec::with_capacity(4 + open_statements.len());
                 statements.push(probe.clone());
                 statements.push(insert.clone());
                 statements.extend(open_statements.iter().cloned());
                 statements.push(guard::release_statement(&probe_key));
+                statements.extend(appended.statements);
                 Ok(statements)
             }
         },
@@ -671,9 +703,13 @@ pub async fn open_fiscal_year(
 
 /// Soft-closes one period: people may still post (the adjustment
 /// window), agent keys may not. Human-only; idempotent — soft-closing
-/// a soft-closed period returns it unchanged. One guarded batch:
-/// status must be `open` (the strict [`db_period::assert_open_statement`]
-/// probe, in-batch) → set `soft-closed` → audit append.
+/// a soft-closed period returns it unchanged (and writes no audit
+/// event, since nothing changed). One guarded batch: status must be
+/// `open` (the strict [`db_period::assert_open_statement`] probe,
+/// in-batch) → set `soft-closed` → the `period.soft_close` audit event.
+///
+/// The actor comes from the [`AuditContext`], so the gate checks and the
+/// event records are the same identity.
 ///
 /// # Errors
 ///
@@ -685,10 +721,20 @@ pub async fn soft_close_period(
     db: &dyn Database,
     company_id: &str,
     period: &str,
-    actor: &Actor,
     now: String,
+    audit: &AuditContext,
 ) -> Result<PeriodState, AccountsError> {
-    if !actor.is_human() {
+    if !audit.actor.is_person() {
+        deny(
+            db,
+            company_id,
+            audit,
+            "period.soft_close",
+            serde_json::json!({ "period": period }),
+            vec![period.to_owned()],
+            &now,
+        )
+        .await?;
         return Err(AccountsError::HumanOnly {
             action: "soft_close_period".to_owned(),
         });
@@ -705,17 +751,20 @@ pub async fn soft_close_period(
         }
     }
     let probe_key = guard::guard_key(&["period-soft-close", company_id, period]);
-    let payload = format!(
-        "action=soft-close-period company={company_id} period={period} actor={}",
-        actor.subject()
-    );
     transition_with_audit(
         db,
         company_id,
         db_period::assert_open_statement(&probe_key, company_id, period),
         probe_key,
         db_period::set_status_statement(company_id, period, db_period::STATUS_SOFT_CLOSED),
-        &payload,
+        audit,
+        &AuditRecord::from_input(
+            "period.soft_close",
+            &serde_json::json!({ "period": period }),
+            Outcome::Allowed,
+            vec![period.to_owned()],
+            None,
+        ),
         &now,
     )
     .await?;
@@ -726,10 +775,11 @@ pub async fn soft_close_period(
 /// reversals in a later period. Human-only. Every registered close
 /// check runs over the period's date range; any blocker refuses the
 /// close with the complete report unless a person supplies an override
-/// reason, which is then part of the audit payload. One guarded batch:
+/// reason, which then rides the audit event. One guarded batch:
 /// status must be `open` or `soft-closed` (the postable guard for a
-/// human — the same disjunction, in-batch) → set `closed` → audit
-/// append. Closing a closed period is a no-op returning `Closed`.
+/// human — the same disjunction, in-batch) → set `closed` → the
+/// `period.close` audit event. Closing a closed period is a no-op
+/// returning `Closed`.
 ///
 /// # Errors
 ///
@@ -746,10 +796,20 @@ pub async fn close_period(
     journal: &dyn Journal,
     checks: &CloseCheckRegistry,
     override_reason: Option<&str>,
-    actor: &Actor,
     now: String,
+    audit: &AuditContext,
 ) -> Result<PeriodState, AccountsError> {
-    if !actor.is_human() {
+    if !audit.actor.is_person() {
+        deny(
+            db,
+            company_id,
+            audit,
+            "period.close",
+            serde_json::json!({ "period": period }),
+            vec![period.to_owned()],
+            &now,
+        )
+        .await?;
         return Err(AccountsError::HumanOnly {
             action: "close_period".to_owned(),
         });
@@ -777,7 +837,7 @@ pub async fn close_period(
     .await?;
     let overridden = if blockers.is_empty() {
         Vec::new()
-    } else if let Some(_reason) = reason {
+    } else if reason.is_some() {
         blockers
     } else {
         return Err(AccountsError::CloseBlocked {
@@ -788,26 +848,24 @@ pub async fn close_period(
             },
         });
     };
-    // `overridden` is recorded in the audit payload below by count; the
-    // full list lives in the year-end report when this is one.
-    let blocker_note = if overridden.is_empty() {
-        String::new()
-    } else {
-        format!(" overridden={}", overridden.len())
-    };
 
     let probe_key = guard::guard_key(&["period-close", company_id, period]);
-    let payload = match reason {
-        Some(reason) => format!(
-            "action=close-period company={company_id} period={period} actor={}\
-             {blocker_note} override=1 reason={reason}",
-            actor.subject()
-        ),
-        None => format!(
-            "action=close-period company={company_id} period={period} actor={}{blocker_note}",
-            actor.subject()
-        ),
-    };
+    let mut audited = AuditRecord::from_input(
+        "period.close",
+        &serde_json::json!({
+            "period": period,
+            "override": reason.is_some(),
+            "overriddenBlockers": overridden.len(),
+        }),
+        Outcome::Allowed,
+        vec![period.to_owned()],
+        None,
+    );
+    // The override reason rides the event, not only its hash: it is the
+    // text a person typed to overrule a check.
+    if let Some(reason) = reason {
+        audited = audited.with_reason(reason);
+    }
     transition_with_audit(
         db,
         company_id,
@@ -817,7 +875,8 @@ pub async fn close_period(
         db_period::assert_postable_statement(&probe_key, company_id, period, true),
         probe_key,
         db_period::set_status_statement(company_id, period, db_period::STATUS_CLOSED),
-        &payload,
+        audit,
+        &audited,
         &now,
     )
     .await?;
@@ -828,8 +887,8 @@ pub async fn close_period(
 /// rule 4 counterpart that makes closure reversible by people and by
 /// nobody else. One guarded batch: status must be `soft-closed` or
 /// `closed` (in-batch; a missing row fails the guard, so a period that
-/// was never opened cannot be "reopened") → set `open` → audit append
-/// carrying the reason.
+/// was never opened cannot be "reopened") → set `open` → the
+/// `period.reopen` audit event carrying the reason.
 ///
 /// # Errors
 ///
@@ -843,10 +902,20 @@ pub async fn reopen_period(
     company_id: &str,
     period: &str,
     reason: &str,
-    actor: &Actor,
     now: String,
+    audit: &AuditContext,
 ) -> Result<PeriodState, AccountsError> {
-    if !actor.is_human() {
+    if !audit.actor.is_person() {
+        deny(
+            db,
+            company_id,
+            audit,
+            "period.reopen",
+            serde_json::json!({ "period": period }),
+            vec![period.to_owned()],
+            &now,
+        )
+        .await?;
         return Err(AccountsError::HumanOnly {
             action: "reopen_period".to_owned(),
         });
@@ -870,17 +939,21 @@ pub async fn reopen_period(
         ),
         vec![SeaValue::from(company_id), SeaValue::from(period)],
     );
-    let payload = format!(
-        "action=reopen-period company={company_id} period={period} actor={} reason={reason}",
-        actor.subject()
-    );
     transition_with_audit(
         db,
         company_id,
         probe,
         probe_key,
         db_period::set_status_statement(company_id, period, db_period::STATUS_OPEN),
-        &payload,
+        audit,
+        &AuditRecord::from_input(
+            "period.reopen",
+            &serde_json::json!({ "period": period }),
+            Outcome::Allowed,
+            vec![period.to_owned()],
+            None,
+        )
+        .with_reason(reason),
         &now,
     )
     .await?;
@@ -1054,16 +1127,17 @@ struct YearEndCommit<'a> {
 
 /// Step 8: the one batch that commits the close — `year_end_closed_at
 /// IS NULL` guard → opening-balance inserts → row stamp → last period
-/// `closed` → audit append, with the head re-read inside the build
-/// closure so a retry sequels onto a fresh chain. The guard is what
-/// makes a rerun or a concurrent second close a no-op instead of a
-/// doubled carry-forward.
+/// `closed` → the `fiscal_year.close` audit event, with the head
+/// re-read inside the build closure so a retry sequels onto a fresh
+/// chain. The guard is what makes a rerun or a concurrent second close a
+/// no-op instead of a doubled carry-forward.
 ///
 /// # Errors
 ///
 /// [`AccountsError::Conflict`] when the retry budget runs out;
 /// [`AccountsError::Database`] when the batch fails (including a
 /// second close winning the race).
+#[allow(clippy::too_many_arguments)]
 async fn commit_year_end(
     db: &dyn Database,
     company_id: &str,
@@ -1071,23 +1145,23 @@ async fn commit_year_end(
     opening: &[(String, i64)],
     reason: Option<&str>,
     now: &str,
+    audit: &AuditContext,
 ) -> Result<(), AccountsError> {
-    let payload = match reason {
-        Some(reason) => format!(
-            "action=close-fiscal-year company={company_id} label={} \
-             closing-entry={} opening-balances={} override=1 reason={reason}",
-            commit.label,
-            commit.closing_entry_id,
-            opening.len()
-        ),
-        None => format!(
-            "action=close-fiscal-year company={company_id} label={} \
-             closing-entry={} opening-balances={}",
-            commit.label,
-            commit.closing_entry_id,
-            opening.len()
-        ),
-    };
+    let mut audited = AuditRecord::from_input(
+        "fiscal_year.close",
+        &serde_json::json!({
+            "label": commit.label,
+            "closingEntryId": commit.closing_entry_id,
+            "openingBalances": opening.len(),
+            "override": reason.is_some(),
+        }),
+        Outcome::Allowed,
+        vec![commit.label.to_string(), commit.closing_entry_id.to_owned()],
+        None,
+    );
+    if let Some(reason) = reason {
+        audited = audited.with_reason(reason);
+    }
     let probe_key = guard::guard_key(&["yearend-open", company_id, &commit.label.to_string()]);
     let update = update_year_end_statement(
         company_id,
@@ -1110,18 +1184,25 @@ async fn commit_year_end(
         db,
         RetryPolicy::default(),
         || {
-            let (payload, opening_statements, probe_key, update, close_last) = (
-                payload.clone(),
+            let (opening_statements, probe_key, update, close_last) = (
                 opening_statements.clone(),
                 probe_key.clone(),
                 update.clone(),
                 close_last.clone(),
             );
+            let (audited, audit) = (audited.clone(), audit.clone());
             async move {
                 let head = chain::read_head(db, company_id).await?;
-                let seq = head.seq + 1;
-                let hash = audit_hash(seq, &head.hash, &payload, now);
-                let mut statements = Vec::with_capacity(5 + opening_statements.len());
+                let appended = append_statements(
+                    company_id,
+                    &head,
+                    &audit,
+                    &audited,
+                    now,
+                    &AuditConfig::default(),
+                )
+                .map_err(|err| DbError::Query(err.to_string()))?;
+                let mut statements = Vec::with_capacity(6 + opening_statements.len());
                 statements.push(guard::assert_statement(
                 &probe_key,
                 "(SELECT year_end_closed_at FROM fiscal_year WHERE company_id = ? AND label = ?) \
@@ -1135,9 +1216,7 @@ async fn commit_year_end(
                 statements.push(update.clone());
                 statements.push(close_last.clone());
                 statements.push(guard::release_statement(&probe_key));
-                statements.push(chain::append_statement(
-                    company_id, &head, &hash, &payload, now,
-                ));
+                statements.extend(appended.statements);
                 Ok(statements)
             }
         },
@@ -1150,6 +1229,10 @@ async fn commit_year_end(
 /// Posts the year-end closing entry, or finds it when a crashed close
 /// already posted it (its id is deterministic). The closing journal is one
 /// per fiscal year, so it is provisioned here before the first post.
+///
+/// Both writes audit under `audit` — the same person, the same request —
+/// so the closing entry's `journal.post_entry` event and the close's
+/// `fiscal_year.close` event belong to one action.
 async fn post_closing_entry(
     db: &dyn Database,
     journal: &dyn Journal,
@@ -1157,10 +1240,18 @@ async fn post_closing_entry(
     label: i64,
     entry: &NewEntry,
     now: &str,
+    audit: &AuditContext,
 ) -> Result<PostedEntry, AccountsError> {
     if let Some(existing) = journal.find_entry(db, company_id, &entry.entry_id).await? {
         return Ok(existing);
     }
+    // The provisioning journal is its own action with its own event, so
+    // it gets its own id derived from the journal it creates.
+    let provisioning = AuditContext::new(
+        audit.actor.clone(),
+        audit.request_id.clone(),
+        format!("{}:provision", entry.journal_id),
+    );
     journal
         .ensure_journal(
             db,
@@ -1169,9 +1260,10 @@ async fn post_closing_entry(
             &format!("YE{label}"),
             "Year-end close",
             now,
+            &provisioning,
         )
         .await?;
-    journal.post(db, entry).await
+    journal.post(db, entry, audit).await
 }
 
 /// Closes a fiscal year end to end: clears the P&L, lands the result in
@@ -1197,8 +1289,9 @@ async fn post_closing_entry(
 /// 7. Post-closing balances carry forward: one opening-balance row per
 ///    non-zero asset/liability/equity account, for `label + 1`.
 /// 8. ONE final batch: `year_end_closed_at IS NULL` guard → opening
-///    balances → row stamp → last period `closed` → audit append (head
-///    re-read inside the build closure).
+///    balances → row stamp → last period `closed` → the
+///    `fiscal_year.close` audit event (head re-read inside the build
+///    closure).
 ///
 /// # Errors
 ///
@@ -1209,7 +1302,7 @@ async fn post_closing_entry(
 /// unoverridden blockers; [`AccountsError::RetainedEarningsMissing`]
 /// when the chart has no single usable retained-earnings account;
 /// [`AccountsError::Money`] / [`AccountsError::Database`] otherwise.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub async fn close_fiscal_year(
     db: &dyn Database,
     company_id: &str,
@@ -1217,10 +1310,20 @@ pub async fn close_fiscal_year(
     journal: &dyn Journal,
     checks: &CloseCheckRegistry,
     override_reason: Option<&str>,
-    actor: &Actor,
     now: String,
+    audit: &AuditContext,
 ) -> Result<YearEndReport, AccountsError> {
-    if !actor.is_human() {
+    if !audit.actor.is_person() {
+        deny(
+            db,
+            company_id,
+            audit,
+            "fiscal_year.close",
+            serde_json::json!({ "label": label }),
+            vec![label.to_string()],
+            &now,
+        )
+        .await?;
         return Err(AccountsError::HumanOnly {
             action: "close_fiscal_year".to_owned(),
         });
@@ -1299,11 +1402,11 @@ pub async fn close_fiscal_year(
         created_at: now.clone(),
         memo: format!("Year-end close of fiscal year {label}"),
         lines,
-        actor_subject: actor.subject(),
+        actor_subject: subject(&audit.actor),
         human: true,
         daily_limit: YEAR_END_DAILY_LIMIT,
     };
-    let posted = post_closing_entry(db, journal, company_id, label, &entry, &now).await?;
+    let posted = post_closing_entry(db, journal, company_id, label, &entry, &now, audit).await?;
 
     // 7. Carry the balance sheet forward, from post-closing balances.
     let opening = carried_forward_opening(db, journal, company_id).await?;
@@ -1330,6 +1433,7 @@ pub async fn close_fiscal_year(
         &opening,
         reason,
         &now,
+        audit,
     )
     .await?;
     Ok(report)
@@ -1468,15 +1572,16 @@ mod tests {
     #[test]
     fn the_actor_labels_subjects_and_gates_humans() {
         let person = Actor::Person {
-            id: "owner".to_owned(),
+            person_id: "owner".to_owned(),
         };
         let agent = Actor::Agent {
             key_id: "key-7".to_owned(),
+            tier: "post-within-limits".to_owned(),
         };
-        assert!(person.is_human());
-        assert!(!agent.is_human());
-        assert_eq!(person.subject(), "person:owner");
-        assert_eq!(agent.subject(), "agent:key-7");
+        assert!(person.is_person());
+        assert!(!agent.is_person());
+        assert_eq!(subject(&person), "person:owner");
+        assert_eq!(subject(&agent), "agent:key-7");
     }
 
     #[test]
@@ -1498,52 +1603,6 @@ mod tests {
             validate_reason("line\nbreak"),
             Err(AccountsError::InvalidReason { .. })
         ));
-    }
-
-    #[test]
-    fn the_audit_hash_is_stable_and_chain_shaped() {
-        let a = audit_hash(
-            1,
-            chain::GENESIS_HASH,
-            "action=test",
-            "2026-01-01T00:00:00Z",
-        );
-        let b = audit_hash(
-            1,
-            chain::GENESIS_HASH,
-            "action=test",
-            "2026-01-01T00:00:00Z",
-        );
-        assert_eq!(a, b, "deterministic");
-        assert_eq!(a.len(), 64, "SHA-256 hex");
-        assert!(
-            a.bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-            "lowercase hex"
-        );
-        // Every field moves the hash: seq, prev_hash, payload, created_at.
-        let moved = [
-            audit_hash(
-                2,
-                chain::GENESIS_HASH,
-                "action=test",
-                "2026-01-01T00:00:00Z",
-            ),
-            audit_hash(1, "other", "action=test", "2026-01-01T00:00:00Z"),
-            audit_hash(
-                1,
-                chain::GENESIS_HASH,
-                "action=other",
-                "2026-01-01T00:00:00Z",
-            ),
-            audit_hash(
-                1,
-                chain::GENESIS_HASH,
-                "action=test",
-                "2026-01-02T00:00:00Z",
-            ),
-        ];
-        assert!(moved.iter().all(|hash| *hash != a));
     }
 
     #[test]

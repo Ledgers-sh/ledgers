@@ -25,6 +25,7 @@ use crate::journal::{JournalDraft, JournalKind, create_journal, get_journal};
 use crate::journal_port::{AccountBalance, BoxFuture, Journal, NewEntry, PostedEntry};
 use crate::posting::{self, PostContext, PostOptions, RawEntry, RawLine};
 use cratefield_core::{Database, DbError, Statement};
+use ledgers_audit::AuditContext;
 use ledgers_db::retry::RetryPolicy;
 use ledgers_money::{Amount, Currency};
 use sea_query::Value as SeaValue;
@@ -106,8 +107,9 @@ impl Journal for EntryJournal {
         &'a self,
         db: &'a dyn Database,
         entry: &'a NewEntry,
+        audit: &'a AuditContext,
     ) -> BoxFuture<'a, Result<PostedEntry, AccountsError>> {
-        Box::pin(async move { post_new_entry(db, entry).await })
+        Box::pin(async move { post_new_entry(db, entry, audit).await })
     }
 
     fn find_entry<'a>(
@@ -150,6 +152,7 @@ impl Journal for EntryJournal {
         code: &'a str,
         name: &'a str,
         created_at: &'a str,
+        audit: &'a AuditContext,
     ) -> BoxFuture<'a, Result<(), AccountsError>> {
         Box::pin(async move {
             if get_journal(db, journal_id)
@@ -164,7 +167,7 @@ impl Journal for EntryJournal {
                 kind: JournalKind::General,
                 name: name.to_owned(),
             };
-            create_journal(db, company_id, draft, journal_id, created_at)
+            create_journal(db, company_id, draft, journal_id, created_at, audit)
                 .await
                 .map(|_| ())
                 .map_err(into_accounts)
@@ -194,7 +197,11 @@ async fn base_currency_of(db: &dyn Database, company_id: &str) -> Result<Currenc
 
 /// Posts one port entry through the batch and reads it back as the port's
 /// [`PostedEntry`].
-async fn post_new_entry(db: &dyn Database, entry: &NewEntry) -> Result<PostedEntry, AccountsError> {
+async fn post_new_entry(
+    db: &dyn Database,
+    entry: &NewEntry,
+    audit: &AuditContext,
+) -> Result<PostedEntry, AccountsError> {
     let journal = get_journal(db, &entry.journal_id)
         .await
         .map_err(into_accounts)?
@@ -265,10 +272,17 @@ async fn post_new_entry(db: &dyn Database, entry: &NewEntry) -> Result<PostedEnt
         human: entry.human,
         daily_limit: Some((entry.actor_subject.clone(), entry.daily_limit)),
     };
-    let posted =
-        posting::post_raw_entry_with(db, &raw, &ctx, RetryPolicy::default(), |_| {}, &options)
-            .await
-            .map_err(into_accounts)?;
+    let posted = posting::post_raw_entry_with(
+        db,
+        &raw,
+        &ctx,
+        RetryPolicy::default(),
+        |_| {},
+        &options,
+        audit,
+    )
+    .await
+    .map_err(into_accounts)?;
     Ok(PostedEntry {
         entry_id: posted.entry_id,
         number: posted.number,

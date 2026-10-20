@@ -43,9 +43,15 @@ impl Module for DbModule {
 
     fn migrations(&self) -> Migrations {
         // The portable set: the SQLite dialect runs on D1, rusqlite and
-        // (lint-checked) Postgres. A postgres override set is added here
-        // only where the SQL truly differs.
-        Migrations::sqlite(super::SQLITE_MIGRATIONS)
+        // (lint-checked) Postgres. The postgres override set exists only
+        // where the SQL truly differs — the audit chain's append-only
+        // triggers, whose RAISE(ABORT) is SQLite's spelling of a plpgsql
+        // refusal. The tables themselves are identical DDL, shared by
+        // including the same files.
+        Migrations {
+            sqlite: super::SQLITE_MIGRATIONS,
+            postgres: super::POSTGRES_MIGRATIONS,
+        }
     }
 
     fn validate_config(&self, _cfg: &dyn Config) -> Result<(), ConfigError> {

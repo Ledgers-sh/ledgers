@@ -26,6 +26,9 @@
 
 use crate::entry::JournalError;
 use cratefield_core::{Database, Statement};
+use ledgers_audit::{AuditConfig, AuditContext, AuditRecord, Outcome, append_statements};
+use ledgers_db::chain;
+use ledgers_db::retry::{self, RetryPolicy};
 use sea_query::Value as SeaValue;
 use serde::{Deserialize, Serialize};
 
@@ -206,6 +209,10 @@ const TABLE: &str = "journal";
 /// (the command layer owns id generation); `created_at` an ISO 8601 UTC
 /// timestamp bound from code.
 ///
+/// The insert and its `journal.create` audit event are **one** batch, so
+/// a journal never exists without the record that created it; the head
+/// is read inside the plan closure, so a chain fork re-plans.
+///
 /// # Errors
 /// [`JournalError::InvalidJournalCode`] /
 /// [`JournalError::InvalidJournalName`] from validation;
@@ -217,6 +224,7 @@ pub async fn create_journal(
     draft: JournalDraft,
     id: &str,
     created_at: &str,
+    audit: &AuditContext,
 ) -> Result<Journal, JournalError> {
     let journal = Journal::from_draft(draft, company_id, id)?;
     if find_journal(db, company_id, &journal.code).await?.is_some() {
@@ -224,7 +232,59 @@ pub async fn create_journal(
             code: journal.code.clone(),
         });
     }
-    db.execute(&Statement::with_values(
+    let insert = insert_statement(&journal, created_at);
+    let audited = AuditRecord::from_input(
+        "journal.create",
+        &serde_json::json!({
+            "code": journal.code,
+            "kind": journal.kind.to_string(),
+            "name": journal.name,
+        }),
+        Outcome::Allowed,
+        vec![journal.id.clone()],
+        None,
+    );
+    retry::run_batch_with_retry(
+        db,
+        RetryPolicy::default(),
+        || {
+            let (insert, audit, audited) = (insert.clone(), audit.clone(), audited.clone());
+            let created_at = created_at.to_owned();
+            async move {
+                let head = chain::read_head(db, company_id).await?;
+                let appended = append_statements(
+                    company_id,
+                    &head,
+                    &audit,
+                    &audited,
+                    &created_at,
+                    &AuditConfig::default(),
+                )
+                .map_err(|err| cratefield_core::DbError::Query(err.to_string()))?;
+                let mut statements = vec![insert];
+                statements.extend(appended.statements);
+                Ok(statements)
+            }
+        },
+        |_| {},
+    )
+    .await
+    .map_err(|err| match err {
+        // The shared sniffer, not a private copy: retry.rs documents this
+        // crate's adoption of it as exactly this refactor.
+        ledgers_db::GuardError::Database(db) if ledgers_db::retry::is_unique_violation(&db) => {
+            JournalError::JournalExists {
+                code: journal.code.clone(),
+            }
+        }
+        other => JournalError::from(other),
+    })?;
+    Ok(journal)
+}
+
+/// The `journal` INSERT for one row, bound from code.
+fn insert_statement(journal: &Journal, created_at: &str) -> Statement {
+    Statement::with_values(
         format!(
             "INSERT INTO {TABLE} (id, company_id, code, kind, name, created_at)\n\
              VALUES (?, ?, ?, ?, ?, ?)"
@@ -237,20 +297,7 @@ pub async fn create_journal(
             SeaValue::from(journal.name.as_str()),
             SeaValue::from(created_at),
         ],
-    ))
-    .await
-    .map_err(|err| {
-        // The shared sniffer, not a private copy: retry.rs documents this
-        // crate's adoption of it as exactly this refactor.
-        if ledgers_db::retry::is_unique_violation(&err) {
-            JournalError::JournalExists {
-                code: journal.code.clone(),
-            }
-        } else {
-            JournalError::Database(err)
-        }
-    })?;
-    Ok(journal)
+    )
 }
 
 /// Finds one journal by company and code; `None` when absent.
