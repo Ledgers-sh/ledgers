@@ -1,0 +1,406 @@
+---
+source: crates/ledgers-ledger/tests/surface.rs
+expression: registry.to_json()
+---
+[
+  {
+    "name": "account.create",
+    "tier": "draft",
+    "human_only": false,
+    "supports_dry_run": false,
+    "idempotent": false,
+    "http_method": "POST",
+    "http_path": "/v1/account/create",
+    "cli": "ledgers account create",
+    "mcp": "account_create",
+    "curl": "curl -X POST \"$LEDGERS_URL/v1/account/create\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CreateAccountInput",
+      "description": "Input for `account.create` command.",
+      "type": "object",
+      "properties": {
+        "draft": {
+          "description": "The account draft (number, `name_key`, type, normal balance, currency, parent, tags).",
+          "$ref": "#/$defs/SerializableAccountDraft"
+        }
+      },
+      "required": [
+        "draft"
+      ],
+      "$defs": {
+        "SerializableAccountDraft": {
+          "description": "Serializable version of [`AccountDraft`].",
+          "type": "object",
+          "properties": {
+            "number": {
+              "description": "The account number (2..=10 ASCII digits).",
+              "type": "string"
+            },
+            "name_key": {
+              "description": "The translatable name key (must start with `\"account.\"`).",
+              "type": "string"
+            },
+            "account_type": {
+              "description": "The account class.",
+              "type": "string"
+            },
+            "normal_balance": {
+              "description": "The balance side; `None` means the default for the type.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "currency": {
+              "description": "The account's currency code; `None` = company base currency.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent": {
+              "description": "The parent account number; `None` = root.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tags": {
+              "description": "Kebab-case tags.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "number",
+            "name_key",
+            "account_type",
+            "tags"
+          ]
+        }
+      }
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CreateAccountOutput",
+      "description": "Output for `account.create` command.",
+      "type": "object",
+      "properties": {
+        "account": {
+          "description": "The created account entry with its assigned metadata.",
+          "$ref": "#/$defs/SerializableAccountEntry"
+        }
+      },
+      "required": [
+        "account"
+      ],
+      "$defs": {
+        "SerializableAccountEntry": {
+          "description": "Serializable version of [`crate::AccountEntry`].",
+          "type": "object",
+          "properties": {
+            "number": {
+              "description": "The account number.",
+              "type": "string"
+            },
+            "name_key": {
+              "description": "The translatable name key.",
+              "type": "string"
+            },
+            "account_type": {
+              "description": "The account class.",
+              "type": "string"
+            },
+            "normal_balance": {
+              "description": "The balance side.",
+              "type": "string"
+            },
+            "currency": {
+              "description": "The currency code.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parent": {
+              "description": "The parent account number.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tags": {
+              "description": "The tags.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "is_postable": {
+              "description": "Whether this account can hold postings.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "number",
+            "name_key",
+            "account_type",
+            "normal_balance",
+            "tags",
+            "is_postable"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "journal.post_entry",
+    "tier": "post-within-limits",
+    "human_only": false,
+    "supports_dry_run": true,
+    "idempotent": true,
+    "http_method": "POST",
+    "http_path": "/v1/journal/{journal-id}/post-entry",
+    "cli": "ledgers journal post-entry",
+    "mcp": "journal_post_entry",
+    "curl": "curl -X POST \"$LEDGERS_URL/v1/journal/{journal-id}/post-entry\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PostEntryInput",
+      "description": "Input for `journal.post_entry` command.",
+      "type": "object",
+      "properties": {
+        "journal_id": {
+          "description": "The journal ID.",
+          "type": "string"
+        },
+        "fiscal_year": {
+          "description": "The fiscal year for the entry number sequence.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "entry": {
+          "description": "The entry draft (must balance, valid accounts, etc.).",
+          "$ref": "#/$defs/SerializableEntryDraft"
+        }
+      },
+      "required": [
+        "journal_id",
+        "fiscal_year",
+        "entry"
+      ],
+      "$defs": {
+        "SerializableEntryDraft": {
+          "description": "Serializable version of [`EntryDraft`].",
+          "type": "object",
+          "properties": {
+            "journal_id": {
+              "description": "The journal ID.",
+              "type": "string"
+            },
+            "document_date": {
+              "description": "The document date (YYYY-MM-DD).",
+              "type": "string"
+            },
+            "posting_date": {
+              "description": "The posting date (YYYY-MM-DD).",
+              "type": "string"
+            },
+            "tax_point_date": {
+              "description": "The optional tax point date (YYYY-MM-DD).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "base_currency": {
+              "description": "The base currency code.",
+              "type": "string"
+            },
+            "description": {
+              "description": "The description.",
+              "type": "string"
+            },
+            "source_documents": {
+              "description": "Source document links.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reverses": {
+              "description": "Entry this reverses, if any.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lines": {
+              "description": "The entry lines.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SerializableLine"
+              }
+            }
+          },
+          "required": [
+            "journal_id",
+            "document_date",
+            "posting_date",
+            "base_currency",
+            "description",
+            "source_documents",
+            "lines"
+          ]
+        },
+        "SerializableLine": {
+          "description": "Serializable version of [`Line`].",
+          "type": "object",
+          "properties": {
+            "account_number": {
+              "description": "The account number.",
+              "type": "string"
+            },
+            "side": {
+              "description": "The side (debit/credit).",
+              "type": "string"
+            },
+            "base": {
+              "description": "The base amount.",
+              "$ref": "#/$defs/SerializableAmount"
+            },
+            "fx": {
+              "description": "Optional FX transaction.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SerializableFx"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tax_code": {
+              "description": "Optional tax code.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dimensions": {
+              "description": "Optional dimensions.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "memo": {
+              "description": "Optional memo.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "account_number",
+            "side",
+            "base",
+            "dimensions"
+          ]
+        },
+        "SerializableAmount": {
+          "description": "Serializable amount with currency.",
+          "type": "object",
+          "properties": {
+            "minor": {
+              "description": "The minor units as a string.",
+              "type": "string"
+            },
+            "currency": {
+              "description": "The currency code.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "minor",
+            "currency"
+          ]
+        },
+        "SerializableFx": {
+          "description": "Serializable FX data.",
+          "type": "object",
+          "properties": {
+            "transaction": {
+              "description": "The transaction amount.",
+              "$ref": "#/$defs/SerializableAmount"
+            },
+            "rate": {
+              "description": "The exchange rate.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transaction",
+            "rate"
+          ]
+        }
+      }
+    },
+    "output_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PostEntryOutput",
+      "description": "Output for `journal.post_entry` command.",
+      "type": "object",
+      "properties": {
+        "entry": {
+          "description": "The posted entry with its assigned number.",
+          "$ref": "#/$defs/SerializablePostedEntry"
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "$defs": {
+        "SerializablePostedEntry": {
+          "description": "Serializable version of [`PostedEntry`].",
+          "type": "object",
+          "properties": {
+            "entry_id": {
+              "description": "The entry's id.",
+              "type": "string"
+            },
+            "journal_id": {
+              "description": "The journal it posted into.",
+              "type": "string"
+            },
+            "fiscal_year": {
+              "description": "The fiscal year the number is scoped to.",
+              "type": "integer",
+              "format": "int64"
+            },
+            "number": {
+              "description": "The gapless number assigned.",
+              "type": "integer",
+              "format": "int64"
+            },
+            "recorded_at": {
+              "description": "The recorded-at timestamp.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entry_id",
+            "journal_id",
+            "fiscal_year",
+            "number",
+            "recorded_at"
+          ]
+        }
+      }
+    }
+  }
+]

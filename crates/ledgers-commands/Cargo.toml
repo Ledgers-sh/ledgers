@@ -1,0 +1,47 @@
+[package]
+name = "ledgers-commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Core, the port-conformance surface of the testing kit (no harness graph by default).
+cratefield-core = { workspace = true }
+cratefield-testing = { workspace = true }
+
+# Money types and validation.
+ledgers-money = { workspace = true }
+
+# Audit log, events, actors, and context.
+ledgers-audit = { workspace = true }
+
+# Database port and guard patterns.
+ledgers-db = { workspace = true }
+
+# Serialization and JSON schema generation.
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
+
+# Time: exact version matching cratefield-core.
+time = { workspace = true }
+
+[dev-dependencies]
+# The harness for testing.
+cratefield-testing = { workspace = true, features = ["harness"] }
+
+# Test snapshots and snapshots validation.
+insta = { version = "1", features = ["json"] }
+
+# Compile-time tests for error types.
+trybuild = "1"
+
+# For blocking tests.
+pollster = { workspace = true, features = ["macro"] }
+
+[lints]
+workspace = true

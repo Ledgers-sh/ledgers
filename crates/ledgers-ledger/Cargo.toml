@@ -24,6 +24,7 @@ postgres = ["cratefield-testing/postgres"]
 # serde_json.
 cratefield-core = { workspace = true }
 cratefield-testing = { workspace = true }
+ledgers-commands = { workspace = true }
 ledgers-db = { workspace = true }
 ledgers-audit = { workspace = true }
 sea-query = { workspace = true }
@@ -33,6 +34,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 # The harness (TestHarness over in-memory SQLite) for the scenario
@@ -42,6 +45,10 @@ thiserror = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-db = { workspace = true }
 pollster = { workspace = true, features = ["macro"] }
+# Golden snapshot testing for the command registry surface.
+insta = { workspace = true }
+# Compile-fail UI tests for ExecToken.
+trybuild = { workspace = true }
 
 [lints]
 workspace = true

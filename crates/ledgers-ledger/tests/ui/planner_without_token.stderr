@@ -1,0 +1,25 @@
+warning: unreachable statement
+  --> tests/ui/planner_without_token.rs:14:5
+   |
+13 |     let db: &dyn Database = todo!();
+   |                             ------- any code following this expression is unreachable
+14 |     let entry: &Entry = todo!();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+   |
+   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0308]: mismatched types
+  --> tests/ui/planner_without_token.rs:18:9
+   |
+17 |     let _plan = plan_post_entry(
+   |                 --------------- arguments to this function are incorrect
+18 |         &(),         // Wrong type: should be &ExecToken
+   |         ^^^ expected `&ExecToken`, found `&()`
+   |
+   = note: expected reference `&ledgers_commands::exec::ExecToken`
+              found reference `&()`
+note: function defined here
+  --> src/posting.rs
+   |
+   | pub async fn plan_post_entry(
+   |              ^^^^^^^^^^^^^^^
