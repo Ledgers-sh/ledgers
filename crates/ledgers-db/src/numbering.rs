@@ -43,7 +43,7 @@
 //! The canonical batch order is `[provision, bump, insert_with_number]`
 //! — the exact reference [`crate::suite::plan_post`] keeps.
 
-use cratefield_core::Statement;
+use cratefield_core::{Database, DbError, Statement};
 use sea_query::Value as SeaValue;
 
 /// Creates the counter row at `next_number = 0` if it does not exist
@@ -81,6 +81,35 @@ pub fn bump_statement(journal_id: &str, fiscal_year: i64) -> Statement {
             SeaValue::BigInt(Some(fiscal_year)),
         ],
     )
+}
+
+/// Reads the current counter value (`next_number`) for a journal and fiscal
+/// year. Returns `None` if no counter row exists (which should not happen
+/// after [`provision_statement`] runs, but is handled for safety).
+///
+/// This is used pre-batch to compute the expected number, enabling
+/// [`post_entry`] to return the number without reading it back after
+/// commit (idempotent resubmits via `entry_id` check can then safely retry).
+///
+/// # Errors
+///
+/// Returns [`DbError`] when the database query fails.
+pub async fn read_counter(
+    db: &dyn Database,
+    journal_id: &str,
+    fiscal_year: i64,
+) -> Result<Option<i64>, DbError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT next_number FROM numbering_counter WHERE journal_id = ? AND fiscal_year = ?"
+                .to_owned(),
+            vec![
+                SeaValue::from(journal_id),
+                SeaValue::BigInt(Some(fiscal_year)),
+            ],
+        ))
+        .await?;
+    Ok(rows.first().and_then(|row| row.get::<i64>("next_number")))
 }
 
 /// Inserts into `table`, taking the entry's number from the counter row
@@ -125,6 +154,38 @@ pub fn insert_with_number(
             names.join(", "),
         ),
         bound,
+    )
+}
+
+/// A guard statement that the counter moved from `expected - 1` to
+/// `expected`: verifies a number assignment is exactly as planned.
+/// Fires (NOT NULL fails) if the counter has any other value, e.g. a lost
+/// race rewound it, a bypass inserted without bumping, or schema drift
+/// broke the process.
+///
+/// Used as a backstop after a literal INSERT of the number: the counter
+/// only grows and every number ≤ counter is already taken in `journal_entry`
+/// for that (journal, fiscal year), so if another post won the race, the
+/// counter was already ≥ expected, our INSERT hit the unique constraint,
+/// and retry re-planned with fresh reads. This guard verifies the counter
+/// is exactly what we expected, turning any broken invariant into a hard
+/// refusal instead of a gap (issue #71).
+#[must_use]
+pub fn assert_counter_advanced_statement(
+    guard_key: &str,
+    journal_id: &str,
+    fiscal_year: i64,
+    expected: i64,
+) -> Statement {
+    Statement::with_values(
+        "INSERT INTO ledger_guard (guard_key, ok)\n\
+         SELECT ?, CASE WHEN (SELECT next_number FROM numbering_counter WHERE journal_id = ? AND fiscal_year = ?) = ? THEN 1 ELSE NULL END".to_owned(),
+        vec![
+            SeaValue::from(guard_key),
+            SeaValue::from(journal_id),
+            SeaValue::BigInt(Some(fiscal_year)),
+            SeaValue::BigInt(Some(expected)),
+        ],
     )
 }
 
