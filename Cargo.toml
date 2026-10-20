@@ -36,6 +36,12 @@ sea-query = { version = "=0.32.7", default-features = false, features = [
 thiserror = "2"
 proptest = "1"
 
+# Async traits (wasm-clean with ?Send):
+async-trait = "0.1"
+
+# JSON schema generation — matches cratefield-core 0.10.1's 1.2.3 (no duplicate versions):
+schemars = "1.2"
+
 # Storage foundation (issue #4): block-on for the conformance matrix tests,
 # the same release the testing kit itself uses.
 pollster = "0.4"
@@ -54,6 +60,8 @@ ledgers-db = { path = "crates/ledgers-db" }
 # Hash-chained audit log, canonical JSON and the offline verifier
 # (issue #9).
 ledgers-audit = { path = "crates/ledgers-audit" }
+# Command registry and executor with policy and audit logging (issue #10).
+ledgers-commands = { path = "crates/ledgers-commands" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"
@@ -61,6 +69,10 @@ time = "=0.3.55"
 # SHA-256: ledgers-audit (#9) owns audit hashing and verification with
 # this; ledgers-ledger's interim period hashes still stamp with it.
 sha2 = "0.10"
+
+# Dev dependencies for ledgers-commands (issue #10):
+insta = { version = "1", features = ["json"] }
+trybuild = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

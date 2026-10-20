@@ -78,6 +78,7 @@ pub mod recurring;
 pub mod registry;
 pub mod reversal;
 pub mod store;
+pub mod surface;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
 pub use chart::{ChartAccount, ChartTemplate};

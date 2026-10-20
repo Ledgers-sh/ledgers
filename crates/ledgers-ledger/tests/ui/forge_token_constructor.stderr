@@ -1,0 +1,16 @@
+error[E0624]: associated function `new` is private
+  --> tests/ui/forge_token_constructor.rs:10:47
+   |
+10 |     let _token = ledgers_commands::ExecToken::new();
+   |                                               ^^^ private associated function
+   |
+  ::: $WORKSPACE/crates/ledgers-commands/src/exec.rs
+   |
+   |     fn new() -> Self {
+   |     ---------------- private associated function defined here
+
+error[E0277]: the trait bound `ExecToken: Default` is not satisfied
+  --> tests/ui/forge_token_constructor.rs:15:19
+   |
+15 |     let _token = <ledgers_commands::ExecToken as Default>::default();
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Default` is not implemented for `ExecToken`

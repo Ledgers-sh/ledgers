@@ -261,23 +261,24 @@ pub async fn plan_post_batch(
     plan_post_batch_with(db, raw, ctx, &options, audit).await
 }
 
-/// [`plan_post_batch`] with the port-level [`PostOptions`] applied: the
-/// period override, the person-side period guard, and the daily
-/// allowance consume.
+/// Builds the entry posting statements without the audit event.
+/// This is used by the executor path, which appends its own Allowed audit event.
+/// The domain statements comprise:
+/// - 1. Gapless numbering (provision, bump, insert with literal number, guard)
+/// - 2. The entry's lines
+/// - 3–8. Write-time checks and their releases
+/// - 9. The outbox enqueue
 ///
 /// # Errors
 /// As [`plan_post_batch`], plus [`DbError`] when `created_at` does not
 /// start with a `YYYY-MM-DD` date and a daily allowance is requested.
 #[doc(hidden)]
-pub async fn plan_post_batch_with(
+pub async fn plan_post_batch_statements_only(
     db: &dyn Database,
     raw: &RawEntry,
     ctx: &PostContext,
     options: &PostOptions,
-    audit: &AuditContext,
 ) -> Result<(Vec<Statement>, i64), DbError> {
-    let head = chain::read_head(db, &raw.company_id).await?;
-
     // Read the numbering counter and compute the expected number inside
     // the batch. The counter's idempotent provision (in the batch) ensures
     // it exists by the time we use it.
@@ -339,11 +340,49 @@ pub async fn plan_post_batch_with(
         .transpose()?;
     statements.extend(guard_statements(raw, ctx, &posting_period, options, day));
 
-    // 9. The audit event: a real `ledgers-audit` record of the post —
-    //    who acted, the entry it touched, the input's hash — appended
-    //    at head.seq + 1 in this same batch, so it exists exactly when
-    //    the posting does. A stale head takes a unique violation;
-    //    retry re-plans.
+    // 9. The outbox enqueue: the event exists exactly when the posting
+    //     commits. The payload names the entry and its number.
+    statements.push(
+        cratefield_core::Outbox::new(OUTBOX_TABLE).enqueue_statement(
+            &ctx.outbox_id,
+            TOPIC_ENTRY_POSTED,
+            &outbox_payload(raw, ctx, &vat_period),
+            None,
+            &ctx.recorded_at,
+        ),
+    );
+
+    // 10. Release the counter guard at the very end.
+    statements.push(guard::release_statement(&counter_guard_key));
+
+    Ok((statements, expected_number))
+}
+
+/// [`plan_post_batch`] with the port-level [`PostOptions`] applied: the
+/// period override, the person-side period guard, and the daily
+/// allowance consume.
+///
+/// # Errors
+/// As [`plan_post_batch`], plus [`DbError`] when `created_at` does not
+/// start with a `YYYY-MM-DD` date and a daily allowance is requested.
+#[doc(hidden)]
+pub async fn plan_post_batch_with(
+    db: &dyn Database,
+    raw: &RawEntry,
+    ctx: &PostContext,
+    options: &PostOptions,
+    audit: &AuditContext,
+) -> Result<(Vec<Statement>, i64), DbError> {
+    let head = chain::read_head(db, &raw.company_id).await?;
+
+    let (mut statements, expected_number) =
+        plan_post_batch_statements_only(db, raw, ctx, options).await?;
+
+    // Append the audit event: a real `ledgers-audit` record of the post —
+    // who acted, the entry it touched, the input's hash — appended
+    // at head.seq + 1 in this same batch, so it exists exactly when
+    // the posting does. A stale head takes a unique violation;
+    // retry re-plans.
     statements.extend(
         append_statements(
             &raw.company_id,
@@ -362,21 +401,6 @@ pub async fn plan_post_batch_with(
         .map_err(|err| DbError::Query(err.to_string()))?
         .statements,
     );
-
-    // 10. The outbox enqueue: the event exists exactly when the posting
-    //     commits. The payload names the entry and its number.
-    statements.push(
-        cratefield_core::Outbox::new(OUTBOX_TABLE).enqueue_statement(
-            &ctx.outbox_id,
-            TOPIC_ENTRY_POSTED,
-            &outbox_payload(raw, ctx, &vat_period),
-            None,
-            &ctx.recorded_at,
-        ),
-    );
-
-    // 11. Release the counter guard at the very end.
-    statements.push(guard::release_statement(&counter_guard_key));
 
     Ok((statements, expected_number))
 }
@@ -561,6 +585,66 @@ fn guard_statements(
     statements.push(guard::release_statement(&accounts_key));
     statements.push(guard::release_statement(&balance_key));
     statements
+}
+
+/// Plans one validated entry for the executor: converts it to statements,
+/// returning just the statements (no execution). The executor appends the
+/// audit record and executes the combined batch.
+///
+/// This is not the main posting path (which is [`post_entry`]); it's called
+/// only by the executor's plan method. The executor handles retry and idempotency.
+///
+/// # Errors
+/// [`JournalError::Money`] when an amount does not fit the storage width.
+pub async fn plan_post_entry(
+    _token: &ledgers_commands::ExecToken,
+    db: &dyn Database,
+    company_id: &str,
+    entry: &Entry,
+    fiscal_year: i64,
+    now: &str,
+    request_id: &str,
+) -> Result<(Vec<Statement>, PostedEntry), crate::JournalError> {
+    let raw = RawEntry::from_entry(entry)?;
+
+    // The entry_id is derived from the request_id to support idempotency:
+    // a replay with the same request_id will use the same entry_id and be idempotent.
+    let entry_id = request_id;
+    let outbox_id = format!("{request_id}-outbox");
+
+    // Check if the entry was already posted (idempotency).
+    if let Some(posted_entry) = read_posted_entry(db, entry_id, company_id).await? {
+        // Entry already exists: return it with no statements (consistent with
+        // read-only commands). The executor will skip the audit event.
+        return Ok((vec![], posted_entry));
+    }
+
+    // The executor has already determined the company and fiscal year context.
+    // We just plan the statements here. The executor will append the Allowed audit event.
+    let ctx = PostContext {
+        fiscal_year,
+        entry_id: entry_id.to_string(),
+        recorded_at: now.to_string(),
+        outbox_id,
+    };
+
+    // Plan the batch with default options (no period override, not human).
+    // This returns only the domain statements; the executor appends the audit event.
+    let options = PostOptions {
+        human: false,
+        ..Default::default()
+    };
+    let (statements, number) = plan_post_batch_statements_only(db, &raw, &ctx, &options).await?;
+
+    let posted = PostedEntry {
+        entry_id: ctx.entry_id,
+        journal_id: raw.journal_id.clone(),
+        fiscal_year: ctx.fiscal_year,
+        number,
+        recorded_at: ctx.recorded_at,
+    };
+
+    Ok((statements, posted))
 }
 
 /// Posts one validated entry: converts it to storage shape, plans and

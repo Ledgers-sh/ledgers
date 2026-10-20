@@ -117,6 +117,68 @@ async fn deny(
 /// The audited command name an account creation records under.
 const COMMAND_CREATE_ACCOUNT: &str = "account.create";
 
+/// Validates a draft and generates the create statement (shared helper).
+///
+/// # Errors
+/// [`AccountsError::InvalidNumber`], [`AccountsError::InvalidTag`] and
+/// [`AccountsError::InvalidNameKey`] from draft validation;
+/// [`AccountsError::ParentNotFound`] when the parent is absent;
+/// [`AccountsError::AccountExists`] when the number is taken;
+/// [`AccountsError::Database`] otherwise.
+async fn validate_and_create_statement(
+    db: &dyn Database,
+    company_id: &str,
+    draft: &AccountDraft,
+    now: &str,
+) -> Result<(Account, Vec<Statement>), AccountsError> {
+    let account = draft.clone().into_account(company_id, now)?;
+    if let Some(parent) = &account.parent
+        && store::find_account(db, company_id, parent).await?.is_none()
+    {
+        return Err(AccountsError::ParentNotFound {
+            parent: parent.clone(),
+        });
+    }
+    if store::find_account(db, company_id, &account.number)
+        .await?
+        .is_some()
+    {
+        return Err(AccountsError::AccountExists {
+            number: account.number.clone(),
+        });
+    }
+    let statements = vec![store::insert_account_statement(&account)];
+    Ok((account, statements))
+}
+
+/// Plans one account creation: validates the draft, requires the parent to exist
+/// (when the draft names one), and returns the SQL statements and the account entry.
+///
+/// This is the token-taking planner: the executor calls this to get statements,
+/// then appends the audit event in the same batch.
+///
+/// # Errors
+/// [`AccountsError::InvalidNumber`], [`AccountsError::InvalidTag`] and
+/// [`AccountsError::InvalidNameKey`] from draft validation;
+/// [`AccountsError::ParentNotFound`] when the parent is absent;
+/// [`AccountsError::AccountExists`] when the number is taken;
+/// [`AccountsError::Database`] otherwise.
+pub async fn plan_create_account(
+    _token: &ledgers_commands::ExecToken,
+    db: &dyn Database,
+    company_id: &str,
+    draft: &AccountDraft,
+    now: &str,
+) -> Result<(Vec<Statement>, AccountEntry), AccountsError> {
+    let (account, statements) = validate_and_create_statement(db, company_id, draft, now).await?;
+    // A newly created account has no children yet, so has_children is false.
+    let entry = AccountEntry {
+        account,
+        has_children: false,
+    };
+    Ok((statements, entry))
+}
+
 /// Creates one account: validates the draft, requires the parent to exist
 /// (when the draft names one), inserts, and returns the re-read entry so
 /// the caller sees the derived postable state, not just what it sent.
@@ -140,22 +202,7 @@ pub async fn create_account(
     now: String,
     audit: &AuditContext,
 ) -> Result<AccountEntry, AccountsError> {
-    let account = draft.into_account(company_id, &now)?;
-    if let Some(parent) = &account.parent
-        && store::find_account(db, company_id, parent).await?.is_none()
-    {
-        return Err(AccountsError::ParentNotFound {
-            parent: parent.clone(),
-        });
-    }
-    if store::find_account(db, company_id, &account.number)
-        .await?
-        .is_some()
-    {
-        return Err(AccountsError::AccountExists {
-            number: account.number.clone(),
-        });
-    }
+    let (account, statements) = validate_and_create_statement(db, company_id, &draft, &now).await?;
     let input = account_draft_input(&account);
     change_with_audit(
         db,
@@ -169,7 +216,7 @@ pub async fn create_account(
             None,
         ),
         &now,
-        &[store::insert_account_statement(&account)],
+        &statements,
     )
     .await?;
     entry_for(db, company_id, &account.number).await

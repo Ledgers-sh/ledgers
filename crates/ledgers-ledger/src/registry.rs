@@ -59,6 +59,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Mutating,
     },
     CommandSpec {
+        name: "account.create",
+        function: "commands::plan_create_account",
+        kind: CommandKind::Mutating,
+    },
+    CommandSpec {
         name: "account.show",
         function: "commands::show_account",
         kind: CommandKind::Read,
@@ -128,6 +133,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Mutating,
     },
     CommandSpec {
+        name: "journal.post_entry",
+        function: "posting::plan_post_entry",
+        kind: CommandKind::Mutating,
+    },
+    CommandSpec {
         name: "fiscal_year.open",
         function: "period::open_fiscal_year",
         kind: CommandKind::Mutating,
@@ -173,7 +183,13 @@ pub const COMMANDS: &[CommandSpec] = &[
 /// the reason each one is exempt. A function listed here is a
 /// deliberate, reviewed decision; anything unlisted and unregistered
 /// fails `tests/audit_registry.rs`.
-pub const EXEMPT: &[(&str, &str)] = &[(
-    "posting::dry_run_entry",
-    "read-only validation; no audit event",
-)];
+pub const EXEMPT: &[(&str, &str)] = &[
+    (
+        "posting::dry_run_entry",
+        "read-only validation; no audit event",
+    ),
+    (
+        "posting::plan_post_batch_statements_only",
+        "internal helper used by plan_post_entry; audit event appended by executor",
+    ),
+];

@@ -249,3 +249,78 @@ impl From<ledgers_db::GuardError> for AccountsError {
         }
     }
 }
+
+/// `account.operation.failed` problem: an account operation failed.
+pub const ACCOUNT_OPERATION_FAILED: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "account-operation-failed",
+    status: cratefield_core::axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+    title: "Account operation failed",
+    description: "The account operation was refused: unknown account, validation error, or \
+                      conflict with existing data.",
+};
+
+/// `account.not-found` problem.
+pub const ACCOUNT_NOT_FOUND: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "account-not-found",
+    status: cratefield_core::axum::http::StatusCode::NOT_FOUND,
+    title: "Account not found",
+    description: "No account with this number exists in the company.",
+};
+
+/// `account.exists` problem: the number is taken.
+pub const ACCOUNT_EXISTS: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "account-exists",
+    status: cratefield_core::axum::http::StatusCode::CONFLICT,
+    title: "Account already exists",
+    description: "An account with this number already exists for the company.",
+};
+
+impl AccountsError {
+    /// The RFC 9457 problem this error renders as.
+    ///
+    /// # Panics
+    /// Never on this dependency graph; `serde_json::Value` construction
+    /// from strings is infallible here.
+    #[must_use]
+    pub fn to_problem(&self) -> cratefield_core::Problem {
+        use cratefield_core::Problem;
+        match self {
+            AccountsError::AccountNotFound { number } => Problem::new(&ACCOUNT_NOT_FOUND)
+                .with_detail(self.to_string())
+                .with_extension("number", number.clone()),
+            AccountsError::AccountExists { number } => Problem::new(&ACCOUNT_EXISTS)
+                .with_detail(self.to_string())
+                .with_extension("number", number.clone()),
+            AccountsError::ParentNotFound { parent } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("parent", parent.clone()),
+            AccountsError::InvalidNumber { number, reason } => {
+                Problem::new(&ACCOUNT_OPERATION_FAILED)
+                    .with_detail(self.to_string())
+                    .with_extension("number", number.clone())
+                    .with_extension("reason", reason.to_string())
+            }
+            AccountsError::InvalidTag { tag } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("tag", tag.clone()),
+            AccountsError::InvalidNameKey { key } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("key", key.clone()),
+            AccountsError::UnknownCurrency { code } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("code", code.clone()),
+            AccountsError::UnknownAccountType { value } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("value", value.clone()),
+            AccountsError::UnknownNormalBalance { value } => {
+                Problem::new(&ACCOUNT_OPERATION_FAILED)
+                    .with_detail(self.to_string())
+                    .with_extension("value", value.clone())
+            }
+            _ => {
+                // Other errors map to the generic failure problem
+                Problem::new(&ACCOUNT_OPERATION_FAILED).with_detail(self.to_string())
+            }
+        }
+    }
+}
