@@ -999,6 +999,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-tax"
+version = "0.1.0"
+dependencies = [
+ "cratefield-core",
+ "cratefield-testing",
+ "ledgers-audit",
+ "ledgers-db",
+ "ledgers-ledger",
+ "ledgers-money",
+ "pollster",
+ "sea-query",
+ "serde_json",
+ "thiserror",
+ "time",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
