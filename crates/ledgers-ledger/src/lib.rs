@@ -61,6 +61,7 @@ pub mod account;
 pub mod chart;
 pub mod close;
 pub mod commands;
+pub mod draft;
 pub mod entry;
 pub mod error;
 pub mod fiscal;
@@ -73,7 +74,9 @@ pub mod mapping;
 pub mod module;
 pub mod period;
 pub mod posting;
+pub mod recurring;
 pub mod registry;
+pub mod reversal;
 pub mod store;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
@@ -99,6 +102,7 @@ pub use period::{
 };
 pub use posting::{PostContext, PostedEntry, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry};
 pub use registry::{COMMANDS, CommandKind, CommandSpec, EXEMPT};
+pub use reversal::{ReverseContext, reverse_entry};
 
 /// The generic small-business chart (`templates/generic-sme.toml`).
 pub const GENERIC_SME_TOML: &str = include_str!(concat!(
@@ -130,6 +134,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "fiscal_year",
         include_str!("../migrations/sqlite/0003_fiscal_year.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "entries_lifecycle",
+        include_str!("../migrations/sqlite/0004_entries_lifecycle.sql"),
+    ),
 ];
 
 /// The Postgres override set: identical DDL for the tables, and the
@@ -151,6 +160,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0003",
         "fiscal_year",
         include_str!("../migrations/postgres/0003_fiscal_year.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "entries_lifecycle",
+        include_str!("../migrations/postgres/0004_entries_lifecycle.sql"),
     ),
 ];
 
@@ -199,13 +213,15 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 3);
+            assert_eq!(set.len(), 4);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
             assert_eq!(set[1].name, "journal");
             assert_eq!(set[2].id, "0003");
             assert_eq!(set[2].name, "fiscal_year");
+            assert_eq!(set[3].id, "0004");
+            assert_eq!(set[3].name, "entries_lifecycle");
         }
     }
 

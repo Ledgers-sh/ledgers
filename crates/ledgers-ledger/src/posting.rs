@@ -254,7 +254,11 @@ pub async fn plan_post_batch(
     ctx: &PostContext,
     audit: &AuditContext,
 ) -> Result<(Vec<Statement>, i64), DbError> {
-    plan_post_batch_with(db, raw, ctx, &PostOptions::default(), audit).await
+    let options = PostOptions {
+        human: audit.actor.is_person(),
+        ..Default::default()
+    };
+    plan_post_batch_with(db, raw, ctx, &options, audit).await
 }
 
 /// [`plan_post_batch`] with the port-level [`PostOptions`] applied: the
@@ -305,6 +309,7 @@ pub async fn plan_post_batch_with(
         ctx,
         &vat_period,
         expected_number,
+        options,
     ));
 
     // The guard after the insert verifies the counter equals expected_number:
@@ -398,16 +403,19 @@ fn entry_input(raw: &RawEntry, number: i64) -> serde_json::Value {
 /// The `journal_entry` insert: uses a literal number computed before the
 /// batch (avoiding the read-after-commit race of issue #71), followed by
 /// a guard statement verifying the counter is at the expected value.
+/// Sets actor to 'human' when options.human is true, else 'agent'.
 fn entry_insert_statement(
     raw: &RawEntry,
     ctx: &PostContext,
     vat_period: &str,
     number: i64,
+    options: &PostOptions,
 ) -> Statement {
+    let actor = if options.human { "human" } else { "agent" };
     Statement::with_values(
         format!(
-            "INSERT INTO {ENTRY_TABLE} (id, company_id, journal_id, fiscal_year, number, status, document_date, posting_date, tax_point_date, vat_period, recorded_at, description, source_documents, reverses, base_currency) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO {ENTRY_TABLE} (id, company_id, journal_id, fiscal_year, number, status, document_date, posting_date, tax_point_date, vat_period, recorded_at, description, source_documents, reverses, base_currency, actor) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ),
         vec![
             SeaValue::from(ctx.entry_id.as_str()),
@@ -425,6 +433,7 @@ fn entry_insert_statement(
             SeaValue::from(source_documents_json(raw)),
             SeaValue::from(raw.reverses.as_deref()),
             SeaValue::from(raw.base_currency.as_str()),
+            SeaValue::from(actor),
         ],
     )
 }
@@ -462,9 +471,50 @@ fn guard_statements(
     let balance_key = guard::guard_key(&["balanced", entry_id]);
 
     let mut statements = vec![owned(&journal_key, "journal", &raw.journal_id)];
+
+    // Reversal guards and releases (if this is a reversal).
+    let mut reversal_release_keys = Vec::new();
     if let Some(reverses) = raw.reverses.as_deref() {
+        // Reversal target ownership guard: target must exist and belong to the posting company.
         statements.push(owned(&reverses_key, ENTRY_TABLE, reverses));
+        reversal_release_keys.push(reverses_key.clone());
+
+        // Reversal invariant guards (ADR 0004 pattern):
+        let reversal_no_reversal_key = guard::guard_key(&["reversal-not-reversal", entry_id]);
+        let reversal_no_double_key = guard::guard_key(&["reversal-no-double", entry_id]);
+        let reversal_no_human_key = guard::guard_key(&["reversal-no-human-by-agent", entry_id]);
+
+        // (a) The target's own reverses IS NULL (no reversal of a reversal).
+        statements.push(guard::assert_statement(
+            &reversal_no_reversal_key,
+            &format!("(SELECT COUNT(*) FROM {ENTRY_TABLE} WHERE id = ? AND reverses IS NULL) = 1"),
+            vec![SeaValue::from(reverses)],
+        ));
+        reversal_release_keys.push(reversal_no_reversal_key);
+
+        // (b) No other journal_entry already reverses the target (UNIQUE index backs this up,
+        // but the guard makes the failure explicit and retriable via re-planning).
+        // Exclude the current entry being inserted.
+        statements.push(guard::assert_statement(
+            &reversal_no_double_key,
+            &format!("(SELECT COUNT(*) FROM {ENTRY_TABLE} WHERE reverses = ? AND id <> ?) = 0"),
+            vec![SeaValue::from(reverses), SeaValue::from(entry_id)],
+        ));
+        reversal_release_keys.push(reversal_no_double_key);
+
+        // (c) If the posting actor is 'agent', the target's actor is not 'human'.
+        if !options.human {
+            statements.push(guard::assert_statement(
+                &reversal_no_human_key,
+                &format!(
+                    "(SELECT COUNT(*) FROM {ENTRY_TABLE} WHERE id = ? AND actor != 'human') = 1"
+                ),
+                vec![SeaValue::from(reverses)],
+            ));
+            reversal_release_keys.push(reversal_no_human_key);
+        }
     }
+
     statements.push(if options.human {
         assert_postable_statement(&period_key, company, posting_period, true)
     } else {
@@ -501,13 +551,15 @@ fn guard_statements(
             subject, METER_POST, day, 1, *limit,
         ));
     }
-    statements.extend([
-        guard::release_statement(&journal_key),
-        guard::release_statement(&reverses_key),
-        guard::release_statement(&period_key),
-        guard::release_statement(&accounts_key),
-        guard::release_statement(&balance_key),
-    ]);
+
+    // Release all guards in order: journal, reversals, period, accounts, balance
+    statements.push(guard::release_statement(&journal_key));
+    for key in reversal_release_keys {
+        statements.push(guard::release_statement(&key));
+    }
+    statements.push(guard::release_statement(&period_key));
+    statements.push(guard::release_statement(&accounts_key));
+    statements.push(guard::release_statement(&balance_key));
     statements
 }
 
@@ -571,7 +623,11 @@ pub async fn post_raw_entry(
     sleep: impl FnMut(Duration),
     audit: &AuditContext,
 ) -> Result<PostedEntry, JournalError> {
-    post_raw_entry_with(db, raw, ctx, policy, sleep, &PostOptions::default(), audit).await
+    let options = PostOptions {
+        human: audit.actor.is_person(),
+        ..Default::default()
+    };
+    post_raw_entry_with(db, raw, ctx, policy, sleep, &options, audit).await
 }
 
 /// [`post_raw_entry`] with the port-level [`PostOptions`]: the same
@@ -673,7 +729,16 @@ pub async fn post_raw_entry_with(
             }
         }
         Err(err) => Err(match err {
-            ledgers_db::GuardError::Conflict { attempts } => JournalError::Conflict { attempts },
+            ledgers_db::GuardError::Conflict { attempts } => {
+                // If this is a reversal and the conflict is due to the unique
+                // index on journal_entry(reverses), diagnose as AlreadyReversed.
+                if let Some(reverses) = raw.reverses.as_deref()
+                    && let Some(err) = diagnose_reversal_unique_conflict(db, reverses).await
+                {
+                    return Err(err);
+                }
+                JournalError::Conflict { attempts }
+            }
             ledgers_db::GuardError::Database(db_error)
                 if db_error
                     .to_string()
@@ -703,6 +768,99 @@ pub async fn post_raw_entry_with(
 fn is_guard_refusal(err: &DbError) -> bool {
     let text = err.to_string().to_ascii_lowercase();
     text.contains("ledger_guard") && text.contains("null")
+}
+
+/// Diagnoses if a conflict is due to the unique constraint on `journal_entry(reverses)`.
+/// Returns [`JournalError::AlreadyReversed`] if another reversal of the target already exists.
+async fn diagnose_reversal_unique_conflict(
+    db: &dyn Database,
+    reverses: &str,
+) -> Option<JournalError> {
+    async fn scalar(db: &dyn Database, statement: Statement) -> Option<i64> {
+        let rows = db.query(&statement).await.ok()?;
+        rows.first().and_then(|row| row.get::<i64>("n"))
+    }
+
+    if scalar(
+        db,
+        Statement::with_values(
+            "SELECT COUNT(*) AS n FROM journal_entry WHERE reverses = ?".to_owned(),
+            vec![SeaValue::from(reverses)],
+        ),
+    )
+    .await?
+        > 0
+    {
+        return Some(JournalError::AlreadyReversed {
+            entry: reverses.to_owned(),
+        });
+    }
+
+    None
+}
+
+/// Diagnoses which reversal invariant guard (if any) failed.
+async fn diagnose_reversal_guards(
+    db: &dyn Database,
+    reverses: &str,
+    options: &PostOptions,
+) -> Option<JournalError> {
+    async fn scalar(db: &dyn Database, statement: Statement) -> Option<i64> {
+        let rows = db.query(&statement).await.ok()?;
+        rows.first().and_then(|row| row.get::<i64>("n"))
+    }
+
+    // (a) The target's own reverses IS NULL (no reversal of a reversal).
+    if scalar(
+        db,
+        Statement::with_values(
+            "SELECT COUNT(*) AS n FROM journal_entry WHERE id = ? AND reverses IS NULL".to_owned(),
+            vec![SeaValue::from(reverses)],
+        ),
+    )
+    .await?
+        == 0
+    {
+        return Some(JournalError::ReversalOfReversal {
+            entry: reverses.to_owned(),
+        });
+    }
+
+    // (b) No other journal_entry already reverses the target. In diagnose,
+    // we check if ANY reversal exists (the guard at posting time checks
+    // id <> current, but that entry never got inserted).
+    if scalar(
+        db,
+        Statement::with_values(
+            "SELECT COUNT(*) AS n FROM journal_entry WHERE reverses = ?".to_owned(),
+            vec![SeaValue::from(reverses)],
+        ),
+    )
+    .await?
+        > 0
+    {
+        return Some(JournalError::AlreadyReversed {
+            entry: reverses.to_owned(),
+        });
+    }
+
+    // (c) If the posting actor is 'agent', the target's actor is not 'human'.
+    if !options.human
+        && scalar(
+            db,
+            Statement::with_values(
+                "SELECT COUNT(*) AS n FROM journal_entry WHERE id = ? AND actor = 'human'"
+                    .to_owned(),
+                vec![SeaValue::from(reverses)],
+            ),
+        )
+        .await?
+            > 0
+    {
+        return Some(JournalError::HumanOnlyReversal);
+    }
+
+    None
 }
 
 /// Attributes a guard refusal to its domain error with cheap reads:
@@ -755,6 +913,12 @@ async fn diagnose_refusal(
             entry: reverses.to_owned(),
         });
     }
+
+    // Reversal invariant guards (ADR 0004 pattern): diagnose which guard failed.
+    if let Some(reverses) = raw.reverses.as_deref() {
+        return diagnose_reversal_guards(db, reverses, options).await;
+    }
+
     let posting_period = options
         .period_override
         .clone()
@@ -903,6 +1067,73 @@ fn outbox_payload(raw: &RawEntry, ctx: &PostContext, vat_period: &str) -> String
         "postedAt": ctx.recorded_at,
     })
     .to_string()
+}
+
+/// Dry run: validates entry and returns it plus provisional number (counter + 1)
+/// without writing anything. Also checks period-open and account-exists so it
+/// refuses what a post would refuse.
+///
+/// # Errors
+///
+/// Returns a [`JournalError`] if the entry fails validation checks such as
+/// period-not-open or unknown account.
+pub async fn dry_run_entry(
+    db: &dyn Database,
+    entry: &Entry,
+    ctx: &PostContext,
+) -> Result<(Entry, i64), JournalError> {
+    let current_number = numbering::read_counter(db, &entry.journal_id, ctx.fiscal_year)
+        .await?
+        .unwrap_or(0);
+    let provisional = current_number + 1;
+
+    let posting_period = entry.posting_period();
+    let company = &entry.company_id;
+
+    // Period-open check.
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT status FROM accounting_period WHERE company_id = ? AND period = ?".to_owned(),
+            vec![
+                SeaValue::from(company),
+                SeaValue::from(posting_period.as_str()),
+            ],
+        ))
+        .await?;
+
+    let is_open = rows
+        .first()
+        .and_then(|row| row.get::<String>("status"))
+        .as_deref()
+        == Some("open");
+
+    if !is_open {
+        return Err(JournalError::PeriodNotOpen {
+            period: posting_period,
+        });
+    }
+
+    // Accounts-exist check.
+    for line in &entry.lines {
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT 1 FROM account WHERE company_id = ? AND number = ? AND archived = 0"
+                    .to_owned(),
+                vec![
+                    SeaValue::from(company),
+                    SeaValue::from(line.account_number.as_str()),
+                ],
+            ))
+            .await?;
+
+        if rows.is_empty() {
+            return Err(JournalError::UnknownAccount {
+                account: line.account_number.clone(),
+            });
+        }
+    }
+
+    Ok((entry.clone(), provisional))
 }
 
 #[cfg(test)]

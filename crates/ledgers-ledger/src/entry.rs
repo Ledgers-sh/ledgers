@@ -567,6 +567,24 @@ pub enum JournalError {
         entry: String,
     },
 
+    /// The entry to be reversed is itself a reversal, which is forbidden.
+    #[error("cannot reverse a reversal (entry {entry} is a reversal itself)")]
+    ReversalOfReversal {
+        /// The reversal entry being reversed.
+        entry: String,
+    },
+
+    /// A reversal target has already been reversed by another entry.
+    #[error("entry {entry} has already been reversed")]
+    AlreadyReversed {
+        /// The entry that was already reversed.
+        entry: String,
+    },
+
+    /// An agent attempted to reverse a human-posted entry, which is human-only.
+    #[error("reversing a human-posted entry is human-only; an agent key cannot perform it")]
+    HumanOnlyReversal,
+
     /// The entry id was already used to post an entry to a different
     /// journal. Entry ids are idempotency keys: a resubmit with the same
     /// id returns the original entry (if it posted) or lets it post again
@@ -703,7 +721,7 @@ impl JournalError {
             JournalError::InvalidJournalCode { code, .. } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("code", code.clone()),
-            JournalError::InvalidJournalName { .. } => {
+            JournalError::InvalidJournalName { .. } | JournalError::HumanOnlyReversal => {
                 Problem::new(&JOURNAL_ENTRY_REFUSED).with_detail(self.to_string())
             }
             JournalError::UnknownKind { value } => Problem::new(&JOURNAL_ENTRY_REFUSED)
@@ -721,7 +739,9 @@ impl JournalError {
             JournalError::ForeignJournal { journal } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("journal", journal.clone()),
-            JournalError::ForeignReversal { entry } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+            JournalError::ForeignReversal { entry }
+            | JournalError::ReversalOfReversal { entry }
+            | JournalError::AlreadyReversed { entry } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("entry", entry.clone()),
             JournalError::EntryIdAlreadyUsed { entry_id } => Problem::new(&JOURNAL_ENTRY_REFUSED)

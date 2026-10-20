@@ -173,9 +173,7 @@ pub const COMMANDS: &[CommandSpec] = &[
 /// the reason each one is exempt. A function listed here is a
 /// deliberate, reviewed decision; anything unlisted and unregistered
 /// fails `tests/audit_registry.rs`.
-///
-/// Empty today: every public async function in the four command modules
-/// is in [`COMMANDS`]. The constant exists so the next non-command
-/// (`#[doc(hidden)]` scaffolding, a pure planner) has somewhere to say
-/// why, instead of prompting someone to weaken the scan.
-pub const EXEMPT: &[(&str, &str)] = &[];
+pub const EXEMPT: &[(&str, &str)] = &[(
+    "posting::dry_run_entry",
+    "read-only validation; no audit event",
+)];
