@@ -17,7 +17,7 @@ cratefield-runtime-native = "=0.4.4"
 # (port conformance only, no harness graph); a crate that wants the harness
 # (TestHarness, fakes) adds `features = ["harness"]`, which is the kit's
 # default feature set.
-cratefield-testing = { version = "=0.5.3", default-features = false, features = [
+cratefield-testing = { version = "=0.5.4", default-features = false, features = [
     "port-conformance",
 ] }
 # The `fz` CLI (doctor, migration collection); 0.7.0 is the release of the
