@@ -8,6 +8,7 @@ publish = false
 
 [features]
 postgres = ["cratefield-testing/postgres"]
+testing = []
 
 [dependencies]
 cratefield-core = { workspace = true }

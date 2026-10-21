@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+testing = []
+
 [dependencies]
 async-trait = { workspace = true }
 cratefield-core = { workspace = true }

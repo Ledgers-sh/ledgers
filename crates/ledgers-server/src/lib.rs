@@ -1,6 +1,12 @@
+#![forbid(unsafe_code)]
 //! Placeholder for the Ledgers server — the harness composition of the Worker
 //! and native runtimes lands in later issues; see docs/PLAN.md §6 and
 //! docs/adr/0001 for the pinned harness.
+//!
+//! This crate holds the [`config::LedgersConfig`] composition point: the
+//! server wires the extension trait implementations here at startup.
+
+pub mod config;
 
 /// Placeholder marker type for the future Ledgers server composition.
 #[derive(Debug)]

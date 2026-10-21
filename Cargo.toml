@@ -72,6 +72,10 @@ ledgers-policy = { path = "crates/ledgers-policy" }
 ledgers-auth = { path = "crates/ledgers-auth" }
 # Approval requests with journal preview and passkey step-up (issue #13).
 ledgers-approvals = { path = "crates/ledgers-approvals" }
+# Extension traits with open defaults (issue #14).
+ledgers-ext = { path = "crates/ledgers-ext" }
+# Chart of accounts, journals, entries, periods, closures (issues #5, #6, #7).
+ledgers-ledger = { path = "crates/ledgers-ledger" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"

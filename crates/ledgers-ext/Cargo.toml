@@ -1,0 +1,25 @@
+[package]
+name = "ledgers-ext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+testing = []
+
+[dependencies]
+async-trait = { workspace = true }
+ledgers-commands = { workspace = true }
+ledgers-money = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+pollster = { workspace = true, features = ["macro"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lints]
+workspace = true
