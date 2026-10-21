@@ -15,7 +15,7 @@ pub mod identity;
 pub mod keys;
 pub mod session;
 
-pub use identity::IdentityProvider;
+pub use identity::{IdentityProvider, OwnerPasskeys};
 pub use keys::{
     AgentKeyDirectory, AgentKeyIssue, AgentKeys, Clock, KeyAuthenticator, KeyDirectoryEntry,
 };

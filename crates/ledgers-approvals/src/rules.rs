@@ -64,14 +64,14 @@ impl ApprovalRules for OwnerApprovesAll {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(any(test, feature = "testing"))]
+pub mod contract_tests {
+    use super::{ApprovalRequest, ApprovalRules, Principal, StepUp};
     use crate::approval::Status;
     use ledgers_commands::Tier;
     use std::collections::BTreeMap;
 
-    fn dummy_request() -> ApprovalRequest {
+    fn dummy_request_with_effect() -> ApprovalRequest {
         let mut effect = BTreeMap::new();
         effect.insert("EUR".to_string(), "10000".to_string());
 
@@ -94,38 +94,56 @@ mod tests {
         }
     }
 
-    #[test]
-    fn owner_may_approve() {
-        let rules = OwnerApprovesAll;
-        let owner = Principal::Person {
+    /// Contract test for `ApprovalRules` implementations.
+    ///
+    /// Verifies critical invariants:
+    /// - An agent principal never gets approval (security: agents cannot approve).
+    /// - High-risk approvals (money movement) require passkey step-up.
+    /// - A person principal may approve (the owner in the open default).
+    ///
+    /// # Panics
+    /// Panics if the invariants are violated.
+    pub fn approval_rules(rules: &dyn ApprovalRules) {
+        let person = Principal::Person {
             person_id: "alice".to_string(),
         };
-        assert!(rules.may_approve(&owner, &dummy_request()));
-    }
-
-    #[test]
-    fn agent_cannot_approve() {
-        let rules = OwnerApprovesAll;
         let agent = Principal::Agent {
             key_id: "key1".to_string(),
             tier: Tier::Read,
             limits: ledgers_commands::Limits::new(),
         };
-        assert!(!rules.may_approve(&agent, &dummy_request()));
+
+        // Request with money movement
+        let request_with_effect = dummy_request_with_effect();
+
+        // Agents never get approval
+        assert!(
+            !rules.may_approve(&agent, &request_with_effect),
+            "agent principal must never be approved to approve"
+        );
+
+        // Person may approve
+        assert!(
+            rules.may_approve(&person, &request_with_effect),
+            "person principal must be able to approve"
+        );
+
+        // Money movement requires passkey
+        let step_up = rules.step_up(&request_with_effect);
+        assert_eq!(
+            step_up,
+            StepUp::Passkey,
+            "high-risk approval must require passkey step-up"
+        );
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
-    fn step_up_session_when_no_effect() {
-        let rules = OwnerApprovesAll;
-        let mut req = dummy_request();
-        req.effect.clear();
-        assert_eq!(rules.step_up(&req), StepUp::Session);
-    }
-
-    #[test]
-    fn step_up_passkey_with_money_movement() {
-        let rules = OwnerApprovesAll;
-        let req = dummy_request();
-        assert_eq!(rules.step_up(&req), StepUp::Passkey);
+    fn contract_tests_pass() {
+        contract_tests::approval_rules(&OwnerApprovesAll);
     }
 }

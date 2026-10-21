@@ -11,6 +11,7 @@ publish = false
 # by CI and a local postgres:16 (FZ_TEST_POSTGRES_URL). The lib itself
 # stays wasm-clean without it.
 postgres = ["cratefield-testing/postgres"]
+testing = []
 
 [dependencies]
 # The lib is wasm32-clean: core, the light port-conformance surface of the

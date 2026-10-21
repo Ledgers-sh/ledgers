@@ -285,3 +285,36 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(test, feature = "testing"))]
+pub mod contract_tests {
+    use super::{CloseCheck, CloseCheckContext};
+
+    /// Contract test for `CloseCheck` implementations.
+    ///
+    /// Verifies that:
+    /// - The check has a non-empty, stable id.
+    /// - The check can be called against an empty context without error.
+    ///
+    /// # Panics
+    /// Panics if the invariants are violated.
+    pub async fn close_check<'a>(check: &'a dyn CloseCheck, ctx: CloseCheckContext<'a>) {
+        let id = check.id();
+        assert!(!id.is_empty(), "CloseCheck id must be non-empty");
+
+        // Should not panic or error on empty context
+        let result = check.blockers(ctx).await;
+        assert!(result.is_ok(), "blockers() must not error on empty context");
+
+        let blockers = result.unwrap();
+        for blocker in blockers {
+            assert!(
+                !blocker.check_id.is_empty(),
+                "blocker check_id must not be empty"
+            );
+            assert!(!blocker.kind.is_empty(), "blocker kind must not be empty");
+            assert!(blocker.count >= 0, "blocker count must be non-negative");
+            assert!(!blocker.link.is_empty(), "blocker link must not be empty");
+        }
+    }
+}
