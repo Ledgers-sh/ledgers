@@ -39,6 +39,10 @@ proptest = "1"
 # Async traits (wasm-clean with ?Send):
 async-trait = "0.1"
 
+# Tracing: subscriber for instrumentation (used in tests for log capture):
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
 # JSON schema generation — matches cratefield-core 0.10.1's 1.2.3 (no duplicate versions):
 schemars = "1.2"
 
@@ -64,6 +68,8 @@ ledgers-audit = { path = "crates/ledgers-audit" }
 ledgers-commands = { path = "crates/ledgers-commands" }
 # Agent key policy, tiers, limits, and decision-making (issue #11).
 ledgers-policy = { path = "crates/ledgers-policy" }
+# Authentication, identity, and session management (issue #12).
+ledgers-auth = { path = "crates/ledgers-auth" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"
