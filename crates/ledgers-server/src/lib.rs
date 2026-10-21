@@ -1,24 +1,90 @@
 #![forbid(unsafe_code)]
-//! Placeholder for the Ledgers server — the harness composition of the Worker
-//! and native runtimes lands in later issues; see docs/PLAN.md §6 and
-//! docs/adr/0001 for the pinned harness.
-//!
-//! This crate holds the [`config::LedgersConfig`] composition point: the
-//! server wires the extension trait implementations here at startup.
+//! Ledgers server composition: harness and modules.
 
 pub mod config;
+pub mod documents;
+pub mod openapi;
+pub mod routes;
 
-/// Placeholder marker type for the future Ledgers server composition.
-#[derive(Debug)]
-pub struct Server;
+/// Cloudflare Workers entry point (wasm32 only)
+#[cfg(target_arch = "wasm32")]
+pub mod worker;
 
-#[cfg(test)]
-mod tests {
-    use super::Server;
+pub use config::LedgersConfig;
+pub use routes::Dispatch;
 
-    #[test]
-    fn placeholder_type_is_unit_struct() {
-        let server = Server;
-        assert_eq!(format!("{server:?}"), "Server");
+use cratefield_core::{Config, ConfigError, Harness, Runtime, Venture, VentureEnv};
+use ledgers_commands::Registry;
+use std::sync::Arc;
+
+/// Builds the Ledgers Harness with all modules.
+///
+/// # Arguments
+///
+/// * `registry` - The command registry
+/// * `cfg` - Configuration provider (reads environment variables)
+/// * `runtime` - The runtime (native, cloudflare, etc.) that provides ports
+pub fn harness(
+    registry: &Registry,
+    cfg: &dyn Config,
+    runtime: impl Runtime + 'static,
+) -> Result<Harness, ConfigError> {
+    // Create the venture
+    let domain = cfg
+        .get("LEDGERS_DOMAIN")
+        .unwrap_or_else(|| "ledgers.localhost".to_string());
+    let public_url = cfg
+        .get("LEDGERS_PUBLIC_URL")
+        .unwrap_or_else(|| format!("http://{domain}"));
+
+    // Default CORS origins for development
+    let cors_origins = cfg
+        .get("LEDGERS_CORS_ORIGINS")
+        .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+        .unwrap_or_else(|| vec![public_url.clone(), "http://localhost:3000".to_string()]);
+
+    let venture = Venture::new("ledgers", &domain)
+        .public_url(public_url)
+        .cors_origins(cors_origins)
+        .env(VentureEnv::Development);
+
+    // Create dispatch
+    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(routes::Unwired);
+
+    // Generate domain modules
+    let domain_mods = routes::domain_modules(registry, Arc::clone(&dispatch)).map_err(|e| {
+        let mut errors = cratefield_core::ConfigError::default();
+        errors.push(e);
+        errors
+    })?;
+
+    // Build harness with modules in dependency order
+    let builder = Harness::builder().venture(venture).runtime(runtime);
+
+    let builder = builder.module(ledgers_storage::StorageModule);
+    let builder = builder.module(ledgers_db::module::DbModule);
+    let builder = builder.module(ledgers_ledger::module::LedgerModule);
+    let builder = builder.module(ledgers_policy::module::PolicyModule);
+    let builder = builder.module(ledgers_approvals::module::ApprovalsModule);
+    let builder = builder.module(ledgers_fx::FxModule);
+    let builder = builder.module(ledgers_tax::module::TaxModule);
+
+    let mut builder = builder;
+    for module in domain_mods {
+        builder = builder.module_arc(module);
     }
+
+    // Documents module - requires Blob and IdGen ports
+    let docs_module = documents::DocumentsModule::from_config(cfg).map_err(|e| {
+        let mut errors = cratefield_core::ConfigError::default();
+        errors.push(e);
+        errors
+    })?;
+    let builder = builder.module(docs_module);
+
+    // Add OpenAPI module
+    let openapi_module = openapi::OpenApiModule::new(registry);
+    let builder = builder.module(openapi_module);
+
+    builder.build()
 }

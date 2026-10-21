@@ -1,0 +1,16 @@
+# Ledgers server configuration for local development
+# Copy to .dev.vars and fill in actual values for local testing
+
+# Harness
+HARNESS_SECRET="your-harness-secret-at-least-32-bytes-long"
+
+# Domain
+LEDGERS_DOMAIN="ledgers.localhost"
+
+# Documents module
+DOCUMENTS_MAX_LARGE_BLOB_BYTES="33554432"
+
+# Native runtime only (not used in Cloudflare Workers)
+DATABASE_PATH="ledgers.db"
+BLOB_DIR="./blobs"
+LISTEN_ADDR="127.0.0.1:8080"

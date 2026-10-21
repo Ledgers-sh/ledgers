@@ -13,6 +13,7 @@ repository = "https://github.com/Ledgers-sh/ledgers"
 cratefield-core = "=0.10.1"
 cratefield-runtime-cloudflare = "=0.5.0"
 cratefield-runtime-native = "=0.4.4"
+cratefield-adapter-sqlite = "=0.3.2"
 # The workspace default for the testing kit is its light, wasm-clean surface
 # (port conformance only, no harness graph); a crate that wants the harness
 # (TestHarness, fakes) adds `features = ["harness"]`, which is the kit's
@@ -38,6 +39,13 @@ proptest = "1"
 
 # Async traits (wasm-clean with ?Send):
 async-trait = "0.1"
+
+# Bytes: used by streaming routes
+bytes = "1"
+
+# Futures: used by streaming routes
+futures-core = "0.3"
+futures-util = "0.3"
 
 # Tracing: subscriber for instrumentation (used in tests for log capture):
 tracing = "0.1"
@@ -76,6 +84,12 @@ ledgers-approvals = { path = "crates/ledgers-approvals" }
 ledgers-ext = { path = "crates/ledgers-ext" }
 # Chart of accounts, journals, entries, periods, closures (issues #5, #6, #7).
 ledgers-ledger = { path = "crates/ledgers-ledger" }
+# Storage foundation (issue #4).
+ledgers-storage = { path = "crates/ledgers-storage" }
+# Exchange rates (issue #5 FX subsection).
+ledgers-fx = { path = "crates/ledgers-fx" }
+# Tax codes and calculations (issue #5 tax subsection).
+ledgers-tax = { path = "crates/ledgers-tax" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"
