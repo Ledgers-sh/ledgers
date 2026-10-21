@@ -8,6 +8,9 @@ allow = [
   "Unicode-3.0",
   "Unicode-DFS-2016",
   "Zlib",
+  # Boost Software License 1.0: permissive, OSI-approved. Reached via
+  # xxhash-rust (redis -> cratefield-runtime-native). Compatible with MIT.
+  "BSL-1.0",
 ]
 confidence-threshold = 0.93
 
