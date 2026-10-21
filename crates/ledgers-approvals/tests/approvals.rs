@@ -15,7 +15,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-const COMPANY_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const COMPANY_ID: &str = "test-company-01234567890123";
 const NOW: &str = "2026-01-15T09:30:00Z";
 const OWNER_PERSON_ID: &str = "owner-person-id";
 const AGENT_KEY_ID: &str = "agent-key-id";
@@ -190,7 +190,7 @@ impl Policy for TestPolicy {
 // ============================================================================
 
 struct VirtualAuthenticator {
-    signing_key: p256::ecdsa::SigningKey,
+    signer: p256::ecdsa::SigningKey,
 }
 
 impl VirtualAuthenticator {
@@ -198,12 +198,12 @@ impl VirtualAuthenticator {
         use p256::SecretKey;
         let seed = [42u8; 32];
         let secret = SecretKey::from_slice(&seed).expect("valid seed");
-        let signing_key = p256::ecdsa::SigningKey::from(secret);
-        VirtualAuthenticator { signing_key }
+        let signer = p256::ecdsa::SigningKey::from(secret);
+        VirtualAuthenticator { signer }
     }
 
     fn public_key_sec1_uncompressed(&self) -> Vec<u8> {
-        let verifying_key = p256::ecdsa::VerifyingKey::from(&self.signing_key);
+        let verifying_key = p256::ecdsa::VerifyingKey::from(&self.signer);
         verifying_key.to_encoded_point(false).as_bytes().to_vec()
     }
 
@@ -226,7 +226,7 @@ impl VirtualAuthenticator {
 
         let mut message = auth_data.clone();
         message.extend_from_slice(client_data_hash.as_slice());
-        let signature: p256::ecdsa::Signature = self.signing_key.sign(&message);
+        let signature: p256::ecdsa::Signature = self.signer.sign(&message);
 
         let public_key_bytes = self.public_key_sec1_uncompressed();
 
