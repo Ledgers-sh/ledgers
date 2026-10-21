@@ -50,6 +50,11 @@ pub enum CommandError {
     #[error(transparent)]
     Database(#[from] cratefield_core::DbError),
 
+    /// The approval request has been superseded: the command or its reads changed
+    /// after the approval was requested.
+    #[error("approval request superseded")]
+    Superseded,
+
     /// A domain error from another crate (e.g., ledgers-ledger, ledgers-audit).
     /// The problem is carried through unchanged.
     #[error(transparent)]
@@ -100,6 +105,9 @@ impl CommandError {
                 Problem::new(&CONFLICT)
                     .with_detail(format!("posting conflicted after {attempts} attempts"))
                     .with_extension("attempts", attempts_i32)
+            }
+            CommandError::Superseded => {
+                Problem::new(&SUPERSEDED).with_detail("approval request has been superseded")
             }
             CommandError::Database(err) => {
                 Problem::new(&DATABASE_ERROR).with_detail(err.to_string())
@@ -163,6 +171,14 @@ pub const CONFLICT: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
     status: cratefield_core::axum::http::StatusCode::CONFLICT,
     title: "Conflict",
     description: "The operation conflicted after retries.",
+};
+
+/// Superseded: 409
+pub const SUPERSEDED: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "superseded",
+    status: cratefield_core::axum::http::StatusCode::CONFLICT,
+    title: "Approval superseded",
+    description: "The approval request has been superseded by changes to the command or its inputs.",
 };
 
 /// Database error: 500

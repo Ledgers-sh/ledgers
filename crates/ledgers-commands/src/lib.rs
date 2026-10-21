@@ -38,7 +38,7 @@ pub mod registry;
 pub use auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 pub use command::{Command, CommandContext, Plan};
 pub use error::{CommandError, PROBLEM_BASE};
-pub use exec::{ExecToken, Execute, Executed, Executor};
+pub use exec::{Approval, ExecToken, Execute, Executed, Executor, request_hash};
 pub use journal_preview::JournalPreview;
 pub use policy::{Decision, DefaultPolicy, Policy};
 pub use registry::{CommandDescriptor, CommandMeta, Registry};

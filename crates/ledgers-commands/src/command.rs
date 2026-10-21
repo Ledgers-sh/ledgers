@@ -95,6 +95,27 @@ pub trait Command: Send + Sync {
         input: &Self::Input,
     ) -> Result<JournalPreview, CommandError>;
 
+    /// Reads the command accesses: returns a map of object ids to their versions.
+    ///
+    /// For approval request tracking, commands can declare which objects they
+    /// read and their versions at read time. This prevents approvals from being
+    /// replayed onto modified data (e.g., a bill amount changed after the
+    /// approval was requested).
+    ///
+    /// The default implementation returns an empty map (no reads tracked).
+    /// Provisional/non-persistent object numbers must never be included.
+    ///
+    /// # Errors
+    /// Returns a `CommandError` if reading versions fails.
+    async fn reads(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<std::collections::BTreeMap<String, String>, CommandError> {
+        Ok(std::collections::BTreeMap::new())
+    }
+
     /// Plans what this command will do: the SQL statements to execute,
     /// the output, and the objects touched (for audit).
     ///
