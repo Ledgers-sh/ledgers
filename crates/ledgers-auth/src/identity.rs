@@ -35,7 +35,7 @@ pub trait IdentityProvider: Send + Sync {
 /// with actual passkey assertion verification against stored credentials.
 /// This is safer than accepting unverified input.
 ///
-/// A custom `IdentityProvider` in `ledgers-cloud` can plug in SSO or other
+/// A custom `IdentityProvider` in a managed-service crate can plug in SSO or other
 /// authentication methods at composition time.
 #[derive(Clone, Copy, Debug)]
 pub struct OwnerPasskeys;
