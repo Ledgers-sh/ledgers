@@ -128,7 +128,7 @@ async fn upload_11mb_pdf_without_opt_in_returns_413() {
     // Upload in multiple chunks to exercise streaming
     let chunks = pdf_bytes
         .chunks(1024 * 1024)
-        .map(|c| Bytes::copy_from_slice(c))
+        .map(Bytes::copy_from_slice)
         .collect();
 
     let response = upload(&harness, chunks).await;
@@ -189,7 +189,7 @@ async fn upload_25mb_pdf_with_large_blob_opt_in_succeeds() {
     // Upload in multiple chunks
     let chunks = pdf_bytes
         .chunks(1024 * 1024)
-        .map(|c| Bytes::copy_from_slice(c))
+        .map(Bytes::copy_from_slice)
         .collect();
 
     let response = upload(&harness, chunks).await;

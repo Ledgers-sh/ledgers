@@ -1,4 +1,4 @@
-//! DocumentsModule: document uploads via streaming to the Blob port.
+//! `DocumentsModule`: document uploads via streaming to the Blob port.
 //!
 //! Provides `/v1/documents/upload` for streaming document uploads with
 //! configurable size limits. Default cap is `MAX_BLOB_BYTES` (10 MiB);
@@ -68,8 +68,7 @@ impl DocumentsModule {
                 })?;
                 if bytes > MAX_LARGE_BLOB_BYTES {
                     return Err(format!(
-                        "DOCUMENTS_MAX_LARGE_BLOB_BYTES must be <= {}, got {bytes}",
-                        MAX_LARGE_BLOB_BYTES
+                        "DOCUMENTS_MAX_LARGE_BLOB_BYTES must be <= {MAX_LARGE_BLOB_BYTES}, got {bytes}"
                     ));
                 }
                 bytes
@@ -136,6 +135,7 @@ impl Module for DocumentsModule {
         // Set max_bytes to MAX_LARGE_BLOB_BYTES (the harness ceiling) so the
         // streamer cannot buffer more than we're willing to accept. Per-request
         // enforcement happens in the handler via the configured max_object_bytes.
+        #[allow(clippy::cast_possible_truncation)]
         const ROUTES: &[StreamRoute] =
             &[StreamRoute::post("/upload", MAX_LARGE_BLOB_BYTES as usize)];
         ROUTES
@@ -154,6 +154,7 @@ struct UploadResponse {
 }
 
 /// Axum handler for streaming uploads: extracts stream, state, and headers.
+#[allow(clippy::result_large_err)]
 async fn handle_upload_handler(
     State(state): State<UploadState>,
     headers: axum::http::HeaderMap,
@@ -163,21 +164,21 @@ async fn handle_upload_handler(
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(ToString::to_string);
 
     // Check content-type early to return 415 instead of 400
-    if let Some(ref ct) = content_type {
-        if !ALLOWED_CONTENT_TYPES.contains(&ct.as_str()) {
-            return Err((
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                format!(
-                    "content-type '{}' not allowed; supported: {}",
-                    ct,
-                    ALLOWED_CONTENT_TYPES.join(", ")
-                ),
-            )
-                .into_response());
-        }
+    if let Some(ref ct) = content_type
+        && !ALLOWED_CONTENT_TYPES.contains(&ct.as_str())
+    {
+        return Err((
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            format!(
+                "content-type '{}' not allowed; supported: {}",
+                ct,
+                ALLOWED_CONTENT_TYPES.join(", ")
+            ),
+        )
+            .into_response());
     }
 
     handle_upload(
@@ -188,7 +189,7 @@ async fn handle_upload_handler(
         state.max_object_bytes,
     )
     .await
-    .map_err(|e| e.into_response())
+    .map_err(IntoResponse::into_response)
 }
 
 /// The document upload handler: streams the body to blob storage.
@@ -234,7 +235,7 @@ async fn handle_upload(
     Ok((
         StatusCode::CREATED,
         Json(UploadResponse {
-            key: format!("documents/{}", doc_id),
+            key: format!("documents/{doc_id}"),
             bytes: uploaded_bytes,
             content_type: ct,
         }),
@@ -286,7 +287,7 @@ mod tests {
         let result = DocumentsModule::from_config(&TestConfig);
         assert!(result.is_ok());
         let module = result.unwrap();
-        assert_eq!(module.max_object_bytes, 33554432);
+        assert_eq!(module.max_object_bytes, 33_554_432);
     }
 
     #[test]
@@ -341,7 +342,7 @@ mod tests {
             }
         }
         let module = DocumentsModule::from_config(&TestConfig).unwrap();
-        assert_eq!(module.max_blob_object_bytes(), 20971520);
+        assert_eq!(module.max_blob_object_bytes(), 20_971_520);
     }
 
     #[test]
@@ -351,7 +352,10 @@ mod tests {
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/upload");
         assert_eq!(routes[0].method, axum::http::Method::POST);
-        assert_eq!(routes[0].max_bytes, MAX_LARGE_BLOB_BYTES as usize);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            assert_eq!(routes[0].max_bytes, MAX_LARGE_BLOB_BYTES as usize);
+        }
     }
 
     #[test]

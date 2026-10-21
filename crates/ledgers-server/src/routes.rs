@@ -43,7 +43,7 @@ impl Dispatch for Unwired {
         _credential: Option<String>,
     ) -> Result<Value, Problem> {
         Err(Problem::internal()
-            .with_detail(format!("command '{}' not yet implemented", command))
+            .with_detail(format!("command '{command}' not yet implemented"))
             .instance(request_id))
     }
 }
@@ -183,19 +183,17 @@ fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
     headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            if s.starts_with("Bearer ") {
-                Some(s[7..].to_string())
-            } else {
-                None
-            }
-        })
+        .and_then(|s| s.strip_prefix("Bearer ").map(ToString::to_string))
 }
 
 /// Generate domain modules from the registry.
+///
+/// # Errors
+///
+/// Returns an error if a domain collides with a reserved module name.
 pub fn domain_modules(
     registry: &Registry,
-    dispatch: Arc<dyn Dispatch>,
+    dispatch: &Arc<dyn Dispatch>,
 ) -> Result<Vec<Arc<dyn Module>>, String> {
     let reserved = [
         "storage",
@@ -214,28 +212,27 @@ pub fn domain_modules(
 
     for descriptor in registry.iter() {
         let path = &descriptor.http_path;
-        if let Some(after_v1) = path.strip_prefix("/v1/") {
-            if let Some(first_segment) = after_v1.split('/').next() {
-                let domain = first_segment.to_string();
-                let relative_path = format!(
-                    "/{}",
-                    after_v1.strip_prefix(&format!("{}/", domain)).unwrap_or("")
-                );
+        if let Some(after_v1) = path.strip_prefix("/v1/")
+            && let Some(first_segment) = after_v1.split('/').next()
+        {
+            let domain = first_segment.to_string();
+            let relative_path = format!(
+                "/{}",
+                after_v1.strip_prefix(&format!("{domain}/")).unwrap_or("")
+            );
 
-                domains.entry(domain).or_insert_with(Vec::new).push((
-                    descriptor.http_method.clone(),
-                    relative_path,
-                    descriptor.name.clone(),
-                ));
-            }
+            domains.entry(domain).or_default().push((
+                descriptor.http_method.clone(),
+                relative_path,
+                descriptor.name.clone(),
+            ));
         }
     }
 
     for domain in domains.keys() {
         if reserved.contains(&domain.as_str()) {
             return Err(format!(
-                "domain '{}' collides with reserved module name",
-                domain
+                "domain '{domain}' collides with reserved module name"
             ));
         }
     }
@@ -245,11 +242,8 @@ pub fn domain_modules(
 
     let mut modules: Vec<Arc<dyn Module>> = Vec::new();
     for (domain, routes) in sorted_domains {
-        let module = DomainModule::new(
-            Box::leak(domain.into_boxed_str()),
-            Arc::clone(&dispatch),
-            routes,
-        );
+        let module =
+            DomainModule::new(Box::leak(domain.into_boxed_str()), dispatch.clone(), routes);
         modules.push(Arc::new(module));
     }
 

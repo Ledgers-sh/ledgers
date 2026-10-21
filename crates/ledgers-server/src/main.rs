@@ -2,7 +2,7 @@
 //! Ledgers server: native binary entry point.
 //!
 //! Runs the Ledgers harness on the native runtime with SQLite or Postgres,
-//! depending on the DATABASE_URL environment variable.
+//! depending on the `DATABASE_URL` environment variable.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {

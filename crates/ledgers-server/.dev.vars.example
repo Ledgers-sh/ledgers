@@ -2,7 +2,8 @@
 # Copy to .dev.vars and fill in actual values for local testing
 
 # Harness
-HARNESS_SECRET="your-harness-secret-at-least-32-bytes-long"
+# generate with: openssl rand -hex 32
+HARNESS_SECRET=
 
 # Domain
 LEDGERS_DOMAIN="ledgers.localhost"

@@ -24,6 +24,10 @@ use std::sync::Arc;
 /// * `registry` - The command registry
 /// * `cfg` - Configuration provider (reads environment variables)
 /// * `runtime` - The runtime (native, cloudflare, etc.) that provides ports
+///
+/// # Errors
+///
+/// Returns `ConfigError` if configuration is invalid.
 pub fn harness(
     registry: &Registry,
     cfg: &dyn Config,
@@ -38,10 +42,10 @@ pub fn harness(
         .unwrap_or_else(|| format!("http://{domain}"));
 
     // Default CORS origins for development
-    let cors_origins = cfg
-        .get("LEDGERS_CORS_ORIGINS")
-        .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
-        .unwrap_or_else(|| vec![public_url.clone(), "http://localhost:3000".to_string()]);
+    let cors_origins = cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
+        || vec![public_url.clone(), "http://localhost:3000".to_string()],
+        |s| s.split(',').map(|s| s.trim().to_string()).collect(),
+    );
 
     let venture = Venture::new("ledgers", &domain)
         .public_url(public_url)
@@ -52,7 +56,7 @@ pub fn harness(
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(routes::Unwired);
 
     // Generate domain modules
-    let domain_mods = routes::domain_modules(registry, Arc::clone(&dispatch)).map_err(|e| {
+    let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {
         let mut errors = cratefield_core::ConfigError::default();
         errors.push(e);
         errors

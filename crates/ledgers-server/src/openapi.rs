@@ -1,6 +1,6 @@
-//! OpenAPI 3.1.0 document generation from the command registry.
+//! `OpenAPI` 3.1.0 document generation from the command registry.
 //!
-//! Serves OpenAPI specification at `/v1/openapi`. The module name "openapi"
+//! Serves `OpenAPI` specification at `/v1/openapi`. The module name "openapi"
 //! is nested by the harness at `/v1/{name}` (cratefield-core harness.rs:442),
 //! so routes within this module are relative to that prefix.
 
@@ -9,13 +9,14 @@ use cratefield_core::{Config, ConfigError, Migrations, Module, ModuleContext, Po
 use ledgers_commands::Registry;
 use serde_json::{Value, json};
 
-/// OpenAPI module serving /v1/openapi
+/// `OpenAPI` module serving /v1/openapi
 pub struct OpenApiModule {
     doc: Value,
 }
 
 impl OpenApiModule {
-    /// Create a new OpenAPI module with the given registry.
+    /// Create a new `OpenAPI` module with the given registry.
+    #[must_use]
     pub fn new(registry: &Registry) -> Self {
         Self {
             doc: document(registry),
@@ -56,8 +57,9 @@ impl Module for OpenApiModule {
     }
 }
 
-/// Generates an OpenAPI 3.1.0 document from the registry.
+/// Generates an `OpenAPI` 3.1.0 document from the registry.
 /// Self-contained: all $refs are resolved within the document.
+#[must_use]
 pub fn document(registry: &Registry) -> Value {
     let mut paths: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut components_schemas: serde_json::Map<String, Value> = serde_json::Map::new();
@@ -290,7 +292,7 @@ mod tests {
         // Check $defs are collected
         assert!(components.contains_key("Amount"));
         // Check $defs are removed from schema
-        assert!(!rewritten.get("$defs").is_some());
+        assert!(rewritten.get("$defs").is_none());
         // Check $ref is rewritten
         assert_eq!(
             rewritten["properties"]["value"]["$ref"],

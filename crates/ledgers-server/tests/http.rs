@@ -186,16 +186,15 @@ fn check_refs_resolved(value: &serde_json::Value, root: &serde_json::Value) {
         serde_json::Value::Object(map) => {
             for (key, val) in map {
                 if key == "$ref" {
-                    if let Some(ref_str) = val.as_str() {
-                        if ref_str.starts_with("#/components/schemas/") {
-                            let schema_name = &ref_str[21..]; // Skip "#/components/schemas/"
-                            let exists = root
-                                .get("components")
-                                .and_then(|c| c.get("schemas"))
-                                .and_then(|s| s.get(schema_name))
-                                .is_some();
-                            assert!(exists, "ref {} does not resolve to a component", ref_str);
-                        }
+                    if let Some(ref_str) = val.as_str()
+                        && let Some(schema_name) = ref_str.strip_prefix("#/components/schemas/")
+                    {
+                        let exists = root
+                            .get("components")
+                            .and_then(|c| c.get("schemas"))
+                            .and_then(|s| s.get(schema_name))
+                            .is_some();
+                        assert!(exists, "ref {ref_str} does not resolve to a component");
                     }
                 } else {
                     check_refs_resolved(val, root);
