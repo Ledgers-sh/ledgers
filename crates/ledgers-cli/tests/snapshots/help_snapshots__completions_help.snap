@@ -1,0 +1,13 @@
+---
+source: crates/ledgers-cli/tests/help_snapshots.rs
+expression: help
+---
+Generate shell completions
+
+Usage: completions <SHELL>
+
+Arguments:
+  <SHELL>  Shell type: bash, zsh, fish, powershell
+
+Options:
+  -h, --help  Print help

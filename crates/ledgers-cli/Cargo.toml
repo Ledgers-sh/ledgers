@@ -32,9 +32,6 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "linux-
 # Config files
 toml = { workspace = true }
 
-# Home directory detection
-dirs = "5"
-
 # Async runtime
 tokio = { version = "1", features = ["rt", "macros"] }
 

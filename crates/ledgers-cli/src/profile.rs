@@ -147,7 +147,12 @@ fn config_path() -> Result<PathBuf> {
         return Ok(PathBuf::from(xdg).join("ledgers").join("config.toml"));
     }
 
-    if let Some(home) = dirs::home_dir() {
+    // Home directory from the environment (no `dirs` crate: it pulls in
+    // option-ext, which is MPL-2.0 and not on the deny.toml allow list).
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    if let Some(home) = home {
         return Ok(home.join(".config").join("ledgers").join("config.toml"));
     }
 
