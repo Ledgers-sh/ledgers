@@ -1,0 +1,10 @@
+---
+source: crates/ledgers-cli/tests/help_snapshots.rs
+expression: help
+---
+Start the native Ledgers server
+
+Usage: serve
+
+Options:
+  -h, --help  Print help (see more with '--help')
