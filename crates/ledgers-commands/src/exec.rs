@@ -213,13 +213,18 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
                     None,
                 );
 
+                // Append guard statements from the policy.
+                let mut statements = plan.statements;
+                let guard_statements = self.policy.guards(&principal, &meta, &preview)?;
+                statements.extend(guard_statements);
+
                 execute_with_retry(
                     self.db,
                     &ctx.company_id,
                     &audit_ctx,
                     &record,
                     &ctx.now,
-                    plan.statements,
+                    statements,
                 )
                 .await?;
 

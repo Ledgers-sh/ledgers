@@ -62,6 +62,8 @@ ledgers-db = { path = "crates/ledgers-db" }
 ledgers-audit = { path = "crates/ledgers-audit" }
 # Command registry and executor with policy and audit logging (issue #10).
 ledgers-commands = { path = "crates/ledgers-commands" }
+# Agent key policy, tiers, limits, and decision-making (issue #11).
+ledgers-policy = { path = "crates/ledgers-policy" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"

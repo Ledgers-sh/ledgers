@@ -7,6 +7,7 @@
 use crate::auth::Principal;
 use crate::journal_preview::JournalPreview;
 use crate::registry::CommandMeta;
+use cratefield_core::Statement;
 use ledgers_money::{Amount, Currency};
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,25 @@ pub trait Policy: Send + Sync {
         meta: &CommandMeta,
         preview: &JournalPreview,
     ) -> Decision;
+
+    /// Guard statements for the posting batch (optional, default empty).
+    ///
+    /// For allowed posts, the executor runs these statements in the same
+    /// `batch_atomic` as the command's statements, inside the retry loop.
+    /// A guard refusal (`NOT NULL` failure) fails the whole batch and
+    /// surfaces as an error, not success.
+    ///
+    /// # Errors
+    /// Returns an error if guard statements cannot be generated (e.g., from invalid input).
+    fn guards(
+        &self,
+        principal: &Principal,
+        meta: &CommandMeta,
+        preview: &JournalPreview,
+    ) -> Result<Vec<Statement>, crate::error::CommandError> {
+        let _ = (principal, meta, preview);
+        Ok(Vec::new())
+    }
 }
 
 /// The default open-core policy: the owner is always allowed;
