@@ -70,6 +70,8 @@ ledgers-commands = { path = "crates/ledgers-commands" }
 ledgers-policy = { path = "crates/ledgers-policy" }
 # Authentication, identity, and session management (issue #12).
 ledgers-auth = { path = "crates/ledgers-auth" }
+# Approval requests with journal preview and passkey step-up (issue #13).
+ledgers-approvals = { path = "crates/ledgers-approvals" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"

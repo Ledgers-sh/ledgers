@@ -555,6 +555,7 @@ fn agent_over_base_ceiling_needs_approval() {
                 Executed::NeedsApproval {
                     request_hash,
                     preview,
+                    ..
                 } => {
                     assert!(!request_hash.is_empty(), "request hash should be computed");
                     assert!(!preview.is_empty(), "preview should have lines");
