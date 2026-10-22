@@ -37,6 +37,24 @@ export class ApiError extends Error {
   }
 }
 
+/** The header that names the company a request acts for (the server's `X-Ledgers-Company`). */
+export const COMPANY_HEADER = 'X-Ledgers-Company';
+
+/**
+ * The company every request from this page acts for: the one in the URL
+ * (`?company=`), or null for the deployment's own company. The shell sets it
+ * before any request is made and whenever the company changes.
+ */
+let activeCompany: string | null = null;
+
+export function setActiveCompany(company: string | null): void {
+  activeCompany = company;
+}
+
+export function getActiveCompany(): string | null {
+  return activeCompany;
+}
+
 export interface ClientConfig {
   /** Server origin, e.g. http://127.0.0.1:3000 (no trailing slash needed). */
   baseUrl: string;
@@ -119,8 +137,9 @@ async function readProblem(response: Response): Promise<Problem> {
   }
 }
 
-/** The init for one request: a key as bearer auth, or the person's cookie. */
+/** The init for one request: a key as bearer auth, or the person's cookie, and the company it acts for. */
 export function requestInit(config: ClientConfig, method: string, headers: Record<string, string>): RequestInit {
+  if (activeCompany) headers[COMPANY_HEADER] = activeCompany;
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
     return { method, headers, cache: 'no-store' };

@@ -1,6 +1,7 @@
-//! Short-lived signed download links. The link carries the document id, the
-//! expiry (Unix seconds) and an HMAC-SHA256 over both and the content hash, so
-//! a link cannot be moved to another document or extended.
+//! Short-lived signed download links. The link carries the company id, the
+//! document id, the expiry (Unix seconds) and an HMAC-SHA256 over all of them
+//! and the content hash, so a link cannot be moved to another document, another
+//! company or extended.
 
 use sha2::{Digest, Sha256};
 
@@ -38,16 +39,24 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     outer.finalize().into()
 }
 
-fn payload(document_id: &str, sha256: &str, expires_at: i64) -> String {
-    format!("document\n{document_id}\n{sha256}\n{expires_at}")
+fn payload(company_id: &str, document_id: &str, sha256: &str, expires_at: i64) -> String {
+    format!("document\n{company_id}\n{document_id}\n{sha256}\n{expires_at}")
 }
 
-/// The hex signature for a document download valid until `expires_at`.
+/// The hex signature for a document download of `company_id` valid until
+/// `expires_at`. The company is signed too: a link made for one company never
+/// verifies as a link to another.
 #[must_use]
-pub fn sign(key: &[u8], document_id: &str, sha256: &str, expires_at: i64) -> String {
+pub fn sign(
+    key: &[u8],
+    company_id: &str,
+    document_id: &str,
+    sha256: &str,
+    expires_at: i64,
+) -> String {
     hex::encode(hmac_sha256(
         key,
-        payload(document_id, sha256, expires_at).as_bytes(),
+        payload(company_id, document_id, sha256, expires_at).as_bytes(),
     ))
 }
 
@@ -58,13 +67,14 @@ pub fn sign(key: &[u8], document_id: &str, sha256: &str, expires_at: i64) -> Str
 /// [`LinkError::Expired`] once `now` is past `expires_at`.
 pub fn verify(
     key: &[u8],
+    company_id: &str,
     document_id: &str,
     sha256: &str,
     expires_at: i64,
     signature: &str,
     now: i64,
 ) -> Result<(), LinkError> {
-    let expected = sign(key, document_id, sha256, expires_at);
+    let expected = sign(key, company_id, document_id, sha256, expires_at);
     if !constant_time_eq(expected.as_bytes(), signature.as_bytes()) {
         return Err(LinkError::BadSignature);
     }
@@ -99,30 +109,49 @@ mod tests {
 
     #[test]
     fn a_fresh_link_verifies_until_it_expires() {
-        let sig = sign(KEY, "doc1", "abc", 1_000);
-        assert_eq!(verify(KEY, "doc1", "abc", 1_000, &sig, 1_000), Ok(()));
+        let sig = sign(KEY, "co1", "doc1", "abc", 1_000);
         assert_eq!(
-            verify(KEY, "doc1", "abc", 1_000, &sig, 1_001),
+            verify(KEY, "co1", "doc1", "abc", 1_000, &sig, 1_000),
+            Ok(())
+        );
+        assert_eq!(
+            verify(KEY, "co1", "doc1", "abc", 1_000, &sig, 1_001),
             Err(LinkError::Expired)
         );
     }
 
     #[test]
     fn an_extended_or_moved_link_is_refused() {
-        let sig = sign(KEY, "doc1", "abc", 1_000);
+        let sig = sign(KEY, "co1", "doc1", "abc", 1_000);
         // Extending the expiry changes the signed payload.
         assert_eq!(
-            verify(KEY, "doc1", "abc", 9_000, &sig, 2_000),
+            verify(KEY, "co1", "doc1", "abc", 9_000, &sig, 2_000),
             Err(LinkError::BadSignature)
         );
         // The same signature names another document.
         assert_eq!(
-            verify(KEY, "doc2", "abc", 1_000, &sig, 500),
+            verify(KEY, "co1", "doc2", "abc", 1_000, &sig, 500),
             Err(LinkError::BadSignature)
         );
         // Another key cannot mint the link.
         assert_eq!(
-            verify(b"other", "doc1", "abc", 1_000, &sig, 500),
+            verify(b"other", "co1", "doc1", "abc", 1_000, &sig, 500),
+            Err(LinkError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn a_link_is_bound_to_its_company() {
+        let sig = sign(KEY, "co1", "doc1", "abc", 1_000);
+        // The same document id and hash under another company: refused.
+        assert_eq!(
+            verify(KEY, "co2", "doc1", "abc", 1_000, &sig, 500),
+            Err(LinkError::BadSignature)
+        );
+        // A link made for company 2 never verifies for company 1 either.
+        let other = sign(KEY, "co2", "doc1", "abc", 1_000);
+        assert_eq!(
+            verify(KEY, "co1", "doc1", "abc", 1_000, &other, 500),
             Err(LinkError::BadSignature)
         );
     }

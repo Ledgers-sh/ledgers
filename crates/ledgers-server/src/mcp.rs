@@ -199,8 +199,15 @@ async fn mcp_post(
         return unauthorized_response(&state.public_url);
     };
 
+    // (c) The company the agent key belongs to serves the request: the key is
+    // verified against that company's keys, never against the deployment's.
+    let dispatch = match state.dispatch.key_company(&deps, &bearer).await {
+        Some(company) => Arc::clone(&state.dispatch).scoped(&company),
+        None => Arc::clone(&state.dispatch),
+    };
+
     // (c) Authenticate the bearer token
-    let Ok(principal) = state.dispatch.principal(&deps, &bearer).await else {
+    let Ok(principal) = dispatch.principal(&deps, &bearer).await else {
         return unauthorized_response(&state.public_url);
     };
 
@@ -230,7 +237,7 @@ async fn mcp_post(
 
     // Build a ToolCaller that uses dispatch
     let caller = ServerToolCaller {
-        dispatch: Arc::clone(&state.dispatch),
+        dispatch,
         deps: Arc::clone(&deps),
         credential: Some(bearer),
         request_id,

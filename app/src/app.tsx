@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { useHash, useOnline, usePendingCount } from './hooks';
 import { fetchOpenApiDocument } from './api/openapi';
-import { ApiError } from './api/client';
+import { ApiError, setActiveCompany } from './api/client';
+import { companiesList, type CompanySummary } from './api/companies';
+import { companyFromSearch } from './lib/companies';
+import { CompanySwitcher } from './ui/CompanySwitcher';
 import { fetchSession, initialOf, NotAMemberError, signOut, type Person } from './api/auth';
 import { isAcceptPath } from './lib/people';
 import { AcceptInvitation } from './ui/Accept';
@@ -82,6 +85,8 @@ type Mode =
   | { kind: 'key'; credentials: Credentials };
 
 export function App() {
+  // Every request acts for the company the URL names (`?company=`), set before the first one is made.
+  setActiveCompany(companyFromSearch(window.location.search));
   // Re-render the whole tree when the language changes.
   useLocale();
   // The sign-in screens take the saved theme too (the shell applies it once signed in).
@@ -239,6 +244,22 @@ function Shell({
       live = false;
     };
   }, [baseUrl, apiKey, unitsTick]);
+  // The companies the person belongs to: read once, and again after a company is created.
+  const [companyList, setCompanyList] = useState<CompanySummary[]>([]);
+  const personId = person?.personId;
+  useEffect(() => {
+    if (!personId) return;
+    let live = true;
+    companiesList({ baseUrl }).then(
+      (list) => live && setCompanyList(list),
+      () => live && setCompanyList([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [baseUrl, personId]);
+  // The company in the URL, or the deployment's own company when the URL names none.
+  const companyId = companyFromSearch(window.location.search) ?? person?.companyId ?? '';
   const units = activeUnits(unitList);
   const requestedUnit = unitFromHash(hash);
   // The scope is the URL's unit when that unit exists and is active; otherwise the whole company.
@@ -401,6 +422,7 @@ function Shell({
                 <span class="person-name">{person.email ?? t('shell.signed_in')}</span>
               </span>
             )}
+            {person && <CompanySwitcher companies={companyList} value={companyId} pathname={window.location.pathname} />}
             <UnitSwitcher units={units} value={unit} onChange={(code) => navigateToUnit(code)} />
             <PeriodPicker range={range} onChange={setRange} />
             <span class="kbd-hint" aria-hidden="true">

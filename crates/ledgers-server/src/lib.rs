@@ -158,7 +158,6 @@ pub fn compose(
 
     // Documents module - the upload and download routes (Blob and IdGen ports).
     let docs_module = documents::DocumentsModule::new(
-        company_id,
         document_key,
         dispatch.clone(),
         routes::domain_routes(registry, "documents"),
@@ -192,7 +191,10 @@ pub fn compose(
     let builder = builder.module(members::MembersModule::new(cors_origins.clone()));
     // The companies a person belongs to, and creating one. After the members
     // module: its migrations are none, and its tables are the organization's.
-    let builder = builder.module(companies::CompaniesModule::new(cors_origins.clone()));
+    let companies_limit = companies_per_person(cfg)?;
+    let builder = builder.module(
+        companies::CompaniesModule::new(cors_origins.clone()).with_company_limit(companies_limit),
+    );
 
     // The status read: which optional features are off and why. Mounted last;
     // it has no migrations, so it does not renumber the D1 files.
@@ -359,4 +361,25 @@ pub const DEV_WEB_ORIGIN: &str = "http://localhost:5173";
 #[must_use]
 pub fn is_dev(cfg: &dyn Config) -> bool {
     cfg.get("LEDGERS_DEV").as_deref() == Some("1")
+}
+
+/// How many companies one person may create: `LEDGERS_COMPANIES_PER_PERSON`,
+/// a whole number of at least 1, or the default when it is unset.
+///
+/// # Errors
+/// A value that is not such a number.
+fn companies_per_person(cfg: &dyn Config) -> Result<usize, ConfigError> {
+    let Some(text) = cfg.get("LEDGERS_COMPANIES_PER_PERSON") else {
+        return Ok(companies::DEFAULT_COMPANIES_PER_PERSON);
+    };
+    match text.trim().parse::<usize>() {
+        Ok(limit) if limit >= 1 => Ok(limit),
+        _ => {
+            let mut errors = ConfigError::default();
+            errors.push(
+                "LEDGERS_COMPANIES_PER_PERSON must be a whole number of 1 or more".to_string(),
+            );
+            Err(errors)
+        }
+    }
 }

@@ -209,8 +209,9 @@ fn an_empty_key_never_verifies_a_download_link() {
     let cfg = MapConfig(BTreeMap::from([("LEDGERS_COMPANY_ID", COMPANY)]));
     let (composition, native, _db) = compose_migrated(&cfg);
     let expires = 4_102_444_800_i64;
-    let forged = ledgers_documents::sign::sign(&[], "01DOC", "abc", expires);
-    let path = format!("/v1/documents/01DOC/file?expires={expires}&signature={forged}");
+    let forged = ledgers_documents::sign::sign(&[], COMPANY, "01DOC", "abc", expires);
+    let path =
+        format!("/v1/documents/01DOC/file?company={COMPANY}&expires={expires}&signature={forged}");
     assert_eq!(send(&composition, &native, Method::GET, &path).0, 503);
 }
 

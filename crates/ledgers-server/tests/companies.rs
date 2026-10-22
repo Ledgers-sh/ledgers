@@ -8,15 +8,17 @@
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
 
+use async_trait::async_trait;
 use cratefield_core::axum::body::to_bytes;
 use cratefield_core::axum::http::{HeaderMap, Method, Request, StatusCode, header};
-use cratefield_core::{Clock, IdGen, Module, Ports, Statement};
+use cratefield_core::{Clock, Database, DbError, IdGen, Module, Ports, Rows, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_db::module::DbModule;
 use ledgers_ledger::LedgerModule;
 use ledgers_policy::module::PolicyModule;
-use ledgers_server::companies::CompaniesModule;
+use ledgers_server::companies::{CompaniesModule, DEFAULT_COMPANIES_PER_PERSON};
 use ledgers_server::dispatch::{self, ApiKeysModule, Deps, ServerDispatch};
+use ledgers_server::mcp::McpModule;
 use ledgers_server::members::MembersModule;
 use ledgers_server::people::{self, PeopleConfig, PeopleModule, PersonClaims};
 use ledgers_server::routes::{self, Dispatch};
@@ -74,6 +76,37 @@ fn config() -> PeopleConfig {
 }
 
 fn fixture() -> Fx {
+    fixture_with(DEFAULT_COMPANIES_PER_PERSON, None)
+}
+
+/// A database that refuses any batch with a statement containing `marker`:
+/// the way a company's seed is made to fail part way through.
+struct FailingDb {
+    inner: Arc<dyn Database>,
+    marker: &'static str,
+}
+
+#[async_trait]
+impl Database for FailingDb {
+    async fn execute(&self, stmt: &Statement) -> Result<u64, DbError> {
+        self.inner.execute(stmt).await
+    }
+
+    async fn query(&self, stmt: &Statement) -> Result<Rows, DbError> {
+        self.inner.query(stmt).await
+    }
+
+    async fn batch_atomic(&self, stmts: &[Statement]) -> Result<(), DbError> {
+        if stmts.iter().any(|stmt| stmt.sql.contains(self.marker)) {
+            return Err(DbError::Batch("injected failure".to_owned()));
+        }
+        self.inner.batch_atomic(stmts).await
+    }
+}
+
+/// The fixture with `limit` companies allowed per person, and, when given,
+/// every batch that mentions `fail_on` refused.
+fn fixture_with(limit: usize, fail_on: Option<&'static str>) -> Fx {
     let clock: Arc<dyn Clock> = Arc::new(Fixed(
         OffsetDateTime::from_unix_timestamp(START).expect("valid time"),
     ));
@@ -94,7 +127,12 @@ fn fixture() -> Fx {
         Box::new(ApiKeysModule),
         Box::new(PeopleModule::new(Some(config()), HOME)),
         Box::new(MembersModule::new(vec![APP.to_owned()])),
-        Box::new(CompaniesModule::new(vec![APP.to_owned()])),
+        Box::new(CompaniesModule::new(vec![APP.to_owned()]).with_company_limit(limit)),
+        Box::new(McpModule::new(
+            Arc::new(registry.clone()),
+            dispatch_impl.clone(),
+            API.to_owned(),
+        )),
         Box::new(ledgers_documents::DocumentsStoreModule),
         Box::new(ledgers_bills::BillsModule),
         Box::new(ledgers_tax::module::TaxModule),
@@ -116,10 +154,17 @@ fn fixture() -> Fx {
                 .db
                 .clone()
                 .expect("the testing kit provides a database");
-            ports.db = Some(Arc::new(CountingDb::new(inner, patch_timing)));
-            let counted = ports.db.clone().expect("counted database");
+            let counted: Arc<dyn Database> = Arc::new(CountingDb::new(inner, patch_timing));
+            let served: Arc<dyn Database> = match fail_on {
+                Some(marker) => Arc::new(FailingDb {
+                    inner: counted,
+                    marker,
+                }),
+                None => counted,
+            };
+            ports.db = Some(served.clone());
             ports.auth = Some(Arc::new(ledgers_server::members::SessionIdentity::new(
-                counted,
+                served,
                 ports.clock.clone().expect("clock"),
             )));
         },
@@ -697,4 +742,297 @@ fn the_demo_owner_is_granted_the_demo_company_once() {
         None,
     );
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// The rows of `table` in the database, counted.
+fn table_count(fx: &Fx, table: &str) -> i64 {
+    let rows = pollster::block_on(fx.deps.db.query(&Statement::new(format!(
+        "SELECT COUNT(*) AS n FROM {table}"
+    ))))
+    .expect("count rows");
+    rows.rows[0].get::<i64>("n").expect("a count")
+}
+
+/// The rows a company creation writes, table by table.
+fn company_tables(fx: &Fx) -> Vec<(&'static str, i64)> {
+    [
+        "company",
+        "orgs",
+        "org_members",
+        "company_setting",
+        "account",
+        "journal",
+        "fiscal_year",
+        "accounting_period",
+        "account_change",
+    ]
+    .into_iter()
+    .map(|table| (table, table_count(fx, table)))
+    .collect()
+}
+
+#[test]
+fn the_people_routes_serve_the_company_the_request_names() {
+    let fx = fixture();
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    add_member(&fx, HOME, "bob", "viewer");
+    let other = create_company(&fx, &ana, "Second company", "generic");
+    let bob = session(&fx, "bob", &[]);
+
+    // Bob belongs to the deployment's company only: the session answers for
+    // that company, and refuses the second one by name.
+    let (status, _, body) = call(
+        &fx,
+        Method::GET,
+        "/v1/auth/session",
+        As::Cookie(&bob),
+        None,
+        Some(APP),
+        None,
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["companyId"], HOME);
+    let (status, _, body) = call(
+        &fx,
+        Method::GET,
+        "/v1/auth/session",
+        As::Cookie(&bob),
+        Some(&other),
+        Some(APP),
+        None,
+    );
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Ana is the owner of the second company, and its session says so.
+    let (status, _, body) = call(
+        &fx,
+        Method::GET,
+        "/v1/auth/session",
+        As::Cookie(&ana),
+        Some(&other),
+        Some(APP),
+        None,
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["companyId"], other.as_str());
+    assert_eq!(body["role"], "owner");
+
+    // The member list is the named company's: Bob is in the home company only.
+    let members_of = |company: Option<&str>| -> Vec<String> {
+        let (status, _, body) = call(
+            &fx,
+            Method::GET,
+            "/v1/auth/people",
+            As::Cookie(&ana),
+            company,
+            Some(APP),
+            None,
+        );
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .filter_map(|row| row["personId"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(members_of(Some(&other)), vec!["ana".to_owned()]);
+    let home = members_of(None);
+    assert!(home.contains(&"bob".to_owned()), "{home:?}");
+    assert!(!members_of(Some(&other)).contains(&"bob".to_owned()));
+}
+
+#[test]
+fn an_agent_key_serves_the_company_it_belongs_to_on_mcp() {
+    let fx = fixture();
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    let other = create_company(&fx, &ana, "Second company", "generic");
+    let other_key = pollster::block_on(dispatch::bootstrap_dev(&fx.deps, &other))
+        .expect("a key of the second company");
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+
+    // The key of the second company is served without naming any company:
+    // MCP answers for the company the key belongs to, not the deployment's.
+    let (status, _, body) = call(
+        &fx,
+        Method::POST,
+        "/v1/mcp",
+        As::Bearer(&other_key),
+        None,
+        None,
+        Some(list.clone()),
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["result"]["tools"].is_array(), "{body}");
+
+    // The deployment's key still serves the deployment's company.
+    let (status, _, body) = call(
+        &fx,
+        Method::POST,
+        "/v1/mcp",
+        As::Bearer(&fx.home_key),
+        None,
+        None,
+        Some(list),
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A credential that is no key of any company is refused.
+    let (status, _, _) = call(
+        &fx,
+        Method::POST,
+        "/v1/mcp",
+        As::Bearer("not-a-key"),
+        None,
+        None,
+        Some(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})),
+    );
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[test]
+fn the_country_packs_are_listed_for_the_create_dialog() {
+    let fx = fixture();
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    let (status, _, body) = call(
+        &fx,
+        Method::GET,
+        "/v1/companies/packs",
+        As::Cookie(&ana),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let packs = body["packs"].as_array().expect("packs");
+    assert!(packs.iter().any(|pack| pack["id"] == "generic"), "{body}");
+    assert!(packs.iter().all(|pack| {
+        pack["name"].is_string()
+            && pack["iso"].is_string()
+            && pack["fiscalYearStartMonth"].is_number()
+    }));
+    let (status, _, _) = call(
+        &fx,
+        Method::GET,
+        "/v1/companies/packs",
+        As::Anonymous,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[test]
+fn a_person_creates_no_more_companies_than_the_limit() {
+    let fx = fixture_with(2, None);
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    create_company(&fx, &ana, "First", "generic");
+    create_company(&fx, &ana, "Second", "generic");
+    let (status, _, body) = call(
+        &fx,
+        Method::POST,
+        "/v1/companies",
+        As::Cookie(&ana),
+        None,
+        Some(APP),
+        Some(json!({
+            "name": "Third",
+            "baseCurrency": "EUR",
+            "countryPack": "generic",
+            "fiscalYearStartMonth": 1,
+        })),
+    );
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(problem_type(&body), "company-limit-reached");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("2 companies"),
+        "{body}"
+    );
+
+    // The limit is per person: Bob may still create his own.
+    let bob = session(&fx, "bob", &[]);
+    add_member(&fx, HOME, "bob", "viewer");
+    create_company(&fx, &bob, "Bob's company", "generic");
+}
+
+#[test]
+fn a_company_whose_seed_fails_leaves_no_company_rows_behind() {
+    // Every batch that writes a fiscal year is refused: the chart and the
+    // journal are written first, then the fiscal year fails.
+    let fx = fixture_with(
+        DEFAULT_COMPANIES_PER_PERSON,
+        Some("INSERT INTO fiscal_year"),
+    );
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    let before = company_tables(&fx);
+
+    let (status, _, body) = call(
+        &fx,
+        Method::POST,
+        "/v1/companies",
+        As::Cookie(&ana),
+        None,
+        Some(APP),
+        Some(json!({
+            "name": "Doomed company",
+            "baseCurrency": "EUR",
+            "countryPack": "generic",
+            "fiscalYearStartMonth": 1,
+        })),
+    );
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(problem_type(&body), "company-seed-failed");
+
+    // Every table the creation writes is back to what it was. The audit
+    // events of the attempt are not in this list: the chain is append-only.
+    assert_eq!(company_tables(&fx), before);
+    let (_, _, listed) = call(
+        &fx,
+        Method::GET,
+        "/v1/companies",
+        As::Cookie(&ana),
+        None,
+        Some(APP),
+        None,
+    );
+    let names: Vec<&str> = listed["companies"]
+        .as_array()
+        .expect("companies")
+        .iter()
+        .filter_map(|row| row["name"].as_str())
+        .collect();
+    assert!(!names.contains(&"Doomed company"), "{names:?}");
+}
+
+#[test]
+fn an_invalid_pack_is_refused_before_any_row_is_written() {
+    let fx = fixture();
+    let ana = session(&fx, "ana", &[]);
+    add_member(&fx, HOME, "ana", "owner");
+    let before = company_tables(&fx);
+    let (status, _, body) = call(
+        &fx,
+        Method::POST,
+        "/v1/companies",
+        As::Cookie(&ana),
+        None,
+        Some(APP),
+        Some(json!({
+            "name": "No such pack",
+            "baseCurrency": "EUR",
+            "countryPack": "zz",
+            "fiscalYearStartMonth": 1,
+        })),
+    );
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(company_tables(&fx), before);
 }

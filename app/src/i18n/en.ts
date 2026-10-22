@@ -1359,6 +1359,26 @@ export const en = {
   'bank.toast_matched': 'Line matched.',
   'bank.toast_rule_created': 'Rule saved and applied.',
   'bank.toast_rule_enabled': 'Rule enabled.',
+  // Companies: the switcher, the create dialog
+  'companies.switch_label': 'Company',
+  'companies.create_title': 'Create company',
+  'companies.create_intro': 'You become the owner of the new company. Its chart of accounts starts from the country pack you choose.',
+  'companies.name': 'Company name',
+  'companies.country_pack': 'Country pack',
+  'companies.base_currency': 'Base currency',
+  'companies.fiscal_start': 'First month of the fiscal year',
+  'companies.fiscal_start_hint': 'The pack suggests one. You can change it.',
+  'companies.cancel': 'Cancel',
+  'companies.create_submit': 'Create company',
+  'companies.name_required': 'Enter a company name.',
+  'companies.name_too_long': 'The name is longer than 200 characters.',
+  'companies.currency_invalid': 'Use a three-letter currency code, such as EUR.',
+  'companies.fiscal_start_invalid': 'Choose a month.',
+  'companies.created': 'Created {name}. You are its owner.',
+  'companies.loading': 'Loading country packs',
+  'companies.create_failed': 'The company could not be created. Try again.',
+  'companies.settings_title': 'Create another company',
+  'companies.settings_body': 'Each company keeps its own books, members and keys. You become the owner of a new one.',
 } as const;
 
 export type MessageKey = keyof typeof en;

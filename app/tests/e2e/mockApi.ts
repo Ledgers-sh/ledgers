@@ -10,6 +10,7 @@ import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
 import { handlePeople, resetPeople } from './mockPeople';
 import { handleUnits, resetUnits } from './mockUnits';
+import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -63,6 +64,8 @@ export interface MockOptions {
   extraEntries?: number;
   /** Seeds three business units (SQZ, LDG, FZ) so the unit switcher, the comparison and the units screens show. */
   units?: boolean;
+  /** The companies the person belongs to: none, one (the switcher hides), or two (it shows). */
+  companies?: 'none' | 'one' | 'many';
   /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
   bank?: boolean;
 }
@@ -275,7 +278,7 @@ export interface MockApi {
 /** The real server allows the app origin via CORS; the fake does the same. */
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': WEB_ORIGIN,
-  'Access-Control-Allow-Headers': 'authorization, content-type, x-file-name',
+  'Access-Control-Allow-Headers': 'authorization, content-type, x-file-name, x-ledgers-company',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   // The app sends the session cookie with credentials: 'include'.
   'Access-Control-Allow-Credentials': 'true',
@@ -982,6 +985,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   resetSettings();
   resetPeople();
   resetUnits(options.units ?? false);
+  resetCompanies(options.companies ?? 'none');
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -1038,6 +1042,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
         if (!asPerson && path.startsWith('/v1/approval-requests')) {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Forbidden').body));
+          return;
+        }
+        // Companies a person belongs to, and creating one (an agent key is not a person).
+        const companiesReply = handleCompanies(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
+        if (companiesReply) {
+          res.writeHead(companiesReply.status, { ...headers, 'Content-Type': companiesReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(companiesReply.body));
           return;
         }
         if (path.startsWith('/v1/bank')) {

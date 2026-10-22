@@ -5,8 +5,9 @@
  * The one exception is a file shared into the app (POST /share-target): it is
  * stored in the upload queue and uploaded by the app once the device is online.
  *
- * API responses are cached per credential: the cache name carries a SHA-256 of the
- * Authorization header, so one key never reads another key's cached data.
+ * API responses are cached per credential and per company: the cache name carries a
+ * SHA-256 of the Authorization header and the X-Ledgers-Company header, so one key
+ * never reads another key's cached data, and one company never reads another's.
  * Signing out deletes every "ledgers-api-*" cache (see src/app.tsx).
  */
 const SHELL_CACHE = 'ledgers-shell-v1';
@@ -36,7 +37,8 @@ async function digest(text) {
 
 async function apiCacheName(request) {
   const auth = request.headers.get('Authorization') || '';
-  return `ledgers-api-${(await digest(auth)).slice(0, 32)}`;
+  const company = request.headers.get('X-Ledgers-Company') || '';
+  return `ledgers-api-${(await digest(`${auth}\n${company}`)).slice(0, 32)}`;
 }
 
 async function networkFirst(request, cacheName) {

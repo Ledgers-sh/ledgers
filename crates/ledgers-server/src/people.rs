@@ -14,7 +14,7 @@
 
 use crate::dispatch::Deps;
 use crate::members;
-use crate::routes::{Presented, SessionPresented};
+use crate::routes::{Presented, SessionPresented, requested_company};
 use async_trait::async_trait;
 use bytes::Bytes;
 use cratefield_core::axum::{
@@ -899,6 +899,12 @@ async fn session(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> R
     ) {
         return problem_response(problem);
     }
+    // The membership is checked in the company the request names (its
+    // `X-Ledgers-Company` header), or the deployment's company when it names none.
+    let company = match requested_company(&state.company_id, &headers) {
+        Ok(company) => company,
+        Err(problem) => return problem_response(problem),
+    };
     let now = unix_now(&state);
     let db = state.deps.db.as_ref();
     let row = match load_session(db, &id).await {
@@ -910,15 +916,14 @@ async fn session(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> R
         }
     };
     let at = OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    let role =
-        match members::resolve_role(db, &state.company_id, &row.person_id, &row.roles, at).await {
-            Ok(Some(role)) => role,
-            Ok(None) => return problem_response(not_a_member()),
-            Err(err) => {
-                tracing::error!(error = %err, "session: could not read the membership");
-                return problem_response(Problem::internal());
-            }
-        };
+    let role = match members::resolve_role(db, &company, &row.person_id, &row.roles, at).await {
+        Ok(Some(role)) => role,
+        Ok(None) => return problem_response(not_a_member()),
+        Err(err) => {
+            tracing::error!(error = %err, "session: could not read the membership");
+            return problem_response(Problem::internal());
+        }
+    };
     let row = match slide_session(db, &id, &row, now).await {
         Ok(row) => row,
         Err(err) => {
@@ -932,7 +937,7 @@ async fn session(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> R
     let mut response = Json(json!({
         "personId": row.person_id,
         "email": row.email,
-        "companyId": state.company_id,
+        "companyId": company,
         "role": role.as_str(),
         "roles": [role.as_str()],
         "csrfToken": row.csrf_token,
@@ -963,9 +968,10 @@ pub const INVITATION_NOT_FOUND: ProblemDef = ProblemDef {
     description: "The invitation was already accepted, revoked or has lapsed.",
 };
 
-/// The signed-in member a people route acts for.
+/// The signed-in member a people route acts for, in the company it named.
 struct SessionMember {
     role: ledgers_commands::Role,
+    company: String,
 }
 
 /// Resolves the cookie session to a company member, checking the Origin of a
@@ -982,6 +988,7 @@ async fn session_member(
         return Err(Problem::new(&SESSION_REQUIRED));
     };
     check_session_origin(&config.app_origins, origin_header(headers).as_deref(), safe)?;
+    let company = requested_company(&state.company_id, headers)?;
     let now = unix_now(state);
     let db = state.deps.db.as_ref();
     let row = match load_session(db, &id).await {
@@ -993,20 +1000,19 @@ async fn session_member(
         }
     };
     let at = OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    let role =
-        match members::resolve_role(db, &state.company_id, &row.person_id, &row.roles, at).await {
-            Ok(Some(role)) => role,
-            Ok(None) => return Err(not_a_member()),
-            Err(err) => {
-                tracing::error!(error = %err, "people: could not read the membership");
-                return Err(Problem::internal());
-            }
-        };
+    let role = match members::resolve_role(db, &company, &row.person_id, &row.roles, at).await {
+        Ok(Some(role)) => role,
+        Ok(None) => return Err(not_a_member()),
+        Err(err) => {
+            tracing::error!(error = %err, "people: could not read the membership");
+            return Err(Problem::internal());
+        }
+    };
     if let Err(err) = slide_session(db, &id, &row, now).await {
         tracing::error!(error = %err, "people: could not slide the session");
         return Err(Problem::internal());
     }
-    Ok(SessionMember { role })
+    Ok(SessionMember { role, company })
 }
 
 /// The member-management check: owners and admins only.
@@ -1051,7 +1057,7 @@ async fn people(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> Re
         Ok(member) => member,
         Err(problem) => return problem_response(problem),
     };
-    let rows = match members::members(state.deps.db.as_ref(), &state.company_id).await {
+    let rows = match members::members(state.deps.db.as_ref(), &member.company).await {
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(error = %err, "people: could not list the members");
@@ -1093,7 +1099,7 @@ async fn invitations(State(state): State<Arc<PeopleState>>, headers: HeaderMap) 
     }
     let now = state.deps.clock.now();
     let rows =
-        match members::pending_invitations(state.deps.db.as_ref(), &state.company_id, now).await {
+        match members::pending_invitations(state.deps.db.as_ref(), &member.company, now).await {
             Ok(rows) => rows,
             Err(err) => {
                 tracing::error!(error = %err, "people: could not list the invitations");
@@ -1130,7 +1136,7 @@ async fn revoke_invitation_route(
     if let Err(problem) = may_manage_people(&member) {
         return problem_response(problem);
     }
-    match members::revoke_invitation(state.deps.db.as_ref(), &state.company_id, &id).await {
+    match members::revoke_invitation(state.deps.db.as_ref(), &member.company, &id).await {
         Ok(true) => {
             let mut response = StatusCode::NO_CONTENT.into_response();
             no_store(&mut response);

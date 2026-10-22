@@ -141,7 +141,6 @@ pub fn fixture_with_options(
     // and download routes.
     let document_routes = routes::domain_routes(&registry, "documents");
     domain.push(Arc::new(ledgers_server::documents::DocumentsModule::new(
-        COMPANY,
         DOCUMENT_KEY.to_vec(),
         dispatch.clone(),
         document_routes,
