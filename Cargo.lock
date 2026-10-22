@@ -2072,6 +2072,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-demo"
+version = "0.1.0"
+dependencies = [
+ "ledgers-ledger",
+ "ledgers-money",
+ "ledgers-tax",
+ "time",
+]
+
+[[package]]
 name = "ledgers-ext"
 version = "0.1.0"
 dependencies = [
@@ -2195,6 +2205,7 @@ dependencies = [
  "ledgers-auth",
  "ledgers-commands",
  "ledgers-db",
+ "ledgers-demo",
  "ledgers-ext",
  "ledgers-fx",
  "ledgers-ledger",

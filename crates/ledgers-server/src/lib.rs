@@ -2,6 +2,7 @@
 //! Ledgers server composition: harness and modules.
 
 pub mod config;
+pub mod demo;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;

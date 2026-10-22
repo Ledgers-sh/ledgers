@@ -30,12 +30,26 @@ use std::time::Duration;
 /// the executor controls when re-planning happens on retry.
 pub struct ExecToken {
     _private: (),
+    /// Whether the executor authenticated a person (not an agent key) for
+    /// this command. Planners read it through [`ExecToken::acts_as_person`]
+    /// so a posting or reversal records who posted it.
+    person: bool,
 }
 
 impl ExecToken {
     /// Creates a new token (crate-private: only the executor constructs it).
-    fn new() -> Self {
-        ExecToken { _private: () }
+    fn new(person: bool) -> Self {
+        ExecToken {
+            _private: (),
+            person,
+        }
+    }
+
+    /// Whether the command runs for a person (a session or an approving
+    /// owner) rather than an agent key.
+    #[must_use]
+    pub fn acts_as_person(&self) -> bool {
+        self.person
     }
 }
 
@@ -245,7 +259,7 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
                     ctx.event_id.clone(),
                 );
 
-                let token = ExecToken::new();
+                let token = ExecToken::new(!principal.is_agent());
                 let plan = cmd.plan(&token, self.db, &ctx, input).await?;
 
                 // If the plan has no statements, don't write an audit event
@@ -351,7 +365,7 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
         )
         .with_approval(&approval.approval_id);
 
-        let token = ExecToken::new();
+        let token = ExecToken::new(!approver.is_agent());
         let plan = cmd.plan(&token, self.db, &ctx, input).await?;
 
         // Extend objects with approval.objects.
@@ -476,7 +490,7 @@ mod tests {
     #[test]
     fn exec_token_not_clone() {
         // Verify ExecToken cannot be cloned or copied.
-        let _token = ExecToken::new();
+        let _token = ExecToken::new(false);
         // This would fail to compile:
         // let _token2 = _token;
     }
