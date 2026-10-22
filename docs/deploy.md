@@ -81,6 +81,10 @@ npx wrangler@4.148.0 deploy --dry-run --env staging --outdir /tmp/lg-dry
 npx wrangler@4.148.0 deploy --env staging
 ```
 
+The Worker limits each agent key to 100 requests per 60 seconds through the
+`RATE_LIMITER` binding declared under `[env.staging.ratelimits]`. No secret or
+step is needed for it. Without the binding the Worker answers `/v1` with 503.
+
 Attach `api-staging.ledgers.sh` to the Worker as a custom domain (Workers &
 Routes, then Custom Domains) so the URL in `LEDGERS_PUBLIC_URL` answers. Doing
 it in the dashboard keeps DNS changes out of the deploy.

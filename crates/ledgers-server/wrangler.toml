@@ -19,8 +19,8 @@ bucket_name = "ledgers-documents"
 
 # Rate Limiting binding for agent key throttling
 [[ratelimits]]
-binding = "RATE_LIMITER"
-namespace_id = 1
+name = "RATE_LIMITER"
+namespace_id = "1"
 simple = { limit = 100, period = 60 }
 
 # Environment variables (non-secret, dev environment)
@@ -78,3 +78,11 @@ migrations_dir = "d1/migrations"
 [[env.staging.r2_buckets]]
 binding = "DOCUMENTS"
 bucket_name = "ledgers-documents-staging"
+
+# Agent-key rate limit (crates/ledgers-server/src/rate_limiting.rs). Ratelimit
+# bindings are not inherited from the top level, so staging declares its own.
+# The Worker answers /v1 with 503 when this binding does not resolve.
+[[env.staging.ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "2"
+simple = { limit = 100, period = 60 }
