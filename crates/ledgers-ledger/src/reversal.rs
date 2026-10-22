@@ -11,14 +11,14 @@ use std::time::Duration;
 use time::Date;
 
 /// The fields from a `journal_entry` header row.
-struct EntryHeader {
-    journal_id: String,
-    document_date: Date,
-    posting_date: Date,
-    tax_point_date: Date,
-    base_currency: Currency,
-    number: Option<i64>,
-    reverses: Option<String>,
+pub(crate) struct EntryHeader {
+    pub(crate) journal_id: String,
+    pub(crate) document_date: Date,
+    pub(crate) posting_date: Date,
+    pub(crate) tax_point_date: Date,
+    pub(crate) base_currency: Currency,
+    pub(crate) number: Option<i64>,
+    pub(crate) reverses: Option<String>,
 }
 
 /// Context for reversing an entry.
@@ -267,7 +267,15 @@ pub(crate) async fn read_entry_with_lines(
         )?);
     }
 
-    let entry = Entry {
+    let entry = entry_from_header(company_id, header, lines.clone());
+    Ok((entry, lines))
+}
+
+/// Builds the posted [`Entry`] a header and its lines describe. The
+/// description, external id and source app are not part of the header
+/// and are left for the caller to fill.
+pub(crate) fn entry_from_header(company_id: &str, header: EntryHeader, lines: Vec<Line>) -> Entry {
+    Entry {
         company_id: company_id.to_owned(),
         journal_id: header.journal_id,
         document_date: header.document_date,
@@ -280,14 +288,13 @@ pub(crate) async fn read_entry_with_lines(
         external_id: None,
         source_app: None,
         reverses: header.reverses,
-        lines: lines.clone(),
+        lines,
         number: header.number,
         recorded_at: None,
-    };
-    Ok((entry, lines))
+    }
 }
 
-fn parse_entry_header_row(
+pub(crate) fn parse_entry_header_row(
     row: &cratefield_core::Row,
     entry_id: &str,
 ) -> Result<EntryHeader, JournalError> {
@@ -357,7 +364,7 @@ fn parse_entry_header_row(
     })
 }
 
-fn parse_line_row(
+pub(crate) fn parse_line_row(
     row: &cratefield_core::Row,
     base_currency: Currency,
     base_currency_code: &str,

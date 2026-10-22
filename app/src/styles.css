@@ -203,7 +203,9 @@ kbd { font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .ledger .desc { min-width: 180px; }
 .ledger a.row-link { color: var(--text); font-weight: 500; }
 .ledger a.row-link:hover { color: var(--agent); text-decoration: underline; }
+.ledger tr.journal-row { cursor: pointer; }
 .ledger .neg { color: var(--danger); }
+.ledger.cards td.limits { white-space: normal; overflow-wrap: anywhere; }
 
 /* Journal entry head + lines */
 .entry-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 24px; }
@@ -418,6 +420,8 @@ dialog.palette::backdrop { background: rgba(5,7,10,.6); }
 .palette-action { display: flex; justify-content: flex-start; }
 .palette-reason { font-size: 14px; border-inline-start: 2px solid var(--human-line); padding-inline-start: 10px; }
 .badge.human { color: var(--human-text); border-color: var(--human-line); }
+.badge.active { color: var(--agent); border-color: var(--rule); }
+.badge.revoked { color: var(--danger); border-color: var(--danger-line); }
 .palette-button kbd { font-size: 11px; }
 @media (max-width: 640px) {
   .palette-form { grid-template-columns: 1fr auto; }
@@ -437,21 +441,8 @@ dialog.palette::backdrop { background: rgba(5,7,10,.6); }
 /* Arabic words are set in the sans face (the mono face has no Arabic letters); numbers and codes keep mono. */
 html[dir='rtl'] .badge, html[dir='rtl'] .label-sm, html[dir='rtl'] .palette-name, html[dir='rtl'] .palette-value { font-family: var(--sans); }
 /* Settings and agent keys */
-.subnav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 0 20px; }
-.subnav a { padding: 10px 12px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.subnav a[aria-current='page'] { color: var(--text); border-bottom-color: var(--agent); }
-.settings-section { display: flex; flex-direction: column; gap: 16px; }
-.settings-section h2 { margin: 0; font-size: 20px; }
-.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.section-head p { margin: 6px 0 0; max-width: 60ch; }
 .small { font-size: 13px; }
-.status { font-size: 14px; white-space: nowrap; }
-.status.active { color: var(--agent); }
-.status.revoked { color: var(--danger); }
-.usage h3, .usage h4 { margin: 0 0 6px; font-size: 15px; }
-.usage h4 { margin-top: 14px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.snippets { display: grid; gap: 12px; }
-.snippet { margin: 0; padding: 12px 14px; background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-all; color: var(--text-2); }
+.snippet { margin: 0; padding: 12px 14px; background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-all; color: var(--text-2); direction: ltr; text-align: start; }
 dialog.key-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .tiers { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .tiers legend, .limits legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 6px; }
@@ -485,7 +476,9 @@ dialog.key-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100v
   color: var(--muted); font: 600 15px var(--sans); cursor: pointer; white-space: nowrap;
 }
 .tab:hover { color: var(--text); }
-.tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--human); }
+.tab[aria-selected='true'], .tab[aria-current='page'] { color: var(--text); border-bottom-color: var(--human); }
+.stack { display: grid; gap: 12px; }
+.caption { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .chip {
   display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; line-height: 1.4; padding: 1px 9px;
   border-radius: 999px; border: 1px solid var(--rule); color: var(--text-2); white-space: nowrap;

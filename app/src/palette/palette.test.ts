@@ -67,7 +67,14 @@ describe('command palette list, generated from the OpenAPI document', () => {
       expect.arrayContaining(['entries.list', 'entries.post', 'entries.reverse']),
     );
     expect(filterCommands(commands, 'reports_balance_sheet').map((c) => c.command)).toEqual(['reports.balance_sheet']);
-    expect(filterCommands(commands, '/v1/accounts').map((c) => c.command)).toEqual(['accounts.list']);
+    expect(filterCommands(commands, '/v1/accounts').map((c) => c.command)).toEqual([
+      'accounts.archive',
+      'accounts.create',
+      'accounts.get',
+      'accounts.list',
+      'accounts.restore',
+      'accounts.update',
+    ]);
     expect(filterCommands(commands, '   ')).toHaveLength(commands.length);
   });
 });

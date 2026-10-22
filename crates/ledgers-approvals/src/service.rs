@@ -1034,23 +1034,22 @@ pub async fn list_requests(
         values.push(SeaValue::from(now));
     }
     values.push(SeaValue::from(i64::from(limit)));
+    // One query reads the whole page: the request columns, not one lookup per id.
     let rows = db
         .query(&Statement::with_values(
             format!(
-                "SELECT id FROM approval_request WHERE company_id = ? {filter} \
+                "SELECT {REQUEST_COLUMNS} FROM approval_request WHERE company_id = ? {filter} \
                  ORDER BY created_at DESC, id DESC LIMIT ?"
             ),
             values,
         ))
         .await
         .map_err(|e| ApprovalError::Database(e.to_string()))?;
-    let mut requests = Vec::new();
-    for row in &rows.rows {
-        let id = row
-            .get::<String>("id")
-            .ok_or_else(|| ApprovalError::Database("missing id column".to_string()))?;
-        requests.push(load_approval_request(db, &id).await?);
-    }
+    let requests = rows
+        .rows
+        .iter()
+        .map(approval_request_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
 
     let count_rows = db
         .query(&Statement::with_values(
@@ -1097,6 +1096,11 @@ struct NonceRow {
     nonce_bytes: Vec<u8>,
 }
 
+/// The columns [`approval_request_from_row`] reads, in one select list.
+const REQUEST_COLUMNS: &str = "id, company_id, command, input, preview, reads, request_hash, effect, \
+     requested_by, reason, status, created_at, expires_at, decided_by, credential_id, \
+     risk, counterparty, decided_at, decision_reason, result, audit_ref";
+
 /// Loads an approval request from the database by id.
 async fn load_approval_request(
     db: &dyn Database,
@@ -1104,11 +1108,7 @@ async fn load_approval_request(
 ) -> Result<ApprovalRequest, ApprovalError> {
     let rows = db
         .query(&Statement::with_values(
-            "SELECT id, company_id, command, input, preview, reads, request_hash, effect, \
-             requested_by, reason, status, created_at, expires_at, decided_by, credential_id, \
-             risk, counterparty, decided_at, decision_reason, result, audit_ref \
-             FROM approval_request WHERE id = ?"
-                .to_owned(),
+            format!("SELECT {REQUEST_COLUMNS} FROM approval_request WHERE id = ?"),
             vec![SeaValue::from(approval_id)],
         ))
         .await
@@ -1117,7 +1117,11 @@ async fn load_approval_request(
     let row = rows.first().ok_or_else(|| {
         ApprovalError::Other(format!("approval request not found: {approval_id}"))
     })?;
+    approval_request_from_row(row)
+}
 
+/// Reads one approval request from a row selected with [`REQUEST_COLUMNS`].
+fn approval_request_from_row(row: &cratefield_core::Row) -> Result<ApprovalRequest, ApprovalError> {
     let id = row
         .get::<String>("id")
         .ok_or_else(|| ApprovalError::Database("missing id column".to_string()))?;

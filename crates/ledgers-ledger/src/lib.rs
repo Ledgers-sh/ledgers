@@ -162,6 +162,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "dimensions",
         include_str!("../migrations/sqlite/0007_dimensions.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0008",
+        "account_display_name",
+        include_str!("../migrations/sqlite/0008_account_display_name.sql"),
+    ),
 ];
 
 /// The Postgres override set: identical DDL for the tables, and the
@@ -203,6 +208,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0007",
         "dimensions",
         include_str!("../migrations/postgres/0007_dimensions.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0008",
+        "account_display_name",
+        include_str!("../migrations/postgres/0008_account_display_name.sql"),
     ),
 ];
 
@@ -251,7 +261,7 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 7);
+            assert_eq!(set.len(), 8);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
@@ -266,6 +276,8 @@ mod tests {
             assert_eq!(set[5].name, "source_app");
             assert_eq!(set[6].id, "0007");
             assert_eq!(set[6].name, "dimensions");
+            assert_eq!(set[7].id, "0008");
+            assert_eq!(set[7].name, "account_display_name");
         }
     }
 

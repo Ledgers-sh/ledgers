@@ -285,6 +285,37 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers accounts list",
         ),
         entry(
+            "accounts.get",
+            "read",
+            "GET",
+            "/v1/accounts/{number}",
+            "ledgers accounts get",
+        ),
+        chart_write(
+            "accounts.create",
+            "POST",
+            "/v1/accounts",
+            "ledgers accounts create",
+        ),
+        chart_write(
+            "accounts.update",
+            "POST",
+            "/v1/accounts/{number}/update",
+            "ledgers accounts update",
+        ),
+        chart_write(
+            "accounts.archive",
+            "POST",
+            "/v1/accounts/{number}/archive",
+            "ledgers accounts archive",
+        ),
+        chart_write(
+            "accounts.restore",
+            "POST",
+            "/v1/accounts/{number}/restore",
+            "ledgers accounts restore",
+        ),
+        entry(
             "entries.get",
             "read",
             "GET",
@@ -414,6 +445,19 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
     commands.extend(human_only_commands());
     commands.extend(approval_commands());
     commands
+}
+
+/// A chart-changing command. It is human-only by default: agent keys get a
+/// 403 unless their policy sets `chart_changes`, so the MCP server does not
+/// offer it as a tool. It is not idempotent.
+#[must_use]
+fn chart_write(name: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
+    CommandDescriptor {
+        human_only: true,
+        idempotent: false,
+        mcp: None,
+        ..entry(name, "draft", method, path, cli)
+    }
 }
 
 /// The human-only commands: agents get a 403 on them, and the MCP server does

@@ -9,11 +9,13 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
+mod accounts;
 mod approvals;
 mod bills;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
+use accounts::AccountsGet;
 use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
@@ -543,6 +545,14 @@ impl Dispatch for ServerDispatch {
                 self.execute(deps, &AccountsList, presented, request_id, input)
                     .await
             }
+            "accounts.get" => {
+                self.execute(deps, &AccountsGet, presented, request_id, input)
+                    .await
+            }
+            "accounts.create" | "accounts.update" | "accounts.archive" | "accounts.restore" => {
+                self.accounts_write(deps, presented, request_id, command, input)
+                    .await
+            }
             "reports.trial_balance" => {
                 self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
@@ -669,6 +679,7 @@ fn internal_agent_policy(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     })
 }
 
@@ -886,6 +897,7 @@ fn agent_key_policy_statement(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
     Ok(Statement::with_values(
@@ -1224,6 +1236,41 @@ pub fn registry() -> Registry {
             (
                 schema_of::<AccountsListInput>(),
                 schema_of::<AccountsListOutput>(),
+            ),
+        ),
+        (
+            "accounts.create",
+            (
+                schema_of::<accounts::AccountsCreateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.update",
+            (
+                schema_of::<accounts::AccountsUpdateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.archive",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.restore",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.get",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsGetOutput>(),
             ),
         ),
         (
@@ -1744,6 +1791,9 @@ impl From<EntryRecord> for EntryRecordView {
 pub struct EntriesListInput {
     /// Only entries of this VAT period (`YYYY-MM`); all periods when absent.
     pub period: Option<String>,
+    /// The id of the last entry of the previous page: the page starts after
+    /// it. The first page when absent. An id the company does not hold is a 404.
+    pub after: Option<String>,
     /// At most this many entries, newest first (default 50, cap 200).
     #[serde(default, deserialize_with = "de_opt_u32")]
     #[schemars(with = "Option<u32>")]
@@ -1792,9 +1842,16 @@ impl Command for EntriesList {
             .limit
             .unwrap_or(DEFAULT_LIST_LIMIT)
             .clamp(1, MAX_LIST_LIMIT);
-        let records = query::list_entries(db, &ctx.company_id, input.period.as_deref(), limit)
-            .await
-            .map_err(|err| domain(&err))?;
+        let records = query::list_entries(
+            db,
+            &ctx.company_id,
+            input.period.as_deref(),
+            input.after.as_deref(),
+            limit,
+        )
+        .await
+        .map_err(|err| domain(&err))?
+        .ok_or_else(|| CommandError::Domain(cratefield_core::Problem::not_found()))?;
         Ok(Plan::with_output(EntriesListOutput {
             entries: records.into_iter().map(EntryRecordView::from).collect(),
         }))
@@ -1861,6 +1918,9 @@ pub struct AccountView {
     pub number: String,
     /// The translatable name key.
     pub name_key: String,
+    /// The custom name a person gave the account, or `null` to show the
+    /// translated `name_key`.
+    pub display_name: Option<String>,
     /// The account class: asset, liability, equity, income, expense.
     pub account_type: String,
     /// The normal balance side.
@@ -1873,6 +1933,8 @@ pub struct AccountView {
     pub tags: Vec<String>,
     /// Whether the account accepts postings (a leaf of the chart).
     pub is_postable: bool,
+    /// Whether the account is archived: kept for history, no new postings.
+    pub archived: bool,
     /// The balance per base currency, debit-positive (empty when no postings).
     pub balances: Vec<SerializableAmount>,
 }
@@ -1934,12 +1996,14 @@ impl Command for AccountsList {
                     balances: by_account.remove(&account.number).unwrap_or_default(),
                     number: account.number,
                     name_key: account.name_key,
+                    display_name: account.display_name,
                     account_type: account.account_type.to_string(),
                     normal_balance: account.normal_balance.to_string(),
                     currency: account.currency.map(|c| c.code().to_string()),
                     parent: account.parent,
                     tags: account.tags,
                     is_postable,
+                    archived: account.archived,
                 }
             })
             .collect();

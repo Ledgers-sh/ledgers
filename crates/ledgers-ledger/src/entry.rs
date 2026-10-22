@@ -551,6 +551,17 @@ pub enum JournalError {
         account: String,
     },
 
+    /// The entry names an account that exists but is archived: it keeps
+    /// its history and takes no new postings. Restore it, or post to an
+    /// active account.
+    #[error(
+        "account {account} is archived and takes no new postings; restore it or post to an active account"
+    )]
+    AccountArchived {
+        /// The archived account number.
+        account: String,
+    },
+
     /// The entry's posting period is closed (or unknown — the guard
     /// fails closed), mapped back from the write-time refusal.
     #[error("posting period {period} is not open")]
@@ -743,6 +754,7 @@ impl JournalError {
     /// Never on this dependency graph; `serde_json::Value` construction
     /// from strings and arrays is infallible here.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn to_problem(&self) -> cratefield_core::Problem {
         use cratefield_core::Problem;
         match self {
@@ -778,6 +790,10 @@ impl JournalError {
             | JournalError::UnknownAccount { account } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("account", account.clone()),
+            JournalError::AccountArchived { account } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("account", account.clone())
+                .with_extension("reason", "account-archived".to_owned()),
             JournalError::FxSameCurrency { currency } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("currency", currency.clone()),

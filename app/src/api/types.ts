@@ -102,16 +102,30 @@ export interface EntriesListOutput {
   entries: EntryRecord[];
 }
 
-/** Account as returned by accounts.list (SerializableAccountEntry, ledgers-ledger surface.rs). */
+/** An account's balance in one base currency, debit-positive (AccountView.balances). */
+export interface AccountBalance {
+  minor: string;
+  currency: string;
+}
+
+/**
+ * Account as returned by accounts.list, accounts.get and the account writes
+ * (AccountView, crates/ledgers-server/src/dispatch/accounts.rs). Balances are
+ * the account's own postings, to date.
+ */
 export interface Account {
   number: string;
   name_key: string;
+  /** The custom name a person gave the account; null for template accounts (use name_key). */
+  display_name: string | null;
   account_type: string;
   normal_balance: string;
   currency: string | null;
   parent: string | null;
   tags: string[];
   is_postable: boolean;
+  archived: boolean;
+  balances: AccountBalance[];
 }
 
 export interface AccountsListOutput {
@@ -209,3 +223,27 @@ export interface KeysRevokeOutput {
   key: AgentKeyView;
 }
 
+
+/** One posted line on an account, newest first in accounts.get (max 20). */
+export interface AccountActivityLine {
+  entry_id: string;
+  journal_id: string;
+  fiscal_year: number;
+  number: number;
+  posting_date: string;
+  description: string;
+  /** Signed base amount on this account, debit-positive. */
+  minor: string;
+  currency: string;
+}
+
+/** Output of accounts.get. */
+export interface AccountDetailOutput {
+  account: Account;
+  activity: AccountActivityLine[];
+}
+
+/** Output of the account writes (accounts.create, update, archive, restore). */
+export interface AccountWriteOutput {
+  account: Account;
+}
