@@ -240,7 +240,7 @@ npx wrangler@4.148.0 dev --env staging --local --port 8787
 done. For the native server (SQLite), `LEDGERS_DEV=1 cargo run -p ledgers-server`
 creates the dev company and prints a dev key; that path has no bootstrap route.
 
-## Demo company (not yet on staging)
+## Demo company
 
 The demo company Halden Works GmbH (`crates/ledgers-demo`, issue #51) is loaded
 automatically by the native development server (`LEDGERS_DEV=1`) when its company has no
@@ -250,8 +250,36 @@ agent or a person posted it. Dimension values are created with the store's domai
 Re-running is a no-op: an entry whose `external_id` exists is skipped, and a reversal whose
 target is already reversed is skipped.
 
-Staging is **not seeded yet**. The Worker has no seeding route, and `ledgers admin seed-demo`
-is not implemented: the CLI can post only through the HTTP registry, which cannot create
-dimension values or post as a person. Until that exists, `POST /admin/bootstrap` gives
-staging an empty company, and the demo book is only available locally. `LEDGERS_DEMO=0`
-keeps a development company empty.
+### Seeding staging
+
+Staging can load the same book with `POST /admin/seed-demo`, after the bootstrap in step 6.
+The Worker runs the same loader as the development server. Agent entries post as an
+internal agent principal that exists only in memory: no agent key is issued or stored for
+the seed. Owner entries post as the person "Demo owner" through the executor. The route is
+idempotent by `external_id`, so a second call posts nothing.
+
+It refuses in this order, and reads or writes nothing before the checks pass:
+
+- `404` while the `SEED_TOKEN` secret is unset,
+- `401` for a missing or wrong bearer token,
+- `403` unless the variable `LEDGERS_ALLOW_DEMO_SEED` is `"1"`. That variable is set in
+  `[env.staging.vars]` only. Never set it in production.
+
+The response and the Worker log carry counts only, never entry text or keys. Seed the
+staging company like this:
+
+```sh
+export SEED_TOKEN="$(openssl rand -hex 32)"
+printf '%s' "$SEED_TOKEN" | wrangler secret put SEED_TOKEN --env staging
+curl -sS -X POST https://api-staging.ledgers.sh/admin/seed-demo \
+  -H "Authorization: Bearer $SEED_TOKEN" -w '\n%{http_code}\n'   # expect 200 with counts
+wrangler secret delete SEED_TOKEN --env staging
+unset SEED_TOKEN
+```
+
+The one-liner `openssl rand -hex 32 | wrangler secret put SEED_TOKEN --env staging` sets
+the secret, but the call needs the value, so keep the token in a shell variable as above.
+Delete the secret as soon as the call has answered, so the route closes again. A second
+call with the secret still set answers `200` with `"posted": 0`.
+
+`LEDGERS_DEMO=0` keeps a development company empty.

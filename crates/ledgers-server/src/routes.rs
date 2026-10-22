@@ -27,6 +27,10 @@ pub enum Presented {
     Bearer(String),
     /// The person's session cookie, with what the request is checked against.
     Session(SessionPresented),
+    /// A principal the server vouches for in-process, such as the internal
+    /// agent the demo seed posts as. No request can present one: the HTTP
+    /// adapters only build `Bearer` and `Session`.
+    Principal(Principal),
 }
 
 /// A session cookie as the request presented it.

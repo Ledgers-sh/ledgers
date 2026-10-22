@@ -145,7 +145,14 @@ export interface BalanceSheetOutput {
   as_of: string;
   assets: Amount;
   liabilities: Amount;
+  /** Equity as presented: equity_accounts plus current_year_result. */
   equity: Amount;
+  equity_accounts: Amount;
+  /** Income minus expenses from the fiscal year start to as_of (negative for a loss). */
+  current_year_result: Amount;
+  /** Assets minus liabilities minus equity; zero when balanced. */
+  difference: Amount;
+  balanced: boolean;
 }
 
 /** One row of reports.account_balance_by_dimension (DimensionBalance). */

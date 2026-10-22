@@ -34,7 +34,6 @@ export function Overview() {
     totals.set(row.debit.currency, entry);
   }
   const hasActivity = trial.rows.length > 0;
-  const balanceSheetGap = BigInt(bs.assets.minor) - (BigInt(bs.liabilities.minor) + BigInt(bs.equity.minor));
 
   return (
     <>
@@ -98,7 +97,9 @@ export function Overview() {
           <div class="tile">
             <span class="label">Equity</span>
             <Money class="value" minor={bs.equity.minor} currency={bs.equity.currency} />
-            <span class="sub">As of {bs.as_of}</span>
+            <span class="sub">
+              Incl. current year result <Money minor={bs.current_year_result.minor} currency={bs.current_year_result.currency} />
+            </span>
           </div>
         </div>
       </section>
@@ -145,8 +146,8 @@ export function Overview() {
             <p class="muted" style={{ marginBottom: '12px' }}>
               Assets should equal liabilities plus equity at the period end.
             </p>
-            <span class={`badge ${balanceSheetGap === 0n ? 'balanced' : 'reversed'}`}>
-              {balanceSheetGap === 0n ? 'Assets = liabilities + equity' : `Gap ${formatMinor(balanceSheetGap, bs.assets.currency, LOCALE)}`}
+            <span class={`badge ${bs.balanced ? 'balanced' : 'reversed'}`}>
+              {bs.balanced ? 'Assets = liabilities + equity' : `Gap ${formatMinor(BigInt(bs.difference.minor), bs.difference.currency, LOCALE)}`}
             </span>
           </div>
         </section>

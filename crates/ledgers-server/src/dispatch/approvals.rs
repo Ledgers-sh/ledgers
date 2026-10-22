@@ -326,6 +326,7 @@ fn credential_of(presented: &Presented) -> Credential {
     match presented {
         Presented::Bearer(token) => token.clone(),
         Presented::Session(session) => session.id.clone(),
+        Presented::Principal(_) => String::new(),
     }
 }
 
@@ -347,6 +348,7 @@ impl ServerDispatch {
 
     fn caller_authn(&self, deps: &Deps, presented: &Presented) -> Authn {
         match presented {
+            Presented::Principal(principal) => Authn::Fixed(principal.clone()),
             Presented::Bearer(_) => Authn::Key(KeyStore {
                 db: Arc::clone(&deps.db),
                 clock: Arc::clone(&deps.clock),
@@ -368,7 +370,7 @@ impl ServerDispatch {
         presented: &Presented,
     ) -> Result<Option<i64>, CommandError> {
         match presented {
-            Presented::Bearer(_) => Ok(None),
+            Presented::Bearer(_) | Presented::Principal(_) => Ok(None),
             Presented::Session(session) => Ok(load_session(deps.db.as_ref(), &session.id)
                 .await
                 .map_err(CommandError::Database)?

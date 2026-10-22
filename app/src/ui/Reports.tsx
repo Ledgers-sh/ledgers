@@ -129,13 +129,14 @@ export function Reports() {
     const lines = [
       ['Assets', bs.assets],
       ['Liabilities', bs.liabilities],
+      ['Equity accounts', bs.equity_accounts],
+      ['Current year result', bs.current_year_result],
       ['Equity', bs.equity],
     ] as const;
     csv = {
       name: `balance-sheet-${bs.as_of}.csv`,
       text: toCsv([['Line', 'Currency', 'Amount'], ...lines.map(([label, a]) => [label, a.currency, toPlainMajor(a.minor, a.currency)])]),
     };
-    const gap = BigInt(bs.assets.minor) - (BigInt(bs.liabilities.minor) + BigInt(bs.equity.minor));
     body = (
       <div class="table-wrap">
         <table class="ledger cards">
@@ -157,7 +158,7 @@ export function Reports() {
           <tfoot>
             <tr>
               <td class="main">Assets minus liabilities and equity</td>
-              <td class="num" data-label="Check">{formatMinor(gap, bs.assets.currency, LOCALE)}</td>
+              <td class="num" data-label="Check">{formatMinor(BigInt(bs.difference.minor), bs.difference.currency, LOCALE)}</td>
             </tr>
           </tfoot>
         </table>

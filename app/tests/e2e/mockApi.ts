@@ -479,14 +479,20 @@ function handle(method: string, url: URL, bodyText: string): Reply {
     const assets = sum(state.entries, (n) => n.startsWith('1'), 'debit') - sum(state.entries, (n) => n.startsWith('1'), 'credit');
     const liabilities = sum(state.entries, (n) => n.startsWith('2'), 'credit') - sum(state.entries, (n) => n.startsWith('2'), 'debit');
     const equity = sum(state.entries, (n) => n.startsWith('3'), 'credit') - sum(state.entries, (n) => n.startsWith('3'), 'debit');
+    const result = netIncome(state.entries);
+    const difference = assets - liabilities - (equity + result);
     return {
       status: 200,
       body: {
         as_of: url.searchParams.get('as_of'),
         assets: money(assets),
         liabilities: money(liabilities),
-        // Equity includes the period's net income, as the real balance sheet does.
-        equity: money(equity + netIncome(state.entries)),
+        // Equity includes the current year result, as the real balance sheet does.
+        equity: money(equity + result),
+        equity_accounts: money(equity),
+        current_year_result: money(result),
+        difference: money(difference),
+        balanced: difference === 0n,
       },
     };
   }
