@@ -17,32 +17,32 @@ ledgers-server = { path = "../ledgers-server" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-async-trait = { workspace = true }
+
+# Native runtime for `ledgers serve` (the same crates ledgers-server's binary uses)
+cratefield-core = { workspace = true }
+cratefield-runtime-native = { workspace = true }
+cratefield-adapter-sqlite = { workspace = true }
 
 # CLI: clap builder API
-clap = { version = "4", features = ["derive", "cargo", "env"] }
+clap = { version = "4", features = ["derive", "cargo"] }
 clap_complete = { version = "4" }
 
-# HTTP client: reqwest blocking with rustls
+# HTTP client: reqwest with rustls
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
-# Keyring for OS keychain (native backends)
+# OS keychain for profile keys (MIT/Apache-2.0; already in the lockfile, allowed by deny.toml)
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # Config files
 toml = { workspace = true }
 
 # Async runtime
-tokio = { version = "1", features = ["rt", "macros"] }
-
-# Tracing/logging
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-
-# Error handling
-anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 insta = { workspace = true }
 tempfile = "3"
 mockito = "1"
+
+[lints]
+workspace = true

@@ -33,6 +33,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo check --target wasm32-unknown-unknown -p ledgers-server
 cargo deny check
+bash tools/test-guards.sh
 bash tools/check-boundary.sh
 bash tools/check-harness-pins.sh
 bash tools/check-harness-rev.sh

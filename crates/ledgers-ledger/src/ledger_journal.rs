@@ -257,6 +257,7 @@ async fn post_new_entry(
         description: entry.memo.clone(),
         source_documents: Vec::new(),
         reverses: None,
+        external_id: None,
         lines,
     };
     let ctx = PostContext {

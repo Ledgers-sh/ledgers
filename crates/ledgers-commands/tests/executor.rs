@@ -40,7 +40,7 @@ struct TestOutput {
 
 struct TestWriteCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for TestWriteCommand {
     const NAME: &'static str = "test.write";
     const TIER: Tier = Tier::Draft;
@@ -110,7 +110,7 @@ impl Command for TestWriteCommand {
 
 struct TestHumanOnlyCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for TestHumanOnlyCommand {
     const NAME: &'static str = "test.human_only";
     const TIER: Tier = Tier::Read;
@@ -149,7 +149,7 @@ impl Command for TestHumanOnlyCommand {
 
 struct TestReadCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for TestReadCommand {
     const NAME: &'static str = "test.read";
     const TIER: Tier = Tier::Read;
@@ -188,7 +188,7 @@ impl Command for TestReadCommand {
 
 struct TestPostCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for TestPostCommand {
     const NAME: &'static str = "test.post";
     const TIER: Tier = Tier::PostWithinLimits;
@@ -309,7 +309,7 @@ impl TestAuthenticator {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Authenticator for TestAuthenticator {
     async fn authenticate(&self, credential: &Credential) -> Result<Principal, CommandError> {
         self.credentials

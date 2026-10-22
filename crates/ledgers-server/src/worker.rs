@@ -6,7 +6,6 @@
 use crate::harness;
 use cratefield_core::{Config, Harness};
 use cratefield_runtime_cloudflare::{Cloudflare, serve};
-use ledgers_commands::Registry;
 use std::sync::OnceLock;
 use worker::{Context, Env, Request, Response, event};
 
@@ -24,7 +23,7 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         let runtime = Cloudflare::new().db("DB").blob("DOCUMENTS");
 
         // Build the harness with the runtime (so it knows which ports are provided)
-        let registry = Registry::new();
+        let registry = crate::dispatch::registry();
         let harness_instance =
             harness(&registry, &cfg, runtime.clone()).expect("Failed to build harness");
 

@@ -47,7 +47,7 @@ impl cratefield_core::RandomBytes for TestRandomBytes {
 /// Test directory: always returns `Tier::PostWithinLimits` with empty limits.
 struct TestKeyDirectory;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl AgentKeyDirectory for TestKeyDirectory {
     async fn lookup(
         &self,

@@ -49,9 +49,10 @@ pub struct CommandContext {
 /// The Command trait: define the name, input/output, tier, and the
 /// operations that preview and plan the command.
 ///
-/// All async methods use `async_trait` with `?Send` (wasm-clean for
-/// Workers runtime, and matching the harness's `Database` port).
-#[async_trait::async_trait(?Send)]
+/// All async methods use `async_trait` with `Send` futures: the executor
+/// is awaited inside the server's axum handlers, which must be `Send`, and
+/// the harness `Database` port is `Send` too.
+#[async_trait::async_trait]
 pub trait Command: Send + Sync {
     /// The command's resource and verb (e.g., `"bills.match"`, `"journal.post"`).
     /// Must be lowercase, alphanumeric and underscores/dashes, like `"resource.verb"` or

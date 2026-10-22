@@ -764,6 +764,7 @@ async fn the_db_guard_alone_rejects_unbalanced_lines_without_consuming_a_number(
         description: "Raw unbalanced".to_owned(),
         source_documents: Vec::new(),
         reverses: None,
+        external_id: None,
         lines: vec![raw_line("1010", 100), raw_line("4000", -99)],
     };
 

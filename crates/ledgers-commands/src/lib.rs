@@ -45,4 +45,4 @@ pub use mcp::{
     ApprovalCard, NOT_TAX_ADVICE, ToolCaller, ToolOutcome, ToolScope, UNTRUSTED_DATA_RULE,
 };
 pub use policy::{Decision, DefaultPolicy, Policy};
-pub use registry::{CommandDescriptor, CommandMeta, Registry};
+pub use registry::{CommandDescriptor, CommandMeta, Registry, default_commands};

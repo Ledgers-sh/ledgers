@@ -5,7 +5,7 @@ use cratefield_core::axum;
 use cratefield_core::axum::body::Body;
 use cratefield_core::axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request};
 use ledgers_commands::{CommandDescriptor, Limits, Principal, Registry, Tier};
-use ledgers_server::{Dispatch, McpModule};
+use ledgers_server::{Deps, Dispatch, McpModule};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -53,6 +53,7 @@ struct TestDispatch;
 impl Dispatch for TestDispatch {
     async fn dispatch(
         &self,
+        _: &Deps,
         command: &str,
         _: Value,
         _: &str,
@@ -66,7 +67,7 @@ impl Dispatch for TestDispatch {
         Ok(json!({"result": "ok"}))
     }
 
-    async fn principal(&self, credential: &str) -> Result<Principal, Problem> {
+    async fn principal(&self, _: &Deps, credential: &str) -> Result<Principal, Problem> {
         match credential {
             "lk_test_read" => Ok(Principal::Agent {
                 key_id: "test_read_key".to_string(),

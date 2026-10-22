@@ -1,51 +1,69 @@
-//! Profile management: config file, key storage, and profile selection.
+//! Profiles: the server URL and a *reference* to the API key.
+//!
+//! The config file (`~/.config/ledgers/config.toml`, or `$LEDGERS_CONFIG_DIR/config.toml`)
+//! holds URLs and key references only. A literal key is rejected when the file is
+//! read, so a secret cannot end up in plaintext config.
+//!
+//! ```toml
+//! [profiles.default]
+//! url = "http://localhost:3000"
+//! key = "keychain"            # OS keychain, service "ledgers", account = profile name
+//!
+//! [profiles.production]
+//! url = "https://ledgers.example.com"
+//! key = "env:PROD_LEDGERS_KEY" # read from that environment variable
+//! ```
+//!
+//! `LEDGERS_API_KEY` in the environment always wins over the profile's key reference.
 
+use crate::Context;
+use crate::app::GlobalFlags;
 use crate::error::{CliError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// A profile: URL and key reference (keychain, env var, or rejected literal).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Keychain service name under which profile keys are stored.
+pub const KEYCHAIN_SERVICE: &str = "ledgers";
+
+/// The profile used when neither `--profile` nor `LEDGERS_PROFILE` is set.
+pub const DEFAULT_PROFILE: &str = "default";
+
+/// A profile: the server URL and where the key lives.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
-    /// The server URL.
+    /// The server base URL.
     pub url: String,
-    /// The key reference: "keychain" or "env:VAR_NAME".
-    /// Literal keys are rejected at load time.
+    /// Where the API key is read from.
     pub key: KeyRef,
 }
 
-/// How to obtain the API key.
-#[derive(Clone, Debug)]
+/// A reference to an API key. Never the key itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeyRef {
-    /// Use the OS keychain (stored under service="ledgers", account=<profile_name>).
+    /// The OS keychain entry for the profile.
     Keychain,
-    /// Use an environment variable.
+    /// The named environment variable.
     Env(String),
 }
 
 impl KeyRef {
-    /// Parses a key ref from a string.
+    /// Parses `keychain` or `env:VAR`.
     ///
     /// # Errors
-    /// Returns an error if the string looks like a literal key (anything other than
-    /// "keychain" or "env:VAR").
+    /// Rejects anything else, including a literal key.
     pub fn parse(s: &str) -> Result<Self> {
         if s == "keychain" {
-            Ok(KeyRef::Keychain)
-        } else if let Some(var) = s.strip_prefix("env:") {
-            if var.is_empty() {
-                Err(CliError::Config(
-                    "env: prefix requires a variable name".to_string(),
-                ))
-            } else {
-                Ok(KeyRef::Env(format!("env:{var}")))
-            }
-        } else {
-            Err(CliError::Config(
-                "literal keys must not be stored in config; use 'keychain' or 'env:VAR'"
-                    .to_string(),
-            ))
+            return Ok(KeyRef::Keychain);
+        }
+        match s.strip_prefix("env:") {
+            Some(var) if !var.is_empty() => Ok(KeyRef::Env(var.to_string())),
+            Some(_) => Err(CliError::Config(
+                "env: prefix requires a variable name".into(),
+            )),
+            None => Err(CliError::Config(
+                "literal keys must not be stored in config; use 'keychain' or 'env:VAR'".into(),
+            )),
         }
     }
 }
@@ -54,17 +72,8 @@ impl std::fmt::Display for KeyRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             KeyRef::Keychain => write!(f, "keychain"),
-            KeyRef::Env(var) => write!(f, "{var}"),
+            KeyRef::Env(var) => write!(f, "env:{var}"),
         }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for KeyRef {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        KeyRef::parse(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -77,180 +86,174 @@ impl Serialize for KeyRef {
     }
 }
 
-/// The configuration file: profiles by name.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+impl<'de> Deserialize<'de> for KeyRef {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        KeyRef::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The config file: profiles by name.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
+    /// Profiles keyed by name.
     #[serde(default)]
     pub profiles: BTreeMap<String, Profile>,
 }
 
 impl Config {
-    /// Loads the config file from the standard location.
-    /// Returns an empty config if the file doesn't exist.
+    /// Loads a config file. A missing file is an empty config.
     ///
     /// # Errors
-    /// Returns an error if the file exists but is invalid.
-    pub fn load() -> Result<Self> {
-        let path = config_path()?;
+    /// Returns an error if the file exists but cannot be read or parsed, or
+    /// holds a literal key.
+    pub fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Config::default());
         }
-
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| CliError::Config(format!("cannot read config: {e}")))?;
-
-        toml::from_str(&content).map_err(|e| CliError::Config(format!("invalid config: {e}")))
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| CliError::Config(format!("cannot read {}: {e}", path.display())))?;
+        toml::from_str(&content)
+            .map_err(|e| CliError::Config(config_parse_error(path, &content, &e)))
     }
 
-    /// Saves the config file to the standard location.
+    /// Writes the config file, creating its directory.
     ///
     /// # Errors
-    /// Returns an error if the directory cannot be created or the file cannot be written.
-    pub fn save(&self) -> Result<()> {
-        let path = config_path()?;
-
-        // Create parent directory if needed
+    /// Returns an error if the directory or file cannot be written.
+    pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| CliError::Config(format!("cannot create config directory: {e}")))?;
         }
-
         let content = toml::to_string_pretty(self)
             .map_err(|e| CliError::Config(format!("cannot serialize config: {e}")))?;
-
-        std::fs::write(&path, content)
-            .map_err(|e| CliError::Config(format!("cannot write config: {e}")))?;
-
-        Ok(())
+        std::fs::write(path, content)
+            .map_err(|e| CliError::Config(format!("cannot write config: {e}")))
     }
 
-    /// Gets a profile by name.
+    /// Looks up a profile by name.
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&Profile> {
         self.profiles.get(name)
     }
+}
 
-    /// Adds or updates a profile.
-    pub fn set_profile(&mut self, name: String, profile: Profile) {
-        self.profiles.insert(name, profile);
+/// A config parse error without the offending source text. The TOML error's
+/// `Display` quotes the line it failed on, which can be a secret, so only its
+/// message and line number are reported.
+fn config_parse_error(path: &Path, content: &str, error: &toml::de::Error) -> String {
+    let line = error.span().map(|span| {
+        let before = content.get(..span.start).unwrap_or(content);
+        before.matches('\n').count() + 1
+    });
+    match line {
+        Some(line) => format!(
+            "invalid config {} at line {line}: {}",
+            path.display(),
+            error.message()
+        ),
+        None => format!("invalid config {}: {}", path.display(), error.message()),
     }
 }
 
-/// The standard config file path.
-/// Priority: `$LEDGERS_CONFIG_DIR/config.toml`, then `$XDG_CONFIG_HOME/ledgers/config.toml`,
-/// then `~/.config/ledgers/config.toml`.
-fn config_path() -> Result<PathBuf> {
-    if let Ok(dir) = std::env::var("LEDGERS_CONFIG_DIR") {
-        return Ok(PathBuf::from(dir).join("config.toml"));
+/// The config file path: `$LEDGERS_CONFIG_DIR/config.toml` if the context sets it,
+/// otherwise `~/.config/ledgers/config.toml`.
+///
+/// # Errors
+/// Returns an error if no home directory is known.
+pub fn config_file(ctx: &Context) -> Result<PathBuf> {
+    if let Some(path) = &ctx.config_path {
+        return Ok(path.clone());
     }
-
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(xdg).join("ledgers").join("config.toml"));
-    }
-
-    // Home directory from the environment (no `dirs` crate: it pulls in
-    // option-ext, which is MPL-2.0 and not on the deny.toml allow list).
+    // No `dirs` crate: it pulls in option-ext (MPL-2.0), which deny.toml does not allow.
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    if let Some(home) = home {
-        return Ok(home.join(".config").join("ledgers").join("config.toml"));
-    }
-
-    Err(CliError::Config(
-        "cannot determine config directory".to_string(),
-    ))
+        .ok_or_else(|| CliError::Config("cannot determine the home directory".into()))?;
+    Ok(PathBuf::from(home)
+        .join(".config")
+        .join("ledgers")
+        .join("config.toml"))
 }
 
-/// Loads a profile: from env overrides or config file.
+/// A resolved server URL and API key.
+#[derive(Clone, Debug)]
+pub struct Connection {
+    /// The server base URL.
+    pub url: String,
+    /// The API key, sent as a Bearer token.
+    pub key: String,
+}
+
+/// Resolves the connection for a command.
 ///
-/// Priority:
-/// 1. `LEDGERS_URL` and `LEDGERS_KEY` env vars (both as literals)
-/// 2. Selected profile from config (by --profile, LEDGERS_PROFILE, or "default")
+/// URL precedence: `--url`, then `LEDGERS_URL`, then the profile.
+/// Key precedence: `LEDGERS_API_KEY`, then the profile's key reference.
 ///
 /// # Errors
-/// Returns an error if the profile is not found or config is invalid.
-pub fn load_profile(name: Option<&str>) -> Result<(String, String)> {
-    // Check env overrides first
-    if let (Ok(url), Ok(key)) = (std::env::var("LEDGERS_URL"), std::env::var("LEDGERS_KEY")) {
-        return Ok((url, key));
-    }
+/// Returns an error if the named profile does not exist, no URL or key can be
+/// found, the keychain has no entry, or the config is invalid.
+pub fn resolve(globals: &GlobalFlags, ctx: &Context) -> Result<Connection> {
+    let explicit_profile = globals.profile.as_deref().or(ctx.profile.as_deref());
+    let url_override = globals.url.as_deref().or(ctx.url.as_deref());
+    let env_key = ctx.api_key.as_deref();
 
-    // Load config
-    let config = Config::load()?;
-
-    // Determine profile name
-    let profile_name = if let Some(n) = name {
-        n.to_string()
+    // Only read the config when a value is missing or a profile was named.
+    let needs_config = url_override.is_none() || env_key.is_none() || explicit_profile.is_some();
+    let profile = if needs_config {
+        let path = config_file(ctx)?;
+        let config = Config::load_from(&path)?;
+        let name = explicit_profile.unwrap_or(DEFAULT_PROFILE);
+        match (config.get(name), explicit_profile) {
+            (Some(p), _) => Some((name.to_string(), p.clone())),
+            (None, Some(_)) => {
+                return Err(CliError::Profile(format!(
+                    "profile '{name}' not found in {}",
+                    path.display()
+                )));
+            }
+            (None, None) => None,
+        }
     } else {
-        std::env::var("LEDGERS_PROFILE").unwrap_or_else(|_| "default".to_string())
+        None
     };
 
-    // Get profile
-    let profile = config
-        .get(&profile_name)
-        .ok_or_else(|| CliError::Profile(format!("profile '{}' not found", profile_name)))?;
+    let url = match (url_override, &profile) {
+        (Some(url), _) => url.to_string(),
+        (None, Some((_, p))) => p.url.clone(),
+        (None, None) => {
+            return Err(CliError::Profile(
+                "no server URL: pass --url, set LEDGERS_URL, or add a profile".into(),
+            ));
+        }
+    };
 
-    // Resolve URL
-    let url = profile.url.clone();
+    let key = match (env_key, &profile) {
+        (Some(key), _) => key.to_string(),
+        (None, Some((name, p))) => read_key(name, &p.key)?,
+        (None, None) => {
+            return Err(CliError::Profile(
+                "no API key: set LEDGERS_API_KEY or configure a profile key".into(),
+            ));
+        }
+    };
 
-    // Resolve key
-    let key = match &profile.key {
-        KeyRef::Keychain => keyring::Entry::new("ledgers", &profile_name)
-            .map_err(|e| CliError::Keychain(format!("cannot access keychain: {e}")))?
-            .get_password()
+    Ok(Connection { url, key })
+}
+
+/// Reads a key from its reference.
+fn read_key(profile: &str, key_ref: &KeyRef) -> Result<String> {
+    match key_ref {
+        KeyRef::Keychain => keyring::Entry::new(KEYCHAIN_SERVICE, profile)
+            .and_then(|entry| entry.get_password())
             .map_err(|e| {
-                CliError::Keychain(format!(
-                    "no key in keychain for profile '{}': {e}",
-                    profile_name
-                ))
-            })?,
+                CliError::Keychain(format!("no key in keychain for profile '{profile}': {e}"))
+            }),
         KeyRef::Env(var) => std::env::var(var)
-            .map_err(|_| CliError::Profile(format!("environment variable {var} not set")))?,
-    };
-
-    Ok((url, key))
-}
-
-/// Stores a key in the OS keychain for a profile.
-///
-/// # Errors
-/// Returns an error if the keychain cannot be accessed.
-pub fn store_key_in_keychain(profile_name: &str, key: &str) -> Result<()> {
-    keyring::Entry::new("ledgers", profile_name)
-        .map_err(|e| CliError::Keychain(format!("cannot access keychain: {e}")))?
-        .set_password(key)
-        .map_err(|e| CliError::Keychain(format!("cannot store key in keychain: {e}")))?;
-    Ok(())
-}
-
-/// Saves a profile: URL and key reference.
-/// The key is stored in the keychain if key_ref is "keychain".
-///
-/// # Errors
-/// Returns an error if the config cannot be saved or keychain access fails.
-pub fn save_profile(name: String, url: String, key_ref: &str) -> Result<()> {
-    let key = KeyRef::parse(key_ref)?;
-
-    let mut config = Config::load()?;
-    config.set_profile(name, Profile { url, key });
-    config.save()?;
-
-    Ok(())
-}
-
-/// Resolves a session from global flags and profile.
-///
-/// Precedence: `--url`/`--key` > environment > profile.
-///
-/// # Errors
-/// Returns an error if the profile cannot be loaded or session cannot be created.
-pub fn resolve_session(globals: &crate::app::GlobalFlags) -> Result<crate::http::Session> {
-    // Load the base profile
-    let (url, key) = load_profile(globals.profile.as_deref())?;
-
-    // Apply global overrides
-    let url = globals.url.as_ref().cloned().unwrap_or(url);
-    let key = globals.key.as_ref().cloned().unwrap_or(key);
-
-    crate::http::Session::new(url, key)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| CliError::Profile(format!("environment variable {var} is not set"))),
+    }
 }

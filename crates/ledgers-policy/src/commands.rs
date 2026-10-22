@@ -12,7 +12,7 @@ use ledgers_commands::{
 /// `policy.put_key`: create or update an agent key.
 pub struct PutKeyCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for PutKeyCommand {
     const NAME: &'static str = "policy.put_key";
     const TIER: Tier = Tier::PostWithinLimits;
@@ -51,7 +51,7 @@ impl Command for PutKeyCommand {
 /// `policy.revoke_key`: mark an agent key as revoked.
 pub struct RevokeKeyCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for RevokeKeyCommand {
     const NAME: &'static str = "policy.revoke_key";
     const TIER: Tier = Tier::PostWithinLimits;
@@ -90,7 +90,7 @@ impl Command for RevokeKeyCommand {
 /// `policy.explain`: get a decision explanation for a command.
 pub struct PolicyExplainCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for PolicyExplainCommand {
     const NAME: &'static str = "policy.explain";
     const TIER: Tier = Tier::Read;

@@ -36,7 +36,7 @@ struct PayBillOutput {
 
 struct PayBillCommand;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for PayBillCommand {
     const NAME: &'static str = "bill.pay";
     const TIER: Tier = Tier::PostWithinLimits;
@@ -145,7 +145,7 @@ impl Command for PayBillCommand {
 
 struct TestAuthenticator;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Authenticator for TestAuthenticator {
     async fn authenticate(
         &self,

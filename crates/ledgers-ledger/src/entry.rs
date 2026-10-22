@@ -630,6 +630,48 @@ pub enum JournalError {
     #[error(transparent)]
     Money(#[from] MoneyError),
 
+    /// A line on an account that requires a dimension does not carry it.
+    #[error("account {account} requires dimension {dimension} on all lines")]
+    DimensionRequired {
+        /// The account that enforces the requirement.
+        account: String,
+        /// The dimension kind.
+        dimension: String,
+    },
+
+    /// A line on an account that forbids a dimension carries it.
+    #[error("account {account} forbids dimension {dimension}")]
+    DimensionForbidden {
+        /// The account that forbids the dimension.
+        account: String,
+        /// The dimension kind.
+        dimension: String,
+    },
+
+    /// A line carries a dimension value that does not exist in the company.
+    #[error("unknown {dimension} value on account {account}: {value}")]
+    UnknownDimensionValue {
+        /// The dimension kind.
+        dimension: String,
+        /// The account the line names.
+        account: String,
+        /// The unknown value.
+        value: String,
+    },
+
+    /// An own-books unit's lines in this entry do not balance in base.
+    #[error("unit {unit} does not balance in base currency")]
+    UnitUnbalanced {
+        /// The unit code whose lines don't balance.
+        unit: String,
+    },
+
+    /// Per-unit balancing is enabled but no inter-unit clearing account
+    /// exists or is ambiguous (need exactly one unarchived leaf tagged
+    /// `inter-unit-clearing`).
+    #[error("per-unit balancing requires exactly one unarchived inter-unit-clearing account")]
+    ClearingAccountMissing,
+
     /// A statement failed on the `Database` port.
     #[error(transparent)]
     Database(#[from] cratefield_core::DbError),
@@ -749,7 +791,9 @@ impl JournalError {
             JournalError::InvalidJournalCode { code, .. } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("code", code.clone()),
-            JournalError::InvalidJournalName { .. } | JournalError::HumanOnlyReversal => {
+            JournalError::InvalidJournalName { .. }
+            | JournalError::HumanOnlyReversal
+            | JournalError::ClearingAccountMissing => {
                 Problem::new(&JOURNAL_ENTRY_REFUSED).with_detail(self.to_string())
             }
             JournalError::UnknownKind { value } => Problem::new(&JOURNAL_ENTRY_REFUSED)
@@ -778,6 +822,25 @@ impl JournalError {
             JournalError::Conflict { attempts } => Problem::new(&JOURNAL_POST_CONFLICT)
                 .with_detail(self.to_string())
                 .with_extension("attempts", u64::from(*attempts)),
+            JournalError::DimensionRequired { account, dimension }
+            | JournalError::DimensionForbidden { account, dimension } => {
+                Problem::new(&JOURNAL_ENTRY_REFUSED)
+                    .with_detail(self.to_string())
+                    .with_extension("account", account.clone())
+                    .with_extension("dimension", dimension.clone())
+            }
+            JournalError::UnknownDimensionValue {
+                dimension,
+                account,
+                value,
+            } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("dimension", dimension.clone())
+                .with_extension("account", account.clone())
+                .with_extension("value", value.clone()),
+            JournalError::UnitUnbalanced { unit } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("unit", unit.clone()),
             JournalError::Money(_) | JournalError::Database(_) => {
                 // No internals in the body (architecture section 6):
                 // the underlying error is the caller's to log.
