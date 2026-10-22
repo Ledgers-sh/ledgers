@@ -9,10 +9,12 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
+mod accounts;
 mod approvals;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
+use accounts::AccountsGet;
 use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
@@ -425,6 +427,14 @@ impl Dispatch for ServerDispatch {
                 self.execute(deps, &AccountsList, presented, request_id, input)
                     .await
             }
+            "accounts.get" => {
+                self.execute(deps, &AccountsGet, presented, request_id, input)
+                    .await
+            }
+            "accounts.create" | "accounts.update" | "accounts.archive" | "accounts.restore" => {
+                self.accounts_write(deps, presented, request_id, command, input)
+                    .await
+            }
             "reports.trial_balance" => {
                 self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
@@ -512,6 +522,7 @@ fn internal_agent_policy(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     })
 }
 
@@ -729,6 +740,7 @@ fn agent_key_policy_statement(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
     Ok(Statement::with_values(
@@ -1059,6 +1071,7 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 /// # Panics
 /// Never in practice: the command names are fixed and unique.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
         (
@@ -1066,6 +1079,41 @@ pub fn registry() -> Registry {
             (
                 schema_of::<AccountsListInput>(),
                 schema_of::<AccountsListOutput>(),
+            ),
+        ),
+        (
+            "accounts.create",
+            (
+                schema_of::<accounts::AccountsCreateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.update",
+            (
+                schema_of::<accounts::AccountsUpdateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.archive",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.restore",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.get",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsGetOutput>(),
             ),
         ),
         (
@@ -1623,6 +1671,9 @@ pub struct AccountView {
     pub number: String,
     /// The translatable name key.
     pub name_key: String,
+    /// The custom name a person gave the account, or `null` to show the
+    /// translated `name_key`.
+    pub display_name: Option<String>,
     /// The account class: asset, liability, equity, income, expense.
     pub account_type: String,
     /// The normal balance side.
@@ -1635,6 +1686,8 @@ pub struct AccountView {
     pub tags: Vec<String>,
     /// Whether the account accepts postings (a leaf of the chart).
     pub is_postable: bool,
+    /// Whether the account is archived: kept for history, no new postings.
+    pub archived: bool,
     /// The balance per base currency, debit-positive (empty when no postings).
     pub balances: Vec<SerializableAmount>,
 }
@@ -1696,12 +1749,14 @@ impl Command for AccountsList {
                     balances: by_account.remove(&account.number).unwrap_or_default(),
                     number: account.number,
                     name_key: account.name_key,
+                    display_name: account.display_name,
                     account_type: account.account_type.to_string(),
                     normal_balance: account.normal_balance.to_string(),
                     currency: account.currency.map(|c| c.code().to_string()),
                     parent: account.parent,
                     tags: account.tags,
                     is_postable,
+                    archived: account.archived,
                 }
             })
             .collect();

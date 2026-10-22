@@ -23,7 +23,7 @@
 //!   diagnostic reads after the failed write (ADR 0004: reads after a
 //!   failed write choose the error, they never gate one), so closed
 //!   and unknown periods surface `PeriodNotOpen` and unknown or
-//!   archived accounts `UnknownAccount`;
+//!   archived accounts `AccountArchived`;
 //! - **cross-company posts** — a post into another company's journal,
 //!   or a reversal naming another company's entry, is refused
 //!   fail-closed by the ownership guards, consuming no number;
@@ -556,14 +556,35 @@ async fn unknown_and_archived_accounts_refuse(db: &dyn Database) {
     );
 
     // Archived account: present in the chart, retired from posting.
-    commands::archive_account(db, COMPANY_ID, "3000", NOW.to_owned(), &common::person())
+    // A spare account with no postings: an account that holds a balance
+    // cannot be archived (AccountHasBalance), so the archived case uses one
+    // that never moved money.
+    commands::create_account(
+        db,
+        COMPANY_ID,
+        ledgers_ledger::account::AccountDraft {
+            number: "3500".to_owned(),
+            name_key: "account.inline.spare".to_owned(),
+            account_type: ledgers_ledger::account::AccountType::Expense,
+            normal_balance: None,
+            currency: None,
+            parent: None,
+            tags: Vec::new(),
+            display_name: None,
+        },
+        NOW.to_owned(),
+        &common::person(),
+    )
+    .await
+    .expect("create a spare expense account");
+    commands::archive_account(db, COMPANY_ID, "3500", NOW.to_owned(), &common::person())
         .await
-        .expect("archive the FX-loss account");
+        .expect("archive the spare account");
     let entry = Entry::from_draft(
         draft(
             &journal_id,
             vec![
-                eur_line("3000", Side::Debit, eur_major(5)),
+                eur_line("3500", Side::Debit, eur_major(5)),
                 eur_line("4000", Side::Credit, eur_major(5)),
             ],
         ),
@@ -582,9 +603,10 @@ async fn unknown_and_archived_accounts_refuse(db: &dyn Database) {
     .expect_err("an archived account refuses the post");
     assert_eq!(
         err,
-        JournalError::UnknownAccount {
-            account: "3000".to_owned(),
-        }
+        JournalError::AccountArchived {
+            account: "3500".to_owned(),
+        },
+        "an archived account is named as archived, not as unknown"
     );
     assert_eq!(
         count(db, "journal_entry", "journal_id", &journal_id).await,

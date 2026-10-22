@@ -27,6 +27,8 @@ import { Icon, type IconName } from './ui/icons';
 import { describeError, Toasts, useToasts } from './ui/common';
 import { Overview } from './ui/Overview';
 import { Accounts } from './ui/Accounts';
+import { AccountNew } from './ui/AccountNew';
+import { AccountDetail } from './ui/AccountDetail';
 import { Journal, EntryDetail } from './ui/Journal';
 import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
@@ -43,7 +45,7 @@ import { paletteCommands, type Session as PaletteSession } from './palette/model
 const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: string) => boolean }[] = [
   { hash: 'overview', label: 'nav.overview', icon: 'overview', match: (r) => r === '' || r === 'overview' },
   { hash: 'journal', label: 'nav.journal', icon: 'journal', match: (r) => r === 'journal' || r.startsWith('journal/') },
-  { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' },
+  { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' || r.startsWith('accounts/') },
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' },
   { hash: 'settings/agent-keys', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
@@ -432,6 +434,8 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route === 'journal') return <Journal />;
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
   if (route === 'accounts') return <Accounts />;
+  if (route === 'accounts/new') return <AccountNew />;
+  if (route.startsWith('accounts/')) return <AccountDetail number={decodeURIComponent(route.slice('accounts/'.length))} />;
   if (route === 'reports') return <Reports />;
   if (route === 'approvals') return <Approvals />;
   if (route === 'settings' || route === 'settings/agent-keys') return <Settings section="agent-keys" />;

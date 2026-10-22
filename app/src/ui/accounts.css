@@ -1,0 +1,92 @@
+/* The chart of accounts screens: the tree list, the new-account form and the account page.
+   Logical properties only, so Arabic (dir=rtl) mirrors the indent, the chevrons and the sides. */
+
+.accounts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+.accounts-search { flex: 1 1 260px; min-width: 0; }
+.accounts-filter { border-bottom: 0; flex: 0 0 auto; }
+
+.account-group + .account-group { margin-top: 24px; }
+.account-group h2 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+/* The name cell: the indent is one step per level of the tree. */
+.account-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding-inline-start: calc(var(--depth, 0) * 22px);
+  min-width: 0;
+}
+.account-name .tree-mark { color: var(--muted); font-family: var(--mono); }
+.account-flags { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.accounts-table .balance-cell { white-space: nowrap; }
+.accounts-table tr.is-archived td.main a.row-link { color: var(--muted); }
+.accounts-table tr.is-archived td.code { color: var(--muted); }
+
+.chip.status-active { color: var(--agent); background: var(--agent-bg); border-color: transparent; }
+.chip.status-archived { color: var(--muted); border-color: var(--rule); }
+
+/* The new-account form: two columns on a wide screen, one on a phone. */
+.account-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 22px;
+  max-width: 760px;
+}
+.account-form .wide { grid-column: 1 / -1; }
+.account-form .form-actions { justify-content: flex-end; }
+
+/* The account page: summary on the side, edit cards beside it on a wide screen. */
+.account-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+.account-summary { padding: 4px 0; }
+.account-summary .detail-meta { padding: 16px 20px; }
+.account-edit { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.account-section { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.account-section h2 { font-size: 16px; margin: 0; }
+.account-section p { margin: 0; }
+.account-inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+.account-inline-form .field { min-width: 0; }
+.account-inline-form button { margin-top: 26px; }
+.balance-blocked { color: var(--danger); font-weight: 600; }
+
+.back-link { display: inline-flex; align-items: center; gap: 6px; }
+.back-link .flip { display: inline-block; }
+html[dir='rtl'] .back-link .flip { transform: scaleX(-1); }
+
+@media (max-width: 860px) {
+  .account-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .account-form { grid-template-columns: minmax(0, 1fr); }
+  .account-inline-form { grid-template-columns: minmax(0, 1fr); }
+  .account-inline-form button { margin-top: 0; width: 100%; }
+  .accounts-filter { width: 100%; }
+  .accounts-filter .tab { flex: 1 1 0; justify-content: center; }
+  .account-name { padding-inline-start: calc(var(--depth, 0) * 14px); }
+  .account-summary .detail-meta { padding: 12px 16px; }
+  .account-section { padding: 14px 16px; }
+}

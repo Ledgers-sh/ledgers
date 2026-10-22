@@ -79,6 +79,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Mutating,
     },
     CommandSpec {
+        name: "account.update",
+        function: "commands::update_account",
+        kind: CommandKind::Mutating,
+    },
+    CommandSpec {
+        name: "account.restore",
+        function: "commands::restore_account",
+        kind: CommandKind::Mutating,
+    },
+    CommandSpec {
         name: "account.delete",
         function: "commands::delete_account",
         kind: CommandKind::Refused,

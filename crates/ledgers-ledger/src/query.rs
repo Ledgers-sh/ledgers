@@ -168,7 +168,7 @@ pub async fn account_balances(
     let rows = db
         .query(&Statement::with_values(
             "SELECT jl.account_number AS account_number, je.base_currency AS base_currency, \
-             COALESCE(SUM(jl.base_minor), 0) AS total \
+             CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) AS total \
              FROM journal_line jl JOIN journal_entry je ON jl.entry_id = je.id \
              WHERE je.company_id = ? \
              GROUP BY jl.account_number, je.base_currency \
@@ -200,4 +200,152 @@ pub async fn account_balances(
 
 fn missing_column(name: &str) -> cratefield_core::DbError {
     cratefield_core::DbError::Query(format!("query result has no column {name}"))
+}
+
+/// The base currencies in which an account (bound twice: company, number)
+/// nets to a non-zero balance: no row means the account is settled. The
+/// archive refusal reads this, and the archive batch re-proves it with a
+/// guard built from the same clause (`NOT EXISTS (<this>)`).
+pub const NONZERO_BALANCE_SQL: &str = "SELECT je.base_currency FROM journal_line jl \
+     JOIN journal_entry je ON jl.entry_id = je.id \
+     WHERE je.company_id = ? AND jl.account_number = ? \
+     GROUP BY je.base_currency HAVING SUM(jl.base_minor) <> 0";
+
+/// Whether any posted line names `account_number` (bound twice: company,
+/// number). Accounts with postings keep their class and cannot take
+/// children or a new parent.
+pub const POSTING_EXISTS_SQL: &str = "SELECT jl.entry_id FROM journal_line jl \
+     JOIN journal_entry je ON jl.entry_id = je.id \
+     WHERE je.company_id = ? AND jl.account_number = ? LIMIT 1";
+
+/// Whether an account of the company has any posted line.
+///
+/// # Errors
+/// [`JournalError::Database`] when the query fails.
+pub async fn account_has_postings(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+) -> Result<bool, cratefield_core::DbError> {
+    Ok(
+        !company_number_rows(db, POSTING_EXISTS_SQL, company_id, number)
+            .await?
+            .is_empty(),
+    )
+}
+
+/// Whether an account of the company nets to a non-zero balance in some
+/// base currency.
+///
+/// # Errors
+/// [`cratefield_core::DbError`] when the query fails.
+pub async fn account_has_nonzero_balance(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+) -> Result<bool, cratefield_core::DbError> {
+    Ok(
+        !company_number_rows(db, NONZERO_BALANCE_SQL, company_id, number)
+            .await?
+            .is_empty(),
+    )
+}
+
+/// Runs a two-placeholder (company, number) SELECT and returns its rows.
+async fn company_number_rows(
+    db: &dyn Database,
+    sql: &str,
+    company_id: &str,
+    number: &str,
+) -> Result<cratefield_core::Rows, cratefield_core::DbError> {
+    db.query(&Statement::with_values(
+        sql.to_owned(),
+        vec![SeaValue::from(company_id), SeaValue::from(number)],
+    ))
+    .await
+}
+
+/// One posted line of an account, as the account page lists it: the entry
+/// it belongs to and the account's signed base amount in that entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountActivity {
+    /// The entry's id (its `request_id` at posting).
+    pub entry_id: String,
+    /// The journal the entry posted into.
+    pub journal_id: String,
+    /// The fiscal year the entry number is scoped to.
+    pub fiscal_year: i64,
+    /// The gapless number within the journal and fiscal year.
+    pub number: i64,
+    /// The accounting date (ISO 8601 date).
+    pub posting_date: String,
+    /// The entry's description.
+    pub description: String,
+    /// The account's signed base amount in this entry (debit positive).
+    pub base: Amount,
+}
+
+/// The most recent posted entries touching one account, newest first, at
+/// most `limit` of them. Reverses appear as their own entries: history is
+/// shown, never rewritten.
+///
+/// # Errors
+/// [`cratefield_core::DbError`] when the query fails, or the currency of a
+/// stored row cannot be read back.
+pub async fn account_activity(
+    db: &dyn Database,
+    company_id: &str,
+    account_number: &str,
+    limit: u32,
+) -> Result<Vec<AccountActivity>, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT je.id AS id, je.journal_id AS journal_id, je.fiscal_year AS fiscal_year, \
+             je.number AS number, je.posting_date AS posting_date, je.description AS description, \
+             je.base_currency AS base_currency, CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) AS total \
+             FROM journal_line jl JOIN journal_entry je ON jl.entry_id = je.id \
+             WHERE je.company_id = ? AND jl.account_number = ? \
+             GROUP BY je.id, je.journal_id, je.fiscal_year, je.number, je.posting_date, \
+             je.description, je.base_currency \
+             ORDER BY je.posting_date DESC, je.fiscal_year DESC, je.number DESC LIMIT ?"
+                .to_owned(),
+            vec![
+                SeaValue::from(company_id),
+                SeaValue::from(account_number),
+                SeaValue::from(i64::from(limit)),
+            ],
+        ))
+        .await?;
+    let mut activity = Vec::with_capacity(rows.rows.len());
+    for row in &rows.rows {
+        let code: String = row
+            .get("base_currency")
+            .ok_or_else(|| JournalError::Database(missing_column("base_currency")))?;
+        let total: i64 = row
+            .get("total")
+            .ok_or_else(|| JournalError::Database(missing_column("total")))?;
+        let currency = Currency::from_code(&code)?;
+        activity.push(AccountActivity {
+            entry_id: row
+                .get("id")
+                .ok_or_else(|| JournalError::Database(missing_column("id")))?,
+            journal_id: row
+                .get("journal_id")
+                .ok_or_else(|| JournalError::Database(missing_column("journal_id")))?,
+            fiscal_year: row
+                .get("fiscal_year")
+                .ok_or_else(|| JournalError::Database(missing_column("fiscal_year")))?,
+            number: row
+                .get("number")
+                .ok_or_else(|| JournalError::Database(missing_column("number")))?,
+            posting_date: row
+                .get("posting_date")
+                .ok_or_else(|| JournalError::Database(missing_column("posting_date")))?,
+            description: row
+                .get("description")
+                .ok_or_else(|| JournalError::Database(missing_column("description")))?,
+            base: Amount::from_i64(total, currency),
+        });
+    }
+    Ok(activity)
 }

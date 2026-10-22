@@ -87,6 +87,7 @@ pub async fn create_chart(db: &dyn Database, company_id: &str) {
                 currency: None,
                 parent: None,
                 tags: Vec::new(),
+                display_name: None,
             },
             NOW.to_owned(),
             &person(),

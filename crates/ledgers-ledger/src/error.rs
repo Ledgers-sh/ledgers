@@ -243,6 +243,69 @@ pub enum AccountsError {
         /// The offending value.
         value: String,
     },
+
+    /// A custom account name is empty, too long or contains control
+    /// characters.
+    #[error("invalid account name: {reason}")]
+    InvalidDisplayName {
+        /// A short, static description of what was wrong.
+        reason: &'static str,
+    },
+
+    /// The account cannot be archived: it still carries a non-zero balance
+    /// in some base currency. Archiving retires an account from new
+    /// postings; its history must net to zero first (a reversal).
+    #[error(
+        "account {number} has a non-zero balance and cannot be archived; post a reversal to bring it to zero first"
+    )]
+    AccountHasBalance {
+        /// The account number.
+        number: String,
+    },
+
+    /// Re-parenting would make an account its own ancestor.
+    #[error("account {number} cannot sit under {parent}: that would make it its own ancestor")]
+    ParentCycle {
+        /// The account being moved.
+        number: String,
+        /// The parent that was requested.
+        parent: String,
+    },
+
+    /// A child must share its parent's account class, so the chart's
+    /// grouping by class stays true.
+    #[error(
+        "account {number} is {account_type} but its parent {parent} is {parent_type}; a child must have its parent's class"
+    )]
+    ParentTypeMismatch {
+        /// The account being created or moved.
+        number: String,
+        /// The parent's number.
+        parent: String,
+        /// The account's class.
+        account_type: String,
+        /// The parent's class.
+        parent_type: String,
+    },
+
+    /// A parent that already holds postings cannot take children: it would
+    /// turn into a heading while it still carries a balance.
+    #[error("parent account {parent} already has postings and cannot take children")]
+    ParentHasPostings {
+        /// The parent number.
+        parent: String,
+    },
+
+    /// The account's class cannot change once it has postings or children.
+    #[error(
+        "account {number} cannot change class: it has {reason}; post a reversal or move its children first"
+    )]
+    TypeChangeRefused {
+        /// The account number.
+        number: String,
+        /// Why the change is refused, in words.
+        reason: &'static str,
+    },
 }
 
 impl From<ledgers_db::GuardError> for AccountsError {
@@ -324,6 +387,14 @@ impl AccountsError {
                     .with_detail(self.to_string())
                     .with_extension("value", value.clone())
             }
+            AccountsError::AccountHasBalance { number } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("number", number.clone())
+                .with_extension("reason", "non-zero-balance".to_owned()),
+            AccountsError::ParentHasPostings { parent } => Problem::new(&ACCOUNT_OPERATION_FAILED)
+                .with_detail(self.to_string())
+                .with_extension("parent", parent.clone())
+                .with_extension("reason", "parent-has-postings".to_owned()),
             _ => {
                 // Other errors map to the generic failure problem
                 Problem::new(&ACCOUNT_OPERATION_FAILED).with_detail(self.to_string())

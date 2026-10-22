@@ -86,6 +86,12 @@ pub struct AgentKey {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[serde(with = "time::serde::rfc3339::option")]
     pub revoked_at: Option<OffsetDateTime>,
+    /// Whether this agent may change the chart of accounts (create, update,
+    /// archive or restore accounts). Off by default: a chart change is a
+    /// human decision unless the key's policy says otherwise. Missing in
+    /// stored policies reads as `false`.
+    #[serde(default)]
+    pub chart_changes: bool,
 }
 
 #[cfg(test)]
@@ -152,6 +158,7 @@ mod tests {
             created_at: now,
             last_used_at: None,
             revoked_at: None,
+            chart_changes: false,
         };
 
         let json = serde_json::to_string(&key).expect("serialize");

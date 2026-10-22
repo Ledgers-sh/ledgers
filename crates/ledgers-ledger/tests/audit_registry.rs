@@ -246,6 +246,7 @@ fn every_mutating_or_denied_command_writes_exactly_one_audit_event() {
                                 currency: None,
                                 parent: None,
                                 tags: Vec::new(),
+                                display_name: None,
                             },
                             NOW.to_owned(),
                             &person(),
@@ -270,6 +271,7 @@ fn every_mutating_or_denied_command_writes_exactly_one_audit_event() {
                                 currency: None,
                                 parent: None,
                                 tags: Vec::new(),
+                                display_name: None,
                             },
                             NOW.to_owned(),
                             &person(),
@@ -277,6 +279,75 @@ fn every_mutating_or_denied_command_writes_exactly_one_audit_event() {
                         .await
                         .map_err(|err| err.to_string())?;
                         commands::archive_account(db, company, &number, NOW.to_owned(), &person())
+                            .await
+                            .map(|_| ())
+                            .map_err(|err| err.to_string())
+                    })
+                    .await;
+                }
+                ("account.update", CommandKind::Mutating) => {
+                    let number = format!("6{:03}", 100 + counter());
+                    assert_one_event(db, company, spec.name, Outcome::Allowed, async {
+                        commands::create_account(
+                            db,
+                            company,
+                            AccountDraft {
+                                number: number.clone(),
+                                name_key: "account.inline.update".to_owned(),
+                                account_type: AccountType::Asset,
+                                normal_balance: None,
+                                currency: None,
+                                parent: None,
+                                tags: Vec::new(),
+                                display_name: None,
+                            },
+                            NOW.to_owned(),
+                            &person(),
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
+                        commands::update_account(
+                            db,
+                            company,
+                            &number,
+                            commands::AccountChanges {
+                                display_name: Some("Renamed by registry".to_owned()),
+                                ..Default::default()
+                            },
+                            NOW.to_owned(),
+                            &person(),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|err| err.to_string())
+                    })
+                    .await;
+                }
+                ("account.restore", CommandKind::Mutating) => {
+                    let number = format!("5{:03}", 100 + counter());
+                    assert_one_event(db, company, spec.name, Outcome::Allowed, async {
+                        commands::create_account(
+                            db,
+                            company,
+                            AccountDraft {
+                                number: number.clone(),
+                                name_key: "account.inline.restore".to_owned(),
+                                account_type: AccountType::Asset,
+                                normal_balance: None,
+                                currency: None,
+                                parent: None,
+                                tags: Vec::new(),
+                                display_name: None,
+                            },
+                            NOW.to_owned(),
+                            &person(),
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
+                        commands::archive_account(db, company, &number, NOW.to_owned(), &person())
+                            .await
+                            .map_err(|err| err.to_string())?;
+                        commands::restore_account(db, company, &number, NOW.to_owned(), &person())
                             .await
                             .map(|_| ())
                             .map_err(|err| err.to_string())
@@ -633,6 +704,7 @@ async fn registry_year(db: &dyn Database, label: i64) -> (String, i64) {
             currency: None,
             parent: None,
             tags: vec![ledgers_ledger::fiscal::RETAINED_EARNINGS_TAG.to_owned()],
+            display_name: None,
         },
         NOW.to_owned(),
         &common::person(),
