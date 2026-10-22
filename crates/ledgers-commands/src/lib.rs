@@ -32,6 +32,7 @@ pub mod command;
 pub mod error;
 pub mod exec;
 pub mod journal_preview;
+pub mod mcp;
 pub mod policy;
 pub mod registry;
 
@@ -40,5 +41,6 @@ pub use command::{Command, CommandContext, Plan};
 pub use error::{CommandError, PROBLEM_BASE};
 pub use exec::{Approval, ExecToken, Execute, Executed, Executor, request_hash};
 pub use journal_preview::JournalPreview;
+pub use mcp::{ApprovalCard, ToolCaller, ToolOutcome, ToolScope, UNTRUSTED_DATA_RULE};
 pub use policy::{Decision, DefaultPolicy, Policy};
 pub use registry::{CommandDescriptor, CommandMeta, Registry};

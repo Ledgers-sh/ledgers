@@ -1,4 +1,4 @@
-use ledgers_cli::{CliError, app, error::ExitCode, serve};
+use ledgers_cli::{CliError, app, error::ExitCode, mcp, profile, serve};
 use ledgers_commands::Registry;
 use std::process;
 
@@ -43,6 +43,15 @@ async fn run_command() -> Result<ExitCode, CliError> {
                 .ok_or_else(|| CliError::CommandArg("shell argument required".to_string()))?;
 
             generate_completions(&registry, shell)?;
+            Ok(ExitCode::Ok)
+        }
+        Some(("mcp", sub_matches)) => {
+            let read_only = sub_matches.get_flag("read_only");
+
+            // Resolve the session using profile/globals
+            let session = profile::resolve_session(&globals)?;
+
+            mcp::run_mcp(session, read_only).await?;
             Ok(ExitCode::Ok)
         }
         Some((cmd_name, sub_matches)) => {

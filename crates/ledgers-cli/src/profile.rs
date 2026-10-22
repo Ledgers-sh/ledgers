@@ -237,3 +237,20 @@ pub fn save_profile(name: String, url: String, key_ref: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// Resolves a session from global flags and profile.
+///
+/// Precedence: `--url`/`--key` > environment > profile.
+///
+/// # Errors
+/// Returns an error if the profile cannot be loaded or session cannot be created.
+pub fn resolve_session(globals: &crate::app::GlobalFlags) -> Result<crate::http::Session> {
+    // Load the base profile
+    let (url, key) = load_profile(globals.profile.as_deref())?;
+
+    // Apply global overrides
+    let url = globals.url.as_ref().cloned().unwrap_or(url);
+    let key = globals.key.as_ref().cloned().unwrap_or(key);
+
+    crate::http::Session::new(url, key)
+}

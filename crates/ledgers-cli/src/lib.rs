@@ -36,11 +36,13 @@
 pub mod app;
 pub mod error;
 pub mod http;
+pub mod mcp;
 pub mod output;
 pub mod profile;
 pub mod serve;
 
 pub use error::{CliError, ExitCode, Result};
+pub use http::Session;
 
 /// A reusable helper for calling a command and handling its outcome.
 /// Used by CLI and will be reused by login/mcp in later issues.

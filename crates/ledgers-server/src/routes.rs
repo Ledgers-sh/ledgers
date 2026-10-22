@@ -13,7 +13,7 @@ use cratefield_core::axum::{
 use cratefield_core::{
     Config, ConfigError, Migrations, Module, ModuleContext, Port, Problem, Scope,
 };
-use ledgers_commands::Registry;
+use ledgers_commands::{Principal, Registry};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,6 +28,13 @@ pub trait Dispatch: Send + Sync {
         request_id: &str,
         credential: Option<String>,
     ) -> Result<Value, Problem>;
+
+    /// Resolves the principal behind a bearer credential, for surfaces that
+    /// need it before dispatching (the MCP tool list). Fails closed until the
+    /// dispatcher is wired to the key authenticator.
+    async fn principal(&self, _credential: &str) -> Result<Principal, Problem> {
+        Err(Problem::validation_failed("unauthorized"))
+    }
 }
 
 /// Default Dispatch: 501 Not Implemented.
