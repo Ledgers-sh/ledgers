@@ -52,6 +52,25 @@ openssl rand -hex 32 | npx wrangler@4.148.0 secret put BOOTSTRAP_TOKEN --env sta
 `BOOTSTRAP_TOKEN` is needed for step 6 only. Keep the value in your password
 manager until step 6 is done, then remove it (step 6 shows how).
 
+Two more secrets are needed for documents and bills (issues #20 to #22). Neither
+is set by the repository; the operator sets them the same way:
+
+```sh
+openssl rand -hex 32 | npx wrangler@4.148.0 secret put LEDGERS_DOCUMENT_SIGNING_KEY --env staging
+npx wrangler@4.148.0 secret put LEDGERS_EXTRACT_API_KEY --env staging
+```
+
+- `LEDGERS_DOCUMENT_SIGNING_KEY` signs the five-minute download links for
+  stored invoices. It is required outside `LEDGERS_DEV=1` (at least 32
+  characters). Changing it ends download links in flight, nothing else.
+- `LEDGERS_EXTRACT_API_KEY` is the Anthropic Messages API key the model
+  extractor (`claude-haiku-4-5`) uses to read scans and photos. Without it only
+  PDFs with a text layer are read, and the Bills screen says so. The key is
+  never logged or returned by any endpoint.
+
+Neither value appears in `wrangler.toml`; `[env.staging.vars]` needs no new
+entries for this feature.
+
 ## 4. Apply the migrations
 
 The migrations are the flat files in `crates/ledgers-server/d1/migrations/`.

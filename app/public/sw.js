@@ -1,7 +1,9 @@
 /*
  * Service worker: caches the app shell and read views (GET) only.
- * Writes (POST, reversals, bill matches) are never queued or replayed; when the
+ * Writes (POST, reversals, bill posts) are never queued or replayed; when the
  * server is unreachable the request fails and the UI says "offline: posting needs the server".
+ * The one exception is a file shared into the app (POST /share-target): it is
+ * stored in the upload queue and uploaded by the app once the device is online.
  *
  * API responses are cached per credential: the cache name carries a SHA-256 of the
  * Authorization header, so one key never reads another key's cached data.
@@ -79,8 +81,61 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(clients.openWindow(targetUrl || '/approvals'));
 });
 
+/*
+ * Web Share Target (issue #34): a PDF or photo shared from another app arrives
+ * here as a multipart POST. The files go into the upload queue in IndexedDB
+ * (the same database and schema as src/lib/uploadQueue.ts), then the app opens
+ * the Bills screen, which uploads them once the device is online.
+ */
+const QUEUE_DB = 'ledgers-uploads';
+const QUEUE_STORE = 'uploads';
+
+function openQueue() {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(QUEUE_DB, 1);
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(QUEUE_STORE)) {
+        open.result.createObjectStore(QUEUE_STORE, { keyPath: 'sha256' });
+      }
+    };
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+}
+
+async function queueSharedFiles(request) {
+  const form = await request.formData();
+  const files = form.getAll('files').filter((file) => file instanceof File);
+  const db = await openQueue();
+  let stored = 0;
+  for (const file of files) {
+    const bytes = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const entry = { sha256, name: file.name, type: file.type, blob: new Blob([bytes], { type: file.type }), queuedAt: new Date().toISOString() };
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(QUEUE_STORE, 'readwrite');
+      tx.objectStore(QUEUE_STORE).put(entry);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    stored += 1;
+  }
+  db.close();
+  return stored;
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  const shareUrl = new URL(request.url);
+  if (request.method === 'POST' && shareUrl.origin === self.location.origin && shareUrl.pathname === '/share-target') {
+    event.respondWith(
+      queueSharedFiles(request)
+        .then(() => Response.redirect('/#/bills?shared=1', 303))
+        .catch(() => Response.redirect('/#/bills?shared=failed', 303)),
+    );
+    return;
+  }
   if (request.method !== 'GET') return; // writes always go to the network
 
   const url = new URL(request.url);

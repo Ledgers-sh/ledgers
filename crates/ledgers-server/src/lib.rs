@@ -85,13 +85,20 @@ pub fn harness(
     // through the rate limiter before dispatch (`rate_limiting::admit`). The
     // limiter comes from the request's ports (`Deps`), so it is resolved per
     // request on Workers as well as natively; persons pass through.
+    let document_key = document_signing_key(cfg, dev).map_err(|e| {
+        let mut errors = ConfigError::default();
+        errors.push(e);
+        errors
+    })?;
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(
-        dispatch::ServerDispatch::new(company_id)
+        dispatch::ServerDispatch::new(company_id.clone())
             .with_app_origins(cors_origins.clone())
             .with_app_url(
                 cfg.get("LEDGERS_APP_URL")
                     .unwrap_or_else(|| public_url.clone()),
-            ),
+            )
+            .with_document_key(document_key.clone())
+            .with_extract_key(cfg.get("LEDGERS_EXTRACT_API_KEY")),
     );
 
     // Generate domain modules
@@ -118,12 +125,13 @@ pub fn harness(
         builder = builder.module_arc(module);
     }
 
-    // Documents module - requires Blob and IdGen ports
-    let docs_module = documents::DocumentsModule::from_config(cfg).map_err(|e| {
-        let mut errors = cratefield_core::ConfigError::default();
-        errors.push(e);
-        errors
-    })?;
+    // Documents module - the upload and download routes (Blob and IdGen ports).
+    let docs_module = documents::DocumentsModule::new(
+        company_id,
+        document_key,
+        dispatch.clone(),
+        routes::domain_routes(registry, "documents"),
+    );
     let builder = builder.module(docs_module);
 
     // Add OpenAPI module
@@ -141,6 +149,10 @@ pub fn harness(
     let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
     // The notification outbox comes last of all, after the inbox.
     let builder = builder.module(ledgers_approvals::module::ApprovalsNotifyModule);
+    // Source documents and vendor bills come last: their migrations follow every
+    // module above, the same way the D1 files are numbered.
+    let builder = builder.module(ledgers_documents::DocumentsStoreModule);
+    let builder = builder.module(ledgers_bills::BillsModule);
 
     builder.build()
 }
@@ -165,6 +177,24 @@ pub fn app_origins(cfg: &dyn Config) -> Vec<String> {
         |s| s.split(',').map(|s| s.trim().to_string()).collect(),
     )
 }
+
+/// The key that signs document download links. Required outside development
+/// (`LEDGERS_DOCUMENT_SIGNING_KEY`, at least 32 characters); development uses a
+/// fixed development key so local links work without setup.
+///
+/// # Errors
+/// A message when the key is missing outside development or too short.
+pub fn document_signing_key(cfg: &dyn Config, dev: bool) -> Result<Vec<u8>, String> {
+    match cfg.get("LEDGERS_DOCUMENT_SIGNING_KEY") {
+        Some(key) if key.len() >= 32 => Ok(key.into_bytes()),
+        Some(_) => Err("LEDGERS_DOCUMENT_SIGNING_KEY must be at least 32 characters".into()),
+        None if dev => Ok(DEV_DOCUMENT_KEY.as_bytes().to_vec()),
+        None => Err("LEDGERS_DOCUMENT_SIGNING_KEY is required unless LEDGERS_DEV=1".into()),
+    }
+}
+
+/// The development download-link key. Never used outside `LEDGERS_DEV=1`.
+pub const DEV_DOCUMENT_KEY: &str = "ledgers-dev-document-signing-key-do-not-use";
 
 /// The web app origin the development mode allows (Vite's default port).
 pub const DEV_WEB_ORIGIN: &str = "http://localhost:5173";

@@ -12,7 +12,13 @@ struct CompanyConfig;
 
 impl Config for CompanyConfig {
     fn get(&self, key: &str) -> Option<String> {
-        (key == "LEDGERS_COMPANY_ID").then(|| "01BOOTSTRAPCOMPANY0000000".to_owned())
+        match key {
+            "LEDGERS_COMPANY_ID" => Some("01BOOTSTRAPCOMPANY0000000".to_owned()),
+            "LEDGERS_DOCUMENT_SIGNING_KEY" => {
+                Some("bootstrap-test-document-signing-key-0123".to_owned())
+            }
+            _ => None,
+        }
     }
 }
 

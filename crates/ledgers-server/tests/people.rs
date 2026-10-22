@@ -209,6 +209,8 @@ fn fixture() -> Fixture {
         clock: clock_dyn,
         id_gen: ids,
         rate_limiter: None,
+        blob: None,
+        http: None,
     };
     // The company row approval requests reference; the served bootstrap creates it.
     pollster::block_on(deps.db.execute(&cratefield_core::Statement::with_values(

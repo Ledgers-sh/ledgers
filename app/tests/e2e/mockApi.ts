@@ -5,6 +5,7 @@
  * ledger in memory so posting and reversing show up in the journal and reports.
  */
 import { readFileSync } from 'node:fs';
+import { handleBills, resetBills, servedFile } from './mockBills';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -224,7 +225,7 @@ export interface MockApi {
 /** The real server allows the app origin via CORS; the fake does the same. */
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': WEB_ORIGIN,
-  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Headers': 'authorization, content-type, x-file-name',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   // The app sends the session cookie with credentials: 'include'.
   'Access-Control-Allow-Credentials': 'true',
@@ -800,6 +801,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.posts = [];
   state.reversals = [];
   state.person = options.person ?? false;
+  resetBills();
   state.approvals = options.person ? approvalSeed() : [];
   state.decisions = [];
   state.bulk = [];
@@ -808,9 +810,11 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
-      let text = '';
-      req.on('data', (chunk: Buffer) => (text += chunk.toString()));
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', () => {
+        const raw = Buffer.concat(chunks);
+        const text = raw.toString('utf8');
         const headers = { ...CORS };
         if (req.method === 'OPTIONS') {
           res.writeHead(204, headers);
@@ -821,6 +825,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           // The public document the app reads to decide which pages to show.
           res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
           res.end(JSON.stringify(OPENAPI));
+          return;
+        }
+        // A signed document link serves its file without a credential: the signature is the credential.
+        const served = req.method === 'GET' ? servedFile(new URL(req.url ?? '/', API_ORIGIN).pathname) : null;
+        if (served) {
+          res.writeHead(200, { ...headers, 'Content-Type': served.mime, 'Cache-Control': 'no-store' });
+          res.end(served.bytes);
           return;
         }
         // A person session: calls without a bearer key are the signed-in owner's.
@@ -853,6 +864,14 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
+        }
+        if (path.startsWith('/v1/documents') || path.startsWith('/v1/bills')) {
+          const billsReply = handleBills(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, raw, req.headers);
+          if (billsReply) {
+            res.writeHead(billsReply.status, { ...headers, 'Content-Type': billsReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(billsReply.body));
+            return;
+          }
         }
         const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
         res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });
