@@ -118,6 +118,33 @@ fn a_second_bootstrap_is_refused_and_mints_nothing() {
 }
 
 #[test]
+fn two_racing_bootstraps_mint_one_key() {
+    let (db, deps) = fresh();
+    let request = input("Demo GmbH", "EUR");
+    let first = dispatch::bootstrap_company(&deps, COMPANY, &request);
+    let second = dispatch::bootstrap_company(&deps, COMPANY, &request);
+    let (a, b) = pollster::block_on(futures_util::future::join(first, second));
+    let results = [a, b];
+    let minted = results.iter().filter(|r| r.is_ok()).count();
+    let refused = results
+        .iter()
+        .filter(|r| matches!(r, Err(BootstrapError::AlreadyBootstrapped)))
+        .count();
+    assert_eq!(
+        (minted, refused),
+        (1, 1),
+        "exactly one bootstrap wins: {results:?}"
+    );
+    assert_eq!(count(db.as_ref(), "agent_key"), 1);
+    assert_eq!(count(db.as_ref(), "api_keys"), 1);
+    assert_eq!(
+        count(db.as_ref(), "ledger_guard"),
+        0,
+        "the claim's probe row is released"
+    );
+}
+
+#[test]
 fn a_development_key_also_closes_the_bootstrap() {
     let (_db, deps) = fresh();
     pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("dev bootstrap");

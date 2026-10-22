@@ -404,9 +404,29 @@ async fn issue_key_as(
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
     let key_id = deps.id_gen.ulid();
+    let policy = agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits)?;
+    deps.db
+        .execute(&policy)
+        .await
+        .map_err(|err| format!("store key policy: {err}"))?;
+    mint_key(deps, company_id, &key_id, owner).await
+}
+
+/// The insert of an agent key's policy row, with the key's id and the time the
+/// row is stamped with. Built here so the bootstrap can run it inside its guarded
+/// batch; [`issue_key_as`] runs it on its own.
+fn agent_key_policy_statement(
+    deps: &Deps,
+    company_id: &str,
+    key_id: &str,
+    label: &str,
+    owner: &str,
+    tier: Tier,
+    limits: BTreeMap<String, CurrencyLimit>,
+) -> Result<Statement, String> {
     let now = deps.clock.now();
     let key = AgentKey {
-        id: key_id.clone(),
+        id: key_id.to_owned(),
         label: label.to_owned(),
         owner: owner.to_owned(),
         tier,
@@ -419,20 +439,26 @@ async fn issue_key_as(
         revoked_at: None,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
-    deps.db
-        .execute(&Statement::with_values(
-            "INSERT INTO agent_key (company_id, id, policy, updated_at) VALUES (?, ?, ?, ?)"
-                .to_owned(),
-            vec![
-                sea_query::Value::from(company_id),
-                sea_query::Value::from(key_id.as_str()),
-                sea_query::Value::from(policy),
-                sea_query::Value::from(rfc3339_utc(now)),
-            ],
-        ))
-        .await
-        .map_err(|err| format!("store key policy: {err}"))?;
+    Ok(Statement::with_values(
+        "INSERT INTO agent_key (company_id, id, policy, updated_at) VALUES (?, ?, ?, ?)".to_owned(),
+        vec![
+            sea_query::Value::from(company_id),
+            sea_query::Value::from(key_id),
+            sea_query::Value::from(policy),
+            sea_query::Value::from(rfc3339_utc(now)),
+        ],
+    ))
+}
 
+/// Mints the secret for an agent key whose policy row exists, and returns it.
+/// The secret is written as the `ApiKeys` row and returned once.
+async fn mint_key(
+    deps: &Deps,
+    company_id: &str,
+    key_id: &str,
+    owner: &str,
+) -> Result<String, String> {
+    let now = deps.clock.now();
     let audit = AuditContext::new(
         Actor::Person {
             person_id: owner.to_owned(),
@@ -442,7 +468,7 @@ async fn issue_key_as(
     );
     let agent_keys = AgentKeys::new(Arc::new(api_keys(&deps.db, &deps.clock)), deps.db.clone());
     let issued = agent_keys
-        .issue(&key_id, company_id, &audit, &rfc3339_utc(now))
+        .issue(key_id, company_id, &audit, &rfc3339_utc(now))
         .await
         .map_err(|err| format!("issue key: {err}"))?;
     Ok(issued.key())
@@ -585,10 +611,17 @@ pub enum BootstrapError {
     Failed(String),
 }
 
-/// Creates the company row (when absent), seeds its chart, journal and fiscal
-/// year, and issues one full-tier (post within limits) key. Refuses to run
-/// once any agent key exists, so a leaked bootstrap token cannot mint keys
-/// after the first one. Returns the key secret, which the caller shows once.
+/// Creates the company (when absent), seeds its chart, journal and fiscal year,
+/// and issues one full-tier (post within limits) key. Returns the key secret,
+/// which the caller shows once.
+///
+/// "No key exists yet" is decided inside the database, not by a read before the
+/// write: the first batch inserts the company and the bootstrap's agent-key policy
+/// row under a guard statement that refuses while any agent key exists for the
+/// company (`docs/adr/0004-guard-statements.md`). Two bootstraps racing on the
+/// same database cannot both pass that guard. The secret row itself is written by
+/// the `ApiKeys` port after the claim; if anything after the claim fails, the claim
+/// is released so a retry can run.
 ///
 /// # Errors
 /// [`BootstrapError`] for invalid input, an already-bootstrapped database, or
@@ -605,51 +638,84 @@ pub async fn bootstrap_company(
         ));
     }
     let db = deps.db.as_ref();
-    let existing_keys = db
-        .query(&Statement::new(format!(
-            "SELECT COUNT(*) AS n FROM {API_KEYS_TABLE}"
-        )))
-        .await
-        .map_err(|err| BootstrapError::Failed(format!("count keys: {err}")))?;
-    let count = existing_keys
-        .rows
-        .first()
-        .and_then(|row| row.get::<i64>("n"))
-        .unwrap_or(0);
-    if count > 0 {
-        return Err(BootstrapError::AlreadyBootstrapped);
-    }
-
     let stamp = rfc3339_utc(deps.clock.now());
-    db.execute(&Statement::with_values(
-        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
-         SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
-            .to_owned(),
-        vec![
-            sea_query::Value::from(company_id),
-            sea_query::Value::from(input.company.trim()),
-            sea_query::Value::from(input.currency.as_str()),
-            sea_query::Value::from(stamp.as_str()),
-            sea_query::Value::from(stamp.as_str()),
-            sea_query::Value::from(company_id),
-        ],
-    ))
-    .await
-    .map_err(|err| BootstrapError::Failed(format!("create company: {err}")))?;
-
-    seed_company(deps, company_id, BOOTSTRAP_OWNER)
-        .await
-        .map_err(BootstrapError::Failed)?;
-    issue_key_as(
+    let key_id = deps.id_gen.ulid();
+    let policy = agent_key_policy_statement(
         deps,
         company_id,
+        &key_id,
         "bootstrap key",
         BOOTSTRAP_OWNER,
         Tier::PostWithinLimits,
         bootstrap_limits(&input.currency),
     )
-    .await
-    .map_err(BootstrapError::Failed)
+    .map_err(BootstrapError::Failed)?;
+
+    // The claim: one batch, all or nothing. The guard refuses while the
+    // company has any agent key; the release removes the probe row again.
+    let claim = ledgers_db::guard::guard_key(&["bootstrap-claim", company_id]);
+    let batch = [
+        ledgers_db::guard::assert_statement(
+            claim.clone(),
+            "(SELECT COUNT(*) FROM agent_key WHERE company_id = ?) = 0",
+            vec![sea_query::Value::from(company_id)],
+        ),
+        Statement::with_values(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
+                .to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(input.company.trim()),
+                sea_query::Value::from(input.currency.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(company_id),
+            ],
+        ),
+        policy,
+        ledgers_db::guard::release_statement(claim),
+    ];
+    if let Err(err) = db.batch_atomic(&batch).await {
+        return Err(if is_guard_refusal(&err) {
+            BootstrapError::AlreadyBootstrapped
+        } else {
+            BootstrapError::Failed(format!("claim company: {err}"))
+        });
+    }
+
+    // The claim stands. A failure from here on releases it, so the operator can
+    // fix the cause and run the bootstrap again.
+    let outcome = async {
+        seed_company(deps, company_id, BOOTSTRAP_OWNER).await?;
+        mint_key(deps, company_id, &key_id, BOOTSTRAP_OWNER).await
+    }
+    .await;
+    match outcome {
+        Ok(key) => Ok(key),
+        Err(step) => {
+            let release = db
+                .execute(&Statement::with_values(
+                    "DELETE FROM agent_key WHERE company_id = ? AND id = ?".to_owned(),
+                    vec![
+                        sea_query::Value::from(company_id),
+                        sea_query::Value::from(key_id.as_str()),
+                    ],
+                ))
+                .await;
+            Err(BootstrapError::Failed(match release {
+                Ok(_) => step,
+                Err(err) => format!("{step}; releasing the claim also failed: {err}"),
+            }))
+        }
+    }
+}
+
+/// Whether a batch failed because a guard refused it (the guard's `ok` column
+/// is `NOT NULL`, so a refused probe reports that constraint).
+fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
+    matches!(err, cratefield_core::DbError::Batch(message)
+        if message.contains("NOT NULL constraint failed: ledger_guard.ok"))
 }
 
 /// The registry of every command the server serves: the descriptors of
