@@ -4,7 +4,7 @@
  * page only when the server lists the operation behind it, so no control is
  * ever a dead button. Any failure reads as "nothing offered".
  */
-import { buildUrl } from './client';
+import { fetchOpenApiDocument } from './openapi';
 
 /** The operationId of bills.match (dots become underscores in the document). */
 export const BILLS_MATCH_OPERATION = 'bills_match';
@@ -26,11 +26,5 @@ export function operationIds(document: unknown): Set<string> {
 
 /** The operationIds the server at `baseUrl` offers. The document is public; no key is sent. */
 export async function fetchOperationIds(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
-  try {
-    const response = await fetchImpl(buildUrl(baseUrl, '/v1/openapi'), { headers: { Accept: 'application/json' } });
-    if (!response.ok) return new Set();
-    return operationIds(await response.json());
-  } catch {
-    return new Set();
-  }
+  return operationIds(await fetchOpenApiDocument(baseUrl, fetchImpl));
 }

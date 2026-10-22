@@ -1,0 +1,1288 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ledgers",
+    "version": "0.1.0",
+    "description": "Ledgers is not tax or legal advice. Check rates and returns before you file.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "paths": {
+    "/v1/accounts": {
+      "get": {
+        "operationId": "accounts_list",
+        "description": "Execute command: accounts.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsListOutput",
+                  "description": "The output of `accounts.list`.",
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "description": "The accounts, by number.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccountView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers accounts list",
+        "x-ledgers-mcp": "accounts_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/entries/{external_id}": {
+      "get": {
+        "operationId": "entries_get",
+        "description": "Execute command: entries.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "entries"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "EntryRecordView",
+                  "description": "One posted entry, as the app's `EntryRecord` types it.",
+                  "type": "object",
+                  "properties": {
+                    "external_id": {
+                      "description": "The source application's idempotency key, if it gave one.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "entry_id": {
+                      "description": "The entry id.",
+                      "type": "string"
+                    },
+                    "journal_id": {
+                      "description": "The journal it posted into.",
+                      "type": "string"
+                    },
+                    "fiscal_year": {
+                      "description": "The fiscal year its number is scoped to.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "number": {
+                      "description": "The gapless number within the journal and fiscal year.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "document_date": {
+                      "description": "The document date, `YYYY-MM-DD`.",
+                      "type": "string"
+                    },
+                    "posting_date": {
+                      "description": "The posting date, `YYYY-MM-DD`.",
+                      "type": "string"
+                    },
+                    "base_currency": {
+                      "description": "The base currency code.",
+                      "type": "string"
+                    },
+                    "description": {
+                      "description": "The description.",
+                      "type": "string"
+                    },
+                    "posted_by": {
+                      "description": "Who posted it: `agent` (an agent key) or `person`.",
+                      "type": "string"
+                    },
+                    "reverses": {
+                      "description": "The entry this one reverses, when it is a reversal.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reversed_by": {
+                      "description": "The entry that reverses this one, if any.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "recorded_at": {
+                      "description": "When it was recorded (UTC).",
+                      "type": "string"
+                    },
+                    "lines": {
+                      "description": "The lines.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EntryLineRecordView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "entry_id",
+                    "journal_id",
+                    "fiscal_year",
+                    "number",
+                    "document_date",
+                    "posting_date",
+                    "base_currency",
+                    "description",
+                    "posted_by",
+                    "recorded_at",
+                    "lines"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "entries.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers entries get",
+        "x-ledgers-mcp": "entries_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/entries/{external_id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/entries": {
+      "get": {
+        "operationId": "entries_list",
+        "description": "Execute command: entries.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "entries"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "EntriesListOutput",
+                  "description": "The output of `entries.list`.",
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "description": "The entries, newest posting first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EntryRecordView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "entries"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "entries.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers entries list",
+        "x-ledgers-mcp": "entries_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/entries\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      },
+      "post": {
+        "operationId": "entries_post",
+        "description": "Execute command: entries.post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "entries"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "EntriesPostInput",
+                "description": "The input of `entries.post`: a balanced entry and, optionally, the\njournal and fiscal year to post it to (defaults: journal `GN`, and the\nfiscal year of the posting date).",
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "description": "The journal to post into; defaults to the general journal `GN`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "fiscal_year": {
+                    "description": "The fiscal year the entry number is scoped to; defaults to the\nposting date's year.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "entry": {
+                    "description": "The entry: header, dates and lines.",
+                    "$ref": "#/components/schemas/SerializableEntryDraft"
+                  }
+                },
+                "required": [
+                  "entry"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PostEntryOutput",
+                  "description": "Output for `journal.post_entry` command.",
+                  "type": "object",
+                  "properties": {
+                    "entry": {
+                      "description": "The posted entry with its assigned number.",
+                      "$ref": "#/components/schemas/SerializablePostedEntry"
+                    }
+                  },
+                  "required": [
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "entries.post",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers entries post",
+        "x-ledgers-mcp": "entries_post",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/entries\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/entries/{external_id}/reverse": {
+      "post": {
+        "operationId": "entries_reverse",
+        "description": "Execute command: entries.reverse",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "entries"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "EntriesReverseInput",
+                "description": "The input of `entries.reverse`: the external id of the entry to reverse\n(from the path) and the posting date of the reversal (default: today).",
+                "type": "object",
+                "properties": {
+                  "external_id": {
+                    "description": "The `external_id` the reversed entry was posted with.",
+                    "type": "string"
+                  },
+                  "posting_date": {
+                    "description": "The reversal's posting date, `YYYY-MM-DD`; defaults to today (UTC).",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "external_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PostEntryOutput",
+                  "description": "Output for `journal.post_entry` command.",
+                  "type": "object",
+                  "properties": {
+                    "entry": {
+                      "description": "The posted entry with its assigned number.",
+                      "$ref": "#/components/schemas/SerializablePostedEntry"
+                    }
+                  },
+                  "required": [
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "entries.reverse",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers entries reverse",
+        "x-ledgers-mcp": "entries_reverse",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/entries/{external_id}/reverse\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/reports/account-balance-by-dimension": {
+      "get": {
+        "operationId": "reports_account_balance_by_dimension",
+        "description": "Execute command: reports.account_balance_by_dimension",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "DimensionBalanceOutput",
+                  "description": "The output of `reports.account_balance_by_dimension`.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account reported.",
+                      "type": "string"
+                    },
+                    "dimension": {
+                      "description": "The dimension key.",
+                      "type": "string"
+                    },
+                    "period": {
+                      "description": "The period reported.",
+                      "type": "string"
+                    },
+                    "rows": {
+                      "description": "One row per dimension value.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DimensionValueView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "account",
+                    "dimension",
+                    "period",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.account_balance_by_dimension",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports account-balance-by-dimension",
+        "x-ledgers-mcp": "reports_account_balance_by_dimension",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/account-balance-by-dimension\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/reports/balance-sheet": {
+      "get": {
+        "operationId": "reports_balance_sheet",
+        "description": "Execute command: reports.balance_sheet",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "BalanceSheetOutput",
+                  "description": "The output of `reports.balance_sheet`.",
+                  "type": "object",
+                  "properties": {
+                    "as_of": {
+                      "description": "The date reported.",
+                      "type": "string"
+                    },
+                    "assets": {
+                      "description": "Total assets.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "liabilities": {
+                      "description": "Total liabilities.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "equity": {
+                      "description": "Total equity.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    }
+                  },
+                  "required": [
+                    "as_of",
+                    "assets",
+                    "liabilities",
+                    "equity"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.balance_sheet",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports balance-sheet",
+        "x-ledgers-mcp": "reports_balance_sheet",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/reports/p-and-l": {
+      "get": {
+        "operationId": "reports_profit_and_loss",
+        "description": "Execute command: reports.profit_and_loss",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ProfitAndLossOutput",
+                  "description": "The output of `reports.profit_and_loss`.",
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "description": "The period reported.",
+                      "type": "string"
+                    },
+                    "revenue": {
+                      "description": "Total income.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "expenses": {
+                      "description": "Total expenses.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "net_income": {
+                      "description": "Revenue minus expenses.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "revenue",
+                    "expenses",
+                    "net_income"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.profit_and_loss",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports p-and-l",
+        "x-ledgers-mcp": "reports_profit_and_loss",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/p-and-l\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/reports/trial-balance": {
+      "get": {
+        "operationId": "reports_trial_balance",
+        "description": "Execute command: reports.trial_balance",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TrialBalanceOutput",
+                  "description": "The output of `reports.trial_balance`.",
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "description": "The period reported.",
+                      "type": "string"
+                    },
+                    "rows": {
+                      "description": "The rows, by account.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrialBalanceRowView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.trial_balance",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports trial-balance",
+        "x-ledgers-mcp": "reports_trial_balance",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/trial-balance\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountView": {
+        "description": "One account of the chart, as the app's `Account` types it, plus its balances.",
+        "type": "object",
+        "properties": {
+          "number": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "name_key": {
+            "description": "The translatable name key.",
+            "type": "string"
+          },
+          "account_type": {
+            "description": "The account class: asset, liability, equity, income, expense.",
+            "type": "string"
+          },
+          "normal_balance": {
+            "description": "The normal balance side.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The account currency, or `null` for the company base currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent": {
+            "description": "The parent account number, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "The chart tags of the account.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_postable": {
+            "description": "Whether the account accepts postings (a leaf of the chart).",
+            "type": "boolean"
+          },
+          "balances": {
+            "description": "The balance per base currency, debit-positive (empty when no postings).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SerializableAmount"
+            }
+          }
+        },
+        "required": [
+          "number",
+          "name_key",
+          "account_type",
+          "normal_balance",
+          "tags",
+          "is_postable",
+          "balances"
+        ]
+      },
+      "SerializableAmount": {
+        "description": "Serializable amount with currency.",
+        "type": "object",
+        "properties": {
+          "minor": {
+            "description": "The minor units as a string.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "minor",
+          "currency"
+        ]
+      },
+      "EntryLineRecordView": {
+        "description": "One entry line, as the app's `EntryLineRecord` types it.",
+        "type": "object",
+        "properties": {
+          "account_number": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "side": {
+            "description": "`debit` or `credit`.",
+            "type": "string"
+          },
+          "base": {
+            "description": "The base amount, in minor units of the entry's base currency.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "memo": {
+            "description": "The memo, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "account_number",
+          "side",
+          "base"
+        ]
+      },
+      "EntryRecordView": {
+        "description": "One posted entry, as the app's `EntryRecord` types it.",
+        "type": "object",
+        "properties": {
+          "external_id": {
+            "description": "The source application's idempotency key, if it gave one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entry_id": {
+            "description": "The entry id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year its number is scoped to.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number within the journal and fiscal year.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "document_date": {
+            "description": "The document date, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "posting_date": {
+            "description": "The posting date, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "base_currency": {
+            "description": "The base currency code.",
+            "type": "string"
+          },
+          "description": {
+            "description": "The description.",
+            "type": "string"
+          },
+          "posted_by": {
+            "description": "Who posted it: `agent` (an agent key) or `person`.",
+            "type": "string"
+          },
+          "reverses": {
+            "description": "The entry this one reverses, when it is a reversal.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reversed_by": {
+            "description": "The entry that reverses this one, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recorded_at": {
+            "description": "When it was recorded (UTC).",
+            "type": "string"
+          },
+          "lines": {
+            "description": "The lines.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryLineRecordView"
+            }
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "document_date",
+          "posting_date",
+          "base_currency",
+          "description",
+          "posted_by",
+          "recorded_at",
+          "lines"
+        ]
+      },
+      "SerializableEntryDraft": {
+        "description": "Serializable version of [`EntryDraft`].",
+        "type": "object",
+        "properties": {
+          "journal_id": {
+            "description": "The journal ID.",
+            "type": "string"
+          },
+          "document_date": {
+            "description": "The document date (YYYY-MM-DD).",
+            "type": "string"
+          },
+          "posting_date": {
+            "description": "The posting date (YYYY-MM-DD).",
+            "type": "string"
+          },
+          "tax_point_date": {
+            "description": "The optional tax point date (YYYY-MM-DD).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_currency": {
+            "description": "The base currency code.",
+            "type": "string"
+          },
+          "description": {
+            "description": "The description.",
+            "type": "string"
+          },
+          "source_documents": {
+            "description": "Source document links.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "external_id": {
+            "description": "External ID from the source application (for idempotency).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_app": {
+            "description": "The application that posted this entry.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reverses": {
+            "description": "Entry this reverses, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lines": {
+            "description": "The entry lines.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SerializableLine"
+            }
+          }
+        },
+        "required": [
+          "journal_id",
+          "document_date",
+          "posting_date",
+          "base_currency",
+          "description",
+          "source_documents",
+          "lines"
+        ]
+      },
+      "SerializableLine": {
+        "description": "Serializable version of [`Line`].",
+        "type": "object",
+        "properties": {
+          "account_number": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "side": {
+            "description": "The side (debit/credit).",
+            "type": "string"
+          },
+          "base": {
+            "description": "The base amount.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "fx": {
+            "description": "Optional FX transaction.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SerializableFx"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tax_code": {
+            "description": "Optional tax code.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dimensions": {
+            "description": "Optional dimensions.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "memo": {
+            "description": "Optional memo.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "account_number",
+          "side",
+          "base",
+          "dimensions"
+        ]
+      },
+      "SerializableFx": {
+        "description": "Serializable FX data.",
+        "type": "object",
+        "properties": {
+          "transaction": {
+            "description": "The transaction amount.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "rate": {
+            "description": "The exchange rate.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction",
+          "rate"
+        ]
+      },
+      "SerializablePostedEntry": {
+        "description": "Serializable version of [`PostedEntry`].",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry's id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year the number is scoped to.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number assigned.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_at": {
+            "description": "The recorded-at timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "recorded_at"
+        ]
+      },
+      "DimensionValueView": {
+        "description": "One dimension value's balance.",
+        "type": "object",
+        "properties": {
+          "dimension_value": {
+            "description": "The dimension value.",
+            "type": "string"
+          },
+          "balance": {
+            "description": "The balance (debit positive).",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "dimension_value",
+          "balance"
+        ]
+      },
+      "TrialBalanceRowView": {
+        "description": "One trial-balance row.",
+        "type": "object",
+        "properties": {
+          "account_code": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "debit": {
+            "description": "The debit total of the period.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "credit": {
+            "description": "The credit total of the period.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "balance": {
+            "description": "The balance (debit positive).",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "account_code",
+          "debit",
+          "credit",
+          "balance"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

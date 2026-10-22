@@ -3,7 +3,9 @@ import { useSession } from '../session';
 import { useAsync } from '../hooks';
 import { periodEnd } from '../lib/period';
 import { formatMinor } from '../lib/money';
-import { Empty, ErrorBanner, LOCALE, Money, PageHead, Skeleton } from './common';
+import { formatDate, formatPeriod, intlLocale, t, tRich } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
+import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
 
 export function Overview() {
   const { client, period } = useSession();
@@ -19,7 +21,7 @@ export function Overview() {
     [client.baseUrl, client.apiKey, period],
   );
 
-  if (state.loading && !state.data) return <Skeleton rows={6} label="Loading overview" />;
+  if (state.loading && !state.data) return <Skeleton rows={6} label={t('overview.loading')} />;
   if (state.error && !state.data) return <ErrorBanner error={state.error} onRetry={state.reload} />;
   if (!state.data) return null;
   const { trial, pl, bs } = state.data;
@@ -34,68 +36,68 @@ export function Overview() {
   }
   const hasActivity = trial.rows.length > 0;
   const balanceSheetGap = BigInt(bs.assets.minor) - (BigInt(bs.liabilities.minor) + BigInt(bs.equity.minor));
+  const asOf = t('overview.as_of', { date: formatDate(bs.as_of) });
+  const locale = intlLocale();
 
   return (
     <>
-      <PageHead title="Overview">
-        Trial balance, profit and loss and balance sheet for the selected period.
-      </PageHead>
+      <PageHead title={t('overview.title')}>{t('overview.intro')}</PageHead>
 
       {!hasActivity ? (
         <Empty
-          title={`No entries in ${period} yet`}
+          title={t('overview.empty_title', { period: formatPeriod(period) })}
           action={
             <a class="btn btn-primary" href="#/new">
-              Post your first entry
+              {t('action.post_first')}
             </a>
           }
         >
-          Once an entry is posted, its effect on revenue, balances and the trial balance appears here. Pick another period to look back.
+          {t('overview.empty_body')}
         </Empty>
       ) : null}
 
       <section aria-labelledby="pl-heading">
         <h2 id="pl-heading" class="sr-only">
-          Profit and loss
+          {t('overview.pl_heading')}
         </h2>
         <div class="tiles">
           <div class="tile">
-            <span class="label">Revenue</span>
+            <span class="label">{t('term.revenue')}</span>
             <Money class="value" minor={pl.revenue.minor} currency={pl.revenue.currency} />
-            <span class="sub">{pl.period}</span>
+            <span class="sub">{formatPeriod(pl.period)}</span>
           </div>
           <div class="tile">
-            <span class="label">Expenses</span>
+            <span class="label">{t('term.expenses')}</span>
             <Money class="value" minor={pl.expenses.minor} currency={pl.expenses.currency} />
-            <span class="sub">{pl.period}</span>
+            <span class="sub">{formatPeriod(pl.period)}</span>
           </div>
           <div class="tile agent">
-            <span class="label">Net income</span>
+            <span class="label">{t('term.net_income')}</span>
             <Money class="value" minor={pl.net_income.minor} currency={pl.net_income.currency} />
-            <span class="sub">Revenue minus expenses</span>
+            <span class="sub">{t('overview.net_income_sub')}</span>
           </div>
         </div>
       </section>
 
       <section aria-labelledby="bs-heading">
         <h2 id="bs-heading" class="sr-only">
-          Balance sheet
+          {t('overview.bs_heading')}
         </h2>
         <div class="tiles">
           <div class="tile">
-            <span class="label">Assets</span>
+            <span class="label">{t('term.assets')}</span>
             <Money class="value" minor={bs.assets.minor} currency={bs.assets.currency} />
-            <span class="sub">As of {bs.as_of}</span>
+            <span class="sub">{asOf}</span>
           </div>
           <div class="tile">
-            <span class="label">Liabilities</span>
+            <span class="label">{t('term.liabilities')}</span>
             <Money class="value" minor={bs.liabilities.minor} currency={bs.liabilities.currency} />
-            <span class="sub">As of {bs.as_of}</span>
+            <span class="sub">{asOf}</span>
           </div>
           <div class="tile">
-            <span class="label">Equity</span>
+            <span class="label">{t('term.equity')}</span>
             <Money class="value" minor={bs.equity.minor} currency={bs.equity.currency} />
-            <span class="sub">As of {bs.as_of}</span>
+            <span class="sub">{asOf}</span>
           </div>
         </div>
       </section>
@@ -103,9 +105,11 @@ export function Overview() {
       <div class="two-col">
         <section class="panel" aria-labelledby="tb-heading">
           <div class="panel-head">
-            <h2 id="tb-heading" class="grow">Trial balance</h2>
+            <h2 id="tb-heading" class="grow">
+              {t('overview.tb_heading')}
+            </h2>
             <a class="btn btn-sm btn-ghost" href="#/reports">
-              Open reports
+              {t('overview.open_reports')}
             </a>
           </div>
           <div class="panel-body">
@@ -115,13 +119,19 @@ export function Overview() {
                   const balanced = sums.debit === sums.credit;
                   return (
                     <div key={currency}>
-                      <dt>Debits, {currency}</dt>
-                      <dd>{formatMinor(sums.debit, currency, LOCALE)}</dd>
-                      <dt style={{ marginTop: '10px' }}>Credits, {currency}</dt>
-                      <dd>{formatMinor(sums.credit, currency, LOCALE)}</dd>
+                      <dt>{t('overview.debits_currency', { currency })}</dt>
+                      <dd>
+                        <Ltr>{formatMinor(sums.debit, currency, locale)}</Ltr>
+                      </dd>
+                      <dt style={{ marginTop: '10px' }}>{t('overview.credits_currency', { currency })}</dt>
+                      <dd>
+                        <Ltr>{formatMinor(sums.credit, currency, locale)}</Ltr>
+                      </dd>
                       <dd style={{ marginTop: '10px', fontFamily: 'var(--sans)' }}>
                         <span class={`badge ${balanced ? 'balanced' : 'reversed'}`}>
-                          {balanced ? 'Balanced' : `Out by ${formatMinor(sums.debit - sums.credit, currency, LOCALE)}`}
+                          {balanced
+                            ? t('overview.balanced')
+                            : tRich('overview.out_by', { amount: <Ltr>{formatMinor(sums.debit - sums.credit, currency, locale)}</Ltr> })}
                         </span>
                       </dd>
                     </div>
@@ -129,21 +139,27 @@ export function Overview() {
                 })}
               </dl>
             ) : (
-              <p class="muted">No activity in this period.</p>
+              <p class="muted">{t('overview.no_activity')}</p>
             )}
           </div>
         </section>
 
         <section class="panel" aria-labelledby="eq-heading">
           <div class="panel-head">
-            <h2 id="eq-heading" class="grow">Balance check</h2>
+            <h2 id="eq-heading" class="grow">
+              {t('overview.check_heading')}
+            </h2>
           </div>
           <div class="panel-body">
             <p class="muted" style={{ marginBottom: '12px' }}>
-              Assets should equal liabilities plus equity at the period end.
+              {t('overview.check_body')}
             </p>
             <span class={`badge ${balanceSheetGap === 0n ? 'balanced' : 'reversed'}`}>
-              {balanceSheetGap === 0n ? 'Assets = liabilities + equity' : `Gap ${formatMinor(balanceSheetGap, bs.assets.currency, LOCALE)}`}
+              {balanceSheetGap === 0n ? (
+                t('overview.check_ok')
+              ) : (
+                tRich('overview.check_gap', { amount: <Ltr>{formatMinor(balanceSheetGap, bs.assets.currency, locale)}</Ltr> })
+              )}
             </span>
           </div>
         </section>

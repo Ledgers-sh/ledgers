@@ -1,7 +1,9 @@
 import { render } from 'preact';
 import { App } from './app';
+import { restoreLocale } from './i18n';
 import './styles.css';
 
+restoreLocale();
 render(<App />, document.getElementById('root') as HTMLElement);
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

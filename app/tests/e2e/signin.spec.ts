@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { API_ORIGIN, mockApi, stopMockApi } from './mockApi';
+import { API_ORIGIN, mockApi, stopMockApi, WEB_ORIGIN } from './mockApi';
 
 // People sign-in (issue #12) with the server's session endpoints mocked at the
 // browser boundary. The real login round trip (passkey, issuer, callback) is
 // the server's test suite; these specs cover what the app does with it.
 
 const CORS = {
-  'access-control-allow-origin': 'http://localhost:5173',
+  'access-control-allow-origin': WEB_ORIGIN,
   'access-control-allow-credentials': 'true',
 };
 

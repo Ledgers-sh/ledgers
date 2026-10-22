@@ -7,8 +7,9 @@ import { formatMinor, parseMajorToMinor } from '../lib/money';
 import { todayIso, yearOf } from '../lib/period';
 import { useAsync } from '../hooks';
 import { loadCurrency, saveCurrency, useSession } from '../session';
-import { Empty, ErrorBanner, LOCALE, PageHead, Skeleton } from './common';
-import { accountLabel } from './Accounts';
+import { Empty, ErrorBanner, PageHead, Skeleton } from './common';
+import { accountName, intlLocale, t, tRich } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
 import { entryRef } from './Journal';
 
 const DEFAULT_JOURNAL = 'general';
@@ -42,15 +43,15 @@ export function NewEntry() {
   const balance = checkBalance(toCheckLines(lines, minors.map((m, i) => (lines[i].amount.trim() === '' ? 0n : m))));
   const lineErrors = lines.map((line, i) => {
     if (!touched) return null;
-    if (line.account === '') return 'Choose an account.';
-    if (line.amount.trim() === '') return 'Enter an amount.';
-    if (minors[i] === null) return 'Use digits with an optional decimal point.';
-    if (minors[i] === 0n) return 'Amount must be more than zero.';
+    if (line.account === '') return t('new.error_account');
+    if (line.amount.trim() === '') return t('new.error_amount_missing');
+    if (minors[i] === null) return t('new.error_amount_format');
+    if (minors[i] === 0n) return t('new.error_amount_zero');
     return null;
   });
-  const descriptionError = touched && description.trim() === '' ? 'Describe what this entry records.' : null;
-  const currencyError = touched && !currencyValid ? 'Use a three-letter code, such as EUR.' : null;
-  const fyError = touched && (!Number.isInteger(fiscalYear) || fiscalYear < 1900) ? 'Enter a fiscal year.' : null;
+  const descriptionError = touched && description.trim() === '' ? t('new.error_description') : null;
+  const currencyError = touched && !currencyValid ? t('new.error_currency') : null;
+  const fyError = touched && (!Number.isInteger(fiscalYear) || fiscalYear < 1900) ? t('new.error_fiscal_year') : null;
 
   const ready =
     balance.balanced &&
@@ -80,7 +81,7 @@ export function NewEntry() {
       const result = await entriesPost(client, input);
       saveCurrency(currency);
       setCurrency(currency);
-      toast(`Posted ${entryRef(result.entry)}.`);
+      toast(t('new.posted', { ref: entryRef(result.entry) }));
       window.location.hash = '#/journal';
     } catch (error) {
       setServerError(error);
@@ -89,42 +90,44 @@ export function NewEntry() {
     }
   };
 
-  if (accounts.loading && !accounts.data) return <Skeleton rows={5} label="Loading accounts" />;
+  if (accounts.loading && !accounts.data) return <Skeleton rows={5} label={t('new.loading')} />;
   if (accounts.error && !accounts.data) return <ErrorBanner error={accounts.error} onRetry={accounts.reload} />;
+  const locale = intlLocale();
+  const amountCurrency = currencyValid ? currency : 'XXX';
 
   return (
     <>
-      <PageHead title="New entry" actions={<a class="btn btn-ghost" href="#/journal">Cancel</a>}>
-        A balanced double-entry posting. The server checks it again before anything is written.
+      <PageHead title={t('new.title')} actions={<a class="btn btn-ghost" href="#/journal">{t('new.cancel')}</a>}>
+        {t('new.intro')}
       </PageHead>
 
       {postable.length === 0 ? (
         <Empty
-          title="No accounts to post to yet"
+          title={t('new.no_accounts_title')}
           action={
             <a class="btn" href="#/accounts">
-              View accounts
+              {t('new.view_accounts')}
             </a>
           }
         >
-          An entry needs at least two postable accounts. Create them with the CLI or the API first.
+          {t('new.no_accounts_body')}
         </Empty>
       ) : (
-        <form class="panel" onSubmit={submit} noValidate aria-label="New journal entry">
+        <form class="panel" onSubmit={submit} noValidate aria-label={t('new.form_label')}>
           <div class="panel-body entry-form">
             <div class="header-grid">
               <label class="field">
-                <span>Posting date</span>
+                <span>{t('new.date')}</span>
                 <input class="input" type="date" value={date} onInput={(e) => setDate((e.target as HTMLInputElement).value)} required />
               </label>
               <label class="field wide">
-                <span>Description</span>
+                <span>{t('new.description')}</span>
                 <input
                   class="input"
                   type="text"
                   name="description"
                   maxLength={200}
-                  placeholder="What this entry records"
+                  placeholder={t('new.description_placeholder')}
                   value={description}
                   aria-invalid={descriptionError ? 'true' : undefined}
                   aria-describedby={descriptionError ? 'desc-error' : undefined}
@@ -133,7 +136,7 @@ export function NewEntry() {
                 {descriptionError && <span id="desc-error" class="field-error">{descriptionError}</span>}
               </label>
               <label class="field">
-                <span>Currency</span>
+                <span>{t('new.currency')}</span>
                 <input
                   class="input mono"
                   type="text"
@@ -148,16 +151,16 @@ export function NewEntry() {
                   <span id="cur-error" class="field-error">{currencyError}</span>
                 ) : (
                   <span id="cur-hint" class="hint">
-                    One currency per entry. Amounts use its decimals.
+                    {t('new.currency_hint')}
                   </span>
                 )}
               </label>
               <label class="field">
-                <span>Journal</span>
+                <span>{t('new.journal')}</span>
                 <input class="input mono" type="text" value={journalId} onInput={(e) => setJournalId((e.target as HTMLInputElement).value)} />
               </label>
               <label class="field">
-                <span>Fiscal year</span>
+                <span>{t('new.fiscal_year')}</span>
                 <input
                   class="input mono"
                   type="number"
@@ -172,74 +175,74 @@ export function NewEntry() {
             </div>
 
             <fieldset class="lines" style={{ border: 0, padding: 0, margin: 0 }}>
-              <legend class="sr-only">Lines</legend>
+              <legend class="sr-only">{t('new.lines')}</legend>
               <div class="line-head" aria-hidden="true">
-                <span>Account</span>
-                <span>Side</span>
-                <span>Amount</span>
-                <span>Memo</span>
+                <span>{t('new.line_account')}</span>
+                <span>{t('new.col_side')}</span>
+                <span>{t('term.amount')}</span>
+                <span>{t('new.col_memo')}</span>
                 <span />
               </div>
               {lines.map((line, index) => (
                 <div class="line-row" key={index}>
                   <label class="field account">
-                    <span class="label-sm">Account</span>
+                    <span class="label-sm">{t('new.line_account')}</span>
                     <select
                       class="input"
                       value={line.account}
-                      aria-label={`Line ${index + 1} account`}
+                      aria-label={t('new.line_account_aria', { n: index + 1 })}
                       aria-invalid={touched && line.account === '' ? 'true' : undefined}
                       onChange={(e) => update(index, { account: (e.target as HTMLSelectElement).value })}
                     >
-                      <option value="">Choose account</option>
+                      <option value="">{t('new.choose_account')}</option>
                       {postable.map((account) => (
                         <option key={account.number} value={account.number}>
-                          {account.number} · {accountLabel(account.name_key)}
+                          {account.number} · {accountName(account.name_key)}
                         </option>
                       ))}
                     </select>
                     {lineErrors[index] && line.account === '' && <span class="field-error">{lineErrors[index]}</span>}
                   </label>
                   <label class="field side">
-                    <span class="label-sm">Side</span>
+                    <span class="label-sm">{t('new.col_side')}</span>
                     <select
                       class="input"
                       value={line.side}
-                      aria-label={`Line ${index + 1} side`}
+                      aria-label={t('new.line_side_aria', { n: index + 1 })}
                       onChange={(e) => update(index, { side: (e.target as HTMLSelectElement).value as 'debit' | 'credit' })}
                     >
-                      <option value="debit">Debit</option>
-                      <option value="credit">Credit</option>
+                      <option value="debit">{t('new.side_debit')}</option>
+                      <option value="credit">{t('new.side_credit')}</option>
                     </select>
                   </label>
                   <label class="field amount">
-                    <span class="label-sm">Amount</span>
+                    <span class="label-sm">{t('term.amount')}</span>
                     <input
                       class="input num"
                       inputMode="decimal"
                       autoComplete="off"
                       placeholder="0.00"
                       value={line.amount}
-                      aria-label={`Line ${index + 1} amount`}
+                      aria-label={t('new.line_amount_aria', { n: index + 1 })}
                       aria-invalid={lineErrors[index] && line.amount !== '' ? 'true' : undefined}
                       onInput={(e) => update(index, { amount: (e.target as HTMLInputElement).value })}
                     />
                     {lineErrors[index] && line.account !== '' && <span class="field-error">{lineErrors[index]}</span>}
                   </label>
                   <label class="field memo">
-                    <span class="label-sm">Memo</span>
+                    <span class="label-sm">{t('new.col_memo')}</span>
                     <input
                       class="input"
                       value={line.memo}
                       maxLength={200}
-                      aria-label={`Line ${index + 1} memo`}
+                      aria-label={t('new.line_memo_aria', { n: index + 1 })}
                       onInput={(e) => update(index, { memo: (e.target as HTMLInputElement).value })}
                     />
                   </label>
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm remove"
-                    aria-label={`Remove line ${index + 1}`}
+                    aria-label={t('new.remove_line', { n: index + 1 })}
                     disabled={lines.length <= 2}
                     onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}
                   >
@@ -249,52 +252,54 @@ export function NewEntry() {
               ))}
               <div>
                 <button type="button" class="btn btn-sm" onClick={() => setLines((prev) => [...prev, newLine('debit')])}>
-                  Add line
+                  {t('new.add_line')}
                 </button>
               </div>
             </fieldset>
 
-            <section class={`balance ${balance.balanced ? 'ok' : touched || balance.filled > 0 ? 'off' : ''}`} aria-live="polite" aria-label="Balance">
+            <section class={`balance ${balance.balanced ? 'ok' : touched || balance.filled > 0 ? 'off' : ''}`} aria-live="polite" aria-label={t('new.balance')}>
               <div class="cell">
-                <span class="label">Debits</span>
-                <span class="value">{formatMinor(balance.debit, currencyValid ? currency : 'XXX', LOCALE)}</span>
+                <span class="label">{t('new.debits')}</span>
+                <span class="value"><Ltr>{formatMinor(balance.debit, amountCurrency, locale)}</Ltr></span>
               </div>
               <div class="cell">
-                <span class="label">Credits</span>
-                <span class="value">{formatMinor(balance.credit, currencyValid ? currency : 'XXX', LOCALE)}</span>
+                <span class="label">{t('new.credits')}</span>
+                <span class="value"><Ltr>{formatMinor(balance.credit, amountCurrency, locale)}</Ltr></span>
               </div>
               <div class="cell">
-                <span class="label">Difference</span>
+                <span class="label">{t('new.difference')}</span>
                 <span class="value diff">
                   {balance.filled < 2 && difference === 0n
-                    ? 'Enter both sides'
+                    ? t('new.enter_both')
                     : difference === 0n
-                    ? 'Balanced'
-                    : `${difference < 0n ? 'Credits' : 'Debits'} exceed by ${formatMinor(offBy, currencyValid ? currency : 'XXX', LOCALE)} ${currencyValid ? currency : ''}`.trim()}
+                    ? t('new.balanced')
+                    : tRich(difference < 0n ? 'new.credits_exceed' : 'new.debits_exceed', {
+                        amount: <Ltr>{`${formatMinor(offBy, amountCurrency, locale)}${currencyValid ? ` ${currency}` : ''}`}</Ltr>,
+                      })}
                 </span>
               </div>
             </section>
 
-            {balance.hasInvalid && touched && <p class="field-error">Fix the amounts marked above before posting.</p>}
+            {balance.hasInvalid && touched && <p class="field-error">{t('new.fix_amounts')}</p>}
 
             {serverError !== null && <ErrorBanner error={serverError} />}
             {serverError instanceof ApiError && serverError.kind === 'forbidden' && (
-              <p class="note">This key cannot post. Ask the owner for a key with posting rights.</p>
+              <p class="note">{t('new.key_cannot_post')}</p>
             )}
 
             <div class="form-actions">
-              {!online && <span class="muted grow">offline: posting needs the server</span>}
+              {!online && <span class="muted grow">{t('common.offline_posting')}</span>}
               {touched && !balance.balanced && !balance.hasInvalid && (
                 <span class="muted grow" role="status">
-                  Make debits equal credits to post.
+                  {t('new.make_equal')}
                 </span>
               )}
               <button type="submit" class="btn btn-primary" disabled={submitting || !online} aria-busy={submitting ? 'true' : undefined}>
-                {submitting ? 'Posting…' : 'Post entry'}
+                {submitting ? t('new.posting') : t('new.post')}
               </button>
             </div>
             <p class="hint muted" style={{ fontSize: '13px' }}>
-              Retrying a failed post is safe: this form keeps one reference for the entry, so the server does not post it twice.
+              {t('new.retry_safe')}
             </p>
           </div>
         </form>

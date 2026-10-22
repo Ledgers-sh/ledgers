@@ -4,11 +4,19 @@
  * Chrome sends for a bearer-authenticated cross-origin fetch). It keeps a small
  * ledger in memory so posting and reversing show up in the journal and reports.
  */
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
-export const API_ORIGIN = 'http://127.0.0.1:3000';
-const PORT = 3000;
+/**
+ * Ports are configurable so parallel checkouts do not share one fake API or
+ * one preview server: E2E_API_PORT (default 3000) and E2E_WEB_PORT (default 5173).
+ */
+const PORT = Number(process.env.E2E_API_PORT ?? 3000);
+const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5173);
+export const API_ORIGIN = `http://127.0.0.1:${PORT}`;
+export const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 export const API_KEY = 'test_sk_mock_0123456789';
 
 type Side = 'debit' | 'credit';
@@ -41,13 +49,13 @@ export interface MockOptions {
 }
 
 const ACCOUNTS = [
-  { number: '1000', name_key: 'account.cash', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '1200', name_key: 'account.receivables', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '2000', name_key: 'account.payables', account_type: 'liability', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '3000', name_key: 'account.capital', account_type: 'equity', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '4000', name_key: 'account.sales', account_type: 'income', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '6000', name_key: 'account.rent', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '6100', name_key: 'account.software', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '1000', name_key: 'account.generic_sme.cash', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '1200', name_key: 'account.generic_sme.accounts_receivable', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '2000', name_key: 'account.generic_sme.accounts_payable', account_type: 'liability', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '3000', name_key: 'account.generic_sme.share_capital', account_type: 'equity', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '4000', name_key: 'account.generic_sme.sales', account_type: 'income', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6000', name_key: 'account.generic_sme.rent', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6100', name_key: 'account.generic_sme.office_supplies', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
 ];
 
 const period = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -124,7 +132,7 @@ export interface MockApi {
 
 /** The real server allows the app origin via CORS; the fake does the same. */
 const CORS: Record<string, string> = {
-  'Access-Control-Allow-Origin': 'http://localhost:5173',
+  'Access-Control-Allow-Origin': WEB_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   // The app sends the session cookie with credentials: 'include'.
@@ -141,15 +149,12 @@ function problem(status: number, title: string, detail?: string): Reply {
   return { status, problem: true, body: { type: 'about:blank', title, status, detail } };
 }
 
-/** The operations this fake serves, in the shape the server's OpenAPI document uses. */
-const OPENAPI = {
-  openapi: '3.1.0',
-  paths: {
-    '/v1/accounts': { get: { operationId: 'accounts_list' } },
-    '/v1/entries': { get: { operationId: 'entries_list' }, post: { operationId: 'entries_post' } },
-    '/v1/bills/{id}/match': { post: { operationId: 'bills_match' } },
-  },
-};
+/**
+ * The operations this fake serves: the document the real server generates for
+ * its registry (app/tests/fixtures/openapi.json, checked by the Rust test
+ * openapi_surfaces), so the palette lists what the server lists.
+ */
+const OPENAPI = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/openapi.json', import.meta.url)), 'utf8')) as Record<string, unknown>;
 
 const state: MockApi = { entries: [], posts: [], reversals: [] };
 let nextNumber = 1;
@@ -329,14 +334,18 @@ export async function stopMockApi(): Promise<void> {
   if (current) await new Promise<void>((resolve) => current.close(() => resolve()));
 }
 
-/** Puts the API key in sessionStorage before any page script runs (skips the connect screen). */
-export async function signIn(page: Page, theme: 'dark' | 'light' = 'dark') {
+/**
+ * Puts the API key in sessionStorage before any page script runs (skips the
+ * connect screen), with the theme and language to start in.
+ */
+export async function signIn(page: Page, theme: 'dark' | 'light' = 'dark', locale: 'en' | 'de' | 'id' | 'ar' = 'en') {
   await page.addInitScript(
-    ({ key, origin, themeValue }) => {
+    ({ key, origin, themeValue, localeValue }) => {
       window.sessionStorage.setItem('ledgers.apiKey', key);
       window.sessionStorage.setItem('ledgers.baseUrl', origin);
       window.localStorage.setItem('ledgers.theme', themeValue);
+      window.localStorage.setItem('ledgers.locale', localeValue);
     },
-    { key: API_KEY, origin: API_ORIGIN, themeValue: theme },
+    { key: API_KEY, origin: API_ORIGIN, themeValue: theme, localeValue: locale },
   );
 }

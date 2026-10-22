@@ -1,5 +1,28 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { API_KEY, API_ORIGIN, mockApi, stopMockApi } from './mockApi';
+
+/** The registry's document (the fixture the Rust test keeps in step), with bills.match added as a server that offers it would. */
+const registryDocument = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/openapi.json', import.meta.url)), 'utf8')) as {
+  paths: Record<string, unknown>;
+};
+const withBillsMatch = {
+  ...registryDocument,
+  paths: {
+    ...registryDocument.paths,
+    '/v1/bills/{id}/match': {
+      post: {
+        operationId: 'bills_match',
+        'x-ledgers-command': 'bills.match',
+        'x-ledgers-tier': 'draft',
+        'x-ledgers-cli': 'ledgers bills match',
+        'x-ledgers-mcp': 'bills_match',
+        'x-ledgers-curl': 'curl -X POST "$LEDGERS_URL/v1/bills/{id}/match" -H "Authorization: Bearer $LEDGERS_KEY" --json @input.json',
+      },
+    },
+  },
+};
 
 test.describe('connect, post, reverse', () => {
   test.afterAll(stopMockApi);
@@ -84,11 +107,19 @@ test.describe('connect, post, reverse', () => {
     await page.getByRole('tab', { name: 'Balance sheet' }).click();
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
     await page.goto('/#/accounts');
-    await expect(page.getByRole('cell', { name: 'Receivables' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Accounts receivable' })).toBeVisible();
   });
 
   test('bills match form calls the match endpoint', async ({ page }) => {
     await mockApi();
+    await page.route('**/v1/openapi', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify(withBillsMatch),
+      }),
+    );
     await page.addInitScript(
       ({ key, origin }) => {
         window.sessionStorage.setItem('ledgers.apiKey', key);

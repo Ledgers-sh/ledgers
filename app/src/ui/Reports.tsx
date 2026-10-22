@@ -5,13 +5,15 @@ import { useSession } from '../session';
 import { periodEnd } from '../lib/period';
 import { formatMinor, toPlainMajor } from '../lib/money';
 import { toCsv } from '../lib/csv';
-import { ErrorBanner, LOCALE, Money, PageHead, Skeleton, Empty } from './common';
+import { ErrorBanner, Money, PageHead, Skeleton, Empty } from './common';
+import { formatDate, formatPeriod, intlLocale, t, type MessageKey } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
 
 type ReportKind = 'trial' | 'pl' | 'bs';
-const TABS: { id: ReportKind; label: string }[] = [
-  { id: 'trial', label: 'Trial balance' },
-  { id: 'pl', label: 'Profit and loss' },
-  { id: 'bs', label: 'Balance sheet' },
+const TABS: { id: ReportKind; label: MessageKey }[] = [
+  { id: 'trial', label: 'reports.tab_trial' },
+  { id: 'pl', label: 'reports.tab_pl' },
+  { id: 'bs', label: 'reports.tab_bs' },
 ];
 
 export function Reports() {
@@ -27,7 +29,7 @@ export function Reports() {
   );
 
   const tabs = (
-    <div role="tablist" aria-label="Report" class="row-actions" style={{ gap: '4px' }}>
+    <div role="tablist" aria-label={t('reports.tabs_label')} class="row-actions" style={{ gap: '4px' }}>
       {TABS.map((tab) => (
         <button
           key={tab.id}
@@ -39,7 +41,7 @@ export function Reports() {
           class={`btn btn-sm ${kind === tab.id ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setKind(tab.id)}
         >
-          {tab.label}
+          {t(tab.label)}
         </button>
       ))}
     </div>
@@ -47,17 +49,17 @@ export function Reports() {
 
   let body;
   let csv: { name: string; text: string } | null = null;
-  if (state.loading && !state.data) body = <Skeleton rows={6} label="Loading report" />;
+  const locale = intlLocale();
+  if (state.loading && !state.data) body = <Skeleton rows={6} label={t('reports.loading')} />;
   else if (state.error && !state.data) body = <ErrorBanner error={state.error} onRetry={state.reload} />;
   else if (state.data?.kind === 'trial') {
     const { rows, period: p } = state.data.trial;
     if (rows.length === 0) {
       body = (
-        <Empty title={`No activity in ${p}`}>
-          The trial balance lists every account with postings in the period. Post an entry or choose another period.
-        </Empty>
+        <Empty title={t('reports.empty_title', { period: formatPeriod(p) })}>{t('reports.empty_body')}</Empty>
       );
     } else {
+      // The CSV keeps its English column names: it is a file other tools read.
       const header = ['Account', 'Currency', 'Debit', 'Credit', 'Balance'];
       csv = {
         name: `trial-balance-${p}.csv`,
@@ -69,22 +71,22 @@ export function Reports() {
       body = (
         <div class="table-wrap">
           <table class="ledger cards">
-            <caption class="sr-only">Trial balance for {p}</caption>
+            <caption class="sr-only">{t('reports.caption_trial', { period: formatPeriod(p) })}</caption>
             <thead>
               <tr>
-                <th scope="col">Account</th>
-                <th scope="col" class="num">Debit</th>
-                <th scope="col" class="num">Credit</th>
-                <th scope="col" class="num">Balance</th>
+                <th scope="col">{t('term.account')}</th>
+                <th scope="col" class="num">{t('term.debit')}</th>
+                <th scope="col" class="num">{t('term.credit')}</th>
+                <th scope="col" class="num">{t('term.balance')}</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={`${r.account_code}-${r.balance.currency}`}>
-                  <td class="main code">{r.account_code}</td>
-                  <td class="num" data-label="Debit"><Money minor={r.debit.minor} currency={r.debit.currency} /></td>
-                  <td class="num" data-label="Credit"><Money minor={r.credit.minor} currency={r.credit.currency} /></td>
-                  <td class="num" data-label="Balance"><Money minor={r.balance.minor} currency={r.balance.currency} /></td>
+                  <td class="main code"><Ltr>{r.account_code}</Ltr></td>
+                  <td class="num" data-label={t('term.debit')}><Money minor={r.debit.minor} currency={r.debit.currency} /></td>
+                  <td class="num" data-label={t('term.credit')}><Money minor={r.credit.minor} currency={r.credit.currency} /></td>
+                  <td class="num" data-label={t('term.balance')}><Money minor={r.balance.minor} currency={r.balance.currency} /></td>
                 </tr>
               ))}
             </tbody>
@@ -95,29 +97,29 @@ export function Reports() {
   } else if (state.data?.kind === 'pl') {
     const pl = state.data.pl;
     const lines = [
-      ['Revenue', pl.revenue],
-      ['Expenses', pl.expenses],
-      ['Net income', pl.net_income],
+      ['term.revenue', pl.revenue],
+      ['term.expenses', pl.expenses],
+      ['term.net_income', pl.net_income],
     ] as const;
     csv = {
       name: `profit-and-loss-${pl.period}.csv`,
-      text: toCsv([['Line', 'Currency', 'Amount'], ...lines.map(([label, a]) => [label, a.currency, toPlainMajor(a.minor, a.currency)])]),
+      text: toCsv([['Line', 'Currency', 'Amount'], ...lines.map(([label, a]) => [t(label), a.currency, toPlainMajor(a.minor, a.currency)])]),
     };
     body = (
       <div class="table-wrap">
         <table class="ledger cards">
-          <caption class="sr-only">Profit and loss for {pl.period}</caption>
+          <caption class="sr-only">{t('reports.caption_pl', { period: formatPeriod(pl.period) })}</caption>
           <thead>
             <tr>
-              <th scope="col">Line</th>
-              <th scope="col" class="num">Amount</th>
+              <th scope="col">{t('term.line')}</th>
+              <th scope="col" class="num">{t('term.amount')}</th>
             </tr>
           </thead>
           <tbody>
             {lines.map(([label, a]) => (
               <tr key={label}>
-                <td class="main">{label}</td>
-                <td class="num" data-label="Amount"><Money minor={a.minor} currency={a.currency} /></td>
+                <td class="main">{t(label)}</td>
+                <td class="num" data-label={t('term.amount')}><Money minor={a.minor} currency={a.currency} /></td>
               </tr>
             ))}
           </tbody>
@@ -127,37 +129,37 @@ export function Reports() {
   } else if (state.data?.kind === 'bs') {
     const bs = state.data.bs;
     const lines = [
-      ['Assets', bs.assets],
-      ['Liabilities', bs.liabilities],
-      ['Equity', bs.equity],
+      ['term.assets', bs.assets],
+      ['term.liabilities', bs.liabilities],
+      ['term.equity', bs.equity],
     ] as const;
     csv = {
       name: `balance-sheet-${bs.as_of}.csv`,
-      text: toCsv([['Line', 'Currency', 'Amount'], ...lines.map(([label, a]) => [label, a.currency, toPlainMajor(a.minor, a.currency)])]),
+      text: toCsv([['Line', 'Currency', 'Amount'], ...lines.map(([label, a]) => [t(label), a.currency, toPlainMajor(a.minor, a.currency)])]),
     };
     const gap = BigInt(bs.assets.minor) - (BigInt(bs.liabilities.minor) + BigInt(bs.equity.minor));
     body = (
       <div class="table-wrap">
         <table class="ledger cards">
-          <caption class="sr-only">Balance sheet as of {bs.as_of}</caption>
+          <caption class="sr-only">{t('reports.caption_bs', { date: formatDate(bs.as_of) })}</caption>
           <thead>
             <tr>
-              <th scope="col">Line</th>
-              <th scope="col" class="num">Amount</th>
+              <th scope="col">{t('term.line')}</th>
+              <th scope="col" class="num">{t('term.amount')}</th>
             </tr>
           </thead>
           <tbody>
             {lines.map(([label, a]) => (
               <tr key={label}>
-                <td class="main">{label}</td>
-                <td class="num" data-label="Amount"><Money minor={a.minor} currency={a.currency} /></td>
+                <td class="main">{t(label)}</td>
+                <td class="num" data-label={t('term.amount')}><Money minor={a.minor} currency={a.currency} /></td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
-              <td class="main">Assets minus liabilities and equity</td>
-              <td class="num" data-label="Check">{formatMinor(gap, bs.assets.currency, LOCALE)}</td>
+              <td class="main">{t('reports.check_row')}</td>
+              <td class="num" data-label={t('term.check')}><Ltr>{formatMinor(gap, bs.assets.currency, locale)}</Ltr></td>
             </tr>
           </tfoot>
         </table>
@@ -167,10 +169,10 @@ export function Reports() {
 
   return (
     <>
-      <PageHead title="Reports" actions={csv ? <CsvButton name={csv.name} text={csv.text} /> : undefined}>
-        Statements for {period}. Balance sheet is as of the last day of the period. Exports are plain CSV in major units.
+      <PageHead title={t('reports.title')} actions={csv ? <CsvButton name={csv.name} text={csv.text} /> : undefined}>
+        {t('reports.intro', { period: formatPeriod(period) })}
       </PageHead>
-      <section class="panel" aria-label="Reports">
+      <section class="panel" aria-label={t('reports.section')}>
         <div class="panel-head">{tabs}</div>
         <div id="report-panel" role="tabpanel" aria-labelledby={`tab-${kind}`}>
           {body}
@@ -193,7 +195,7 @@ function CsvButton({ name, text }: { name: string; text: string }) {
   };
   return (
     <button type="button" class="btn" onClick={download}>
-      Export CSV
+      {t('reports.export')}
     </button>
   );
 }

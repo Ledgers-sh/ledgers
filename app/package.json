@@ -11,8 +11,9 @@
     "preview": "vite preview --port 5173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts",
-    "screenshots": "playwright test tests/e2e/screenshots.spec.ts"
+    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts tests/e2e/a11y.spec.ts tests/e2e/i18n-palette.spec.ts",
+    "screenshots": "playwright test tests/e2e/screenshots.spec.ts",
+    "i18n:gen": "node scripts/gen-i18n.mjs"
   },
   "dependencies": {
     "@fontsource/source-code-pro": "5.3.1",
@@ -20,6 +21,7 @@
     "preact": "10.29.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.64.1",
     "@types/node": "24.19.2",
     "typescript": "5.9.3",
