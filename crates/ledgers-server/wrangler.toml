@@ -1,7 +1,6 @@
 # Cloudflare Workers configuration for Ledgers server
 
 name = "ledgers"
-type = "javascript"
 main = "build/worker/shim.mjs"
 
 compatibility_date = "2024-12-01"
@@ -11,7 +10,7 @@ compatibility_date = "2024-12-01"
 binding = "DB"
 database_name = "ledgers"
 database_id = "00000000-0000-0000-0000-000000000000"
-migrations_dir = "migrations"
+migrations_dir = "d1/migrations"
 
 # R2 Bucket binding for document storage
 [[r2_buckets]]
@@ -25,7 +24,8 @@ DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
 
 # Secrets are managed separately:
 # - Development: set in .dev.vars (not checked in)
-# - Production: use `wrangler secret put HARNESS_SECRET`
+# - Staging and production: `wrangler secret put HARNESS_SECRET --env <env>`
+#   (docs/deploy.md has the full staging steps)
 
 # Build configuration
 [build]
@@ -44,3 +44,31 @@ migrations_dir = "migrations"
 [[env.production.r2_buckets]]
 binding = "DOCUMENTS"
 bucket_name = "ledgers-documents-prod"
+
+# Staging: the deployed test environment behind https://api-staging.ledgers.sh.
+# Values here are not inherited from the top level, so each one is set again.
+# STAGING_D1_ID and STAGING_COMPANY_ID are placeholders to fill before deploy
+# (docs/deploy.md, step 2). Migrations are the flat files in d1/migrations,
+# generated from the modules' SQLite migrations (tests/d1_migrations.rs).
+[env.staging]
+name = "ledgers-api-staging"
+compatibility_date = "2026-10-01"
+
+[env.staging.vars]
+ENV = "staging"
+LEDGERS_DEV = "0"
+LEDGERS_DOMAIN = "api-staging.ledgers.sh"
+LEDGERS_PUBLIC_URL = "https://api-staging.ledgers.sh"
+LEDGERS_CORS_ORIGINS = "https://app-staging.ledgers.sh"
+LEDGERS_COMPANY_ID = "STAGING_COMPANY_ID"
+DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "ledgers-staging"
+database_id = "STAGING_D1_ID"
+migrations_dir = "d1/migrations"
+
+[[env.staging.r2_buckets]]
+binding = "DOCUMENTS"
+bucket_name = "ledgers-documents-staging"

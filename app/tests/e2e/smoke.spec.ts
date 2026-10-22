@@ -97,4 +97,28 @@ test.describe('connect, post, reverse', () => {
     await page.getByRole('button', { name: 'Run match' }).click();
     await expect(page.getByText(/no_candidates/)).toBeVisible();
   });
+
+  test('bills is hidden when the server does not list bills.match', async ({ page }) => {
+    await mockApi();
+    await page.route('**/v1/openapi', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify({ openapi: '3.1.0', paths: { '/v1/accounts': { get: { operationId: 'accounts_list' } } } }),
+      }),
+    );
+    await page.addInitScript(
+      ({ key, origin }) => {
+        window.sessionStorage.setItem('ledgers.apiKey', key);
+        window.sessionStorage.setItem('ledgers.baseUrl', origin);
+      },
+      { key: API_KEY, origin: API_ORIGIN },
+    );
+    await page.goto('/#/overview');
+    await expect(page.getByRole('link', { name: 'Journal' }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Bills', exact: true })).toHaveCount(0);
+    await page.goto('/#/bills');
+    await expect(page.getByText('Page not found')).toBeVisible();
+  });
 });

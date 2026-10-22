@@ -2193,6 +2193,7 @@ dependencies = [
  "ledgers-storage",
  "ledgers-tax",
  "pollster",
+ "rusqlite",
  "schemars 1.2.3",
  "sea-query",
  "serde",

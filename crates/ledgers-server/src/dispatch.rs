@@ -391,12 +391,24 @@ pub async fn issue_key(
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
+    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits).await
+}
+
+/// [`issue_key`] with the owner recorded on the key and its audit events.
+async fn issue_key_as(
+    deps: &Deps,
+    company_id: &str,
+    label: &str,
+    owner: &str,
+    tier: Tier,
+    limits: BTreeMap<String, CurrencyLimit>,
+) -> Result<String, String> {
     let key_id = deps.id_gen.ulid();
     let now = deps.clock.now();
     let key = AgentKey {
         id: key_id.clone(),
         label: label.to_owned(),
-        owner: DEV_OWNER.to_owned(),
+        owner: owner.to_owned(),
         tier,
         limits,
         allowed_journals: None,
@@ -423,7 +435,7 @@ pub async fn issue_key(
 
     let audit = AuditContext::new(
         Actor::Person {
-            person_id: DEV_OWNER.to_owned(),
+            person_id: owner.to_owned(),
         },
         deps.id_gen.ulid(),
         deps.id_gen.ulid(),
@@ -436,20 +448,20 @@ pub async fn issue_key(
     Ok(issued.key())
 }
 
-/// Development bootstrap for `company_id`: when the company has no chart,
-/// imports the generic SME chart, opens the general journal `GN` and the
-/// current calendar year; then issues one local key with full tier
-/// (post within limits) and returns its secret.
+/// Seeds `company_id` when it has no chart yet: imports the generic SME
+/// chart, opens the general journal (`general`, code `GN`) and the current
+/// calendar year. Idempotent: a company that already has accounts is left
+/// as it is.
 ///
 /// # Errors
 /// A message naming the failed step.
-pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();
     let audit = AuditContext::new(
         Actor::Person {
-            person_id: DEV_OWNER.to_owned(),
+            person_id: owner.to_owned(),
         },
         deps.id_gen.ulid(),
         deps.id_gen.ulid(),
@@ -492,23 +504,152 @@ pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, Stri
         .await
         .map_err(|err| format!("open fiscal year: {err}"))?;
     }
+    Ok(())
+}
 
+/// Per-currency limits of the bootstrap keys: the same generous ceilings the
+/// development key uses, in minor units.
+fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
     let mut limits = BTreeMap::new();
     limits.insert(
-        "EUR".to_owned(),
+        currency.to_owned(),
         CurrencyLimit {
             per_entry: 100_000_000_000_000,
             per_day: 1_000_000_000_000_000,
         },
     );
+    limits
+}
+
+/// Development bootstrap for `company_id`: when the company has no chart,
+/// imports the generic SME chart, opens the general journal `GN` and the
+/// current calendar year; then issues one local key with full tier
+/// (post within limits) and returns its secret.
+///
+/// # Errors
+/// A message naming the failed step.
+pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+    seed_company(deps, company_id, DEV_OWNER).await?;
     issue_key(
         deps,
         company_id,
         "dev local key",
         Tier::PostWithinLimits,
-        limits,
+        bootstrap_limits("EUR"),
     )
     .await
+}
+
+/// The owner recorded on the keys and audit events of a deployed bootstrap.
+const BOOTSTRAP_OWNER: &str = "bootstrap";
+/// The longest company name a bootstrap accepts, in characters.
+pub const BOOTSTRAP_NAME_MAX: usize = 200;
+
+/// The input of a deployed-environment bootstrap: the company's display
+/// name and its base currency (an ISO 4217 code such as `EUR`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct CompanyBootstrap {
+    /// The company's name, shown in the app and on reports.
+    pub company: String,
+    /// The base currency: three ASCII uppercase letters.
+    pub currency: String,
+}
+
+impl CompanyBootstrap {
+    /// Checks the name and the currency code.
+    ///
+    /// # Errors
+    /// A message naming the field that is out of range.
+    pub fn validate(&self) -> Result<(), String> {
+        let name = self.company.trim();
+        if name.is_empty() || name.chars().count() > BOOTSTRAP_NAME_MAX {
+            return Err(format!(
+                "company must be 1 to {BOOTSTRAP_NAME_MAX} characters"
+            ));
+        }
+        if self.currency.len() != 3 || !self.currency.bytes().all(|b| b.is_ascii_uppercase()) {
+            return Err("currency must be a three-letter ISO 4217 code, such as EUR".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Why a deployed bootstrap did not run.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BootstrapError {
+    /// The input failed [`CompanyBootstrap::validate`].
+    Invalid(String),
+    /// An agent key already exists: the bootstrap is one-shot.
+    AlreadyBootstrapped,
+    /// A storage or configuration step failed; the message names the step.
+    Failed(String),
+}
+
+/// Creates the company row (when absent), seeds its chart, journal and fiscal
+/// year, and issues one full-tier (post within limits) key. Refuses to run
+/// once any agent key exists, so a leaked bootstrap token cannot mint keys
+/// after the first one. Returns the key secret, which the caller shows once.
+///
+/// # Errors
+/// [`BootstrapError`] for invalid input, an already-bootstrapped database, or
+/// a failed step.
+pub async fn bootstrap_company(
+    deps: &Deps,
+    company_id: &str,
+    input: &CompanyBootstrap,
+) -> Result<String, BootstrapError> {
+    input.validate().map_err(BootstrapError::Invalid)?;
+    if company_id.trim().is_empty() {
+        return Err(BootstrapError::Failed(
+            "LEDGERS_COMPANY_ID is not set".to_owned(),
+        ));
+    }
+    let db = deps.db.as_ref();
+    let existing_keys = db
+        .query(&Statement::new(format!(
+            "SELECT COUNT(*) AS n FROM {API_KEYS_TABLE}"
+        )))
+        .await
+        .map_err(|err| BootstrapError::Failed(format!("count keys: {err}")))?;
+    let count = existing_keys
+        .rows
+        .first()
+        .and_then(|row| row.get::<i64>("n"))
+        .unwrap_or(0);
+    if count > 0 {
+        return Err(BootstrapError::AlreadyBootstrapped);
+    }
+
+    let stamp = rfc3339_utc(deps.clock.now());
+    db.execute(&Statement::with_values(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+         SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
+            .to_owned(),
+        vec![
+            sea_query::Value::from(company_id),
+            sea_query::Value::from(input.company.trim()),
+            sea_query::Value::from(input.currency.as_str()),
+            sea_query::Value::from(stamp.as_str()),
+            sea_query::Value::from(stamp.as_str()),
+            sea_query::Value::from(company_id),
+        ],
+    ))
+    .await
+    .map_err(|err| BootstrapError::Failed(format!("create company: {err}")))?;
+
+    seed_company(deps, company_id, BOOTSTRAP_OWNER)
+        .await
+        .map_err(BootstrapError::Failed)?;
+    issue_key_as(
+        deps,
+        company_id,
+        "bootstrap key",
+        BOOTSTRAP_OWNER,
+        Tier::PostWithinLimits,
+        bootstrap_limits(&input.currency),
+    )
+    .await
+    .map_err(BootstrapError::Failed)
 }
 
 /// The registry of every command the server serves: the descriptors of

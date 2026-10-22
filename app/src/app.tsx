@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { useHash, useOnline } from './hooks';
+import { BILLS_MATCH_OPERATION, fetchOperationIds } from './api/features';
 import {
   clearCredentials,
   loadCredentials,
@@ -33,6 +34,12 @@ const NAV: { hash: string; label: string; icon: IconName; match: (route: string)
   { hash: 'reports', label: 'Reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'Bills', icon: 'bills', match: (r) => r === 'bills' },
 ];
+
+/**
+ * Bills is shown only when the server's OpenAPI document lists bills.match.
+ * `checking` covers the first moments after connecting, before the document arrives.
+ */
+type BillsState = 'checking' | 'offered' | 'absent';
 
 export function App() {
   const [credentials, setCredentials] = useState<Credentials | null>(() => loadCredentials());
@@ -78,11 +85,25 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
   const [period, setPeriodState] = useState<string>(() => loadPeriod());
   const [currency, setCurrencyState] = useState<string>(() => loadCurrency());
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  const [billsState, setBillsState] = useState<BillsState>('checking');
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     saveTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    let live = true;
+    setBillsState('checking');
+    void fetchOperationIds(credentials.baseUrl).then((ids) => {
+      if (live) setBillsState(ids.has(BILLS_MATCH_OPERATION) ? 'offered' : 'absent');
+    });
+    return () => {
+      live = false;
+    };
+  }, [credentials.baseUrl]);
+
+  const nav = NAV.filter((item) => item.hash !== 'bills' || billsState === 'offered');
 
   const setPeriod = useCallback((next: string) => {
     savePeriod(next);
@@ -125,7 +146,7 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
   }, []);
 
   const route = hash.replace(/\?.*$/, '');
-  const page = renderRoute(route);
+  const page = renderRoute(route, billsState);
   const current = NAV.find((item) => item.match(route));
 
   return (
@@ -140,7 +161,7 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
             <span>ledgers<span>.sh</span></span>
           </a>
           <nav class="nav" aria-label="Sections">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
                 <Icon name={item.icon} />
                 {item.label}
@@ -209,7 +230,7 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
         </div>
       </div>
       <nav class="bottom-nav" aria-label="Sections">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
             <Icon name={item.icon} />
             {item.label}
@@ -221,13 +242,14 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
   );
 }
 
-function renderRoute(route: string) {
+function renderRoute(route: string, billsState: BillsState) {
   if (route === '' || route === 'overview') return <Overview />;
   if (route === 'journal') return <Journal />;
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
   if (route === 'accounts') return <Accounts />;
   if (route === 'reports') return <Reports />;
-  if (route === 'bills') return <Bills />;
+  if (route === 'bills' && billsState === 'offered') return <Bills />;
+  if (route === 'bills' && billsState === 'checking') return <p class="muted">Checking what this server offers…</p>;
   if (route === 'new') return <NewEntry />;
   return (
     <div class="empty">
