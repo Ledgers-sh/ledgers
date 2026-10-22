@@ -8,6 +8,35 @@ use cratefield_core::{Database, DbError, Row, Statement};
 use sea_query::Value;
 use std::collections::HashMap;
 
+/// The unmerged parties of `company_id` that have an IBAN, keyed by the IBAN
+/// as `iban::normalise` writes it. Parties share the `vendor` table with bills.
+///
+/// # Errors
+/// The database error when the read fails.
+pub async fn parties_by_iban(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<HashMap<String, crate::model::PartyRef>, DbError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id, name, iban FROM vendor WHERE company_id = ? AND merged_into IS NULL AND iban IS NOT NULL ORDER BY id".to_owned(),
+            vec![Value::from(company_id)],
+        ))
+        .await?;
+    let mut by_iban = HashMap::new();
+    for row in &rows.rows {
+        let (Some(iban), Some(id), Some(name)) =
+            (opt(row, "iban"), opt(row, "id"), opt(row, "name"))
+        else {
+            continue;
+        };
+        by_iban
+            .entry(ledgers_bills::iban::normalise(&iban))
+            .or_insert(crate::model::PartyRef { id, name });
+    }
+    Ok(by_iban)
+}
+
 /// A bank account row.
 #[derive(Clone, Debug)]
 pub struct AccountRow {

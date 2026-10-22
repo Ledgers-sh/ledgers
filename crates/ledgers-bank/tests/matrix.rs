@@ -231,6 +231,82 @@ async fn scenario(db: &dyn Database) {
     );
 }
 
+async fn exec_party(
+    db: &dyn Database,
+    id: &str,
+    name: &str,
+    iban: &str,
+    merged_into: Option<&str>,
+) {
+    exec(
+        db,
+        "INSERT INTO vendor (id, company_id, name, iban, source, needs_review, merged_into, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, 'manual', 0, ?, '2026-03-01T00:00:00Z', '2026-03-01T00:00:00Z')",
+        vec![
+            Value::from(id),
+            Value::from(COMPANY),
+            Value::from(name),
+            Value::from(iban),
+            merged_into.map_or(Value::String(None), Value::from),
+        ],
+    )
+    .await;
+}
+
+/// A bank counterparty is the party whose IBAN it is, however the IBAN is
+/// spaced; a merged party is no longer a counterparty.
+async fn parties_match_by_iban(db: &dyn Database) {
+    seed(db).await;
+    exec_party(
+        db,
+        "party-live",
+        "Halden Works GmbH",
+        "DE89 3704 0044 0532 0130 00",
+        None,
+    )
+    .await;
+    exec_party(
+        db,
+        "party-old",
+        "Halden Old",
+        "GB82WEST12345698765432",
+        Some("party-live"),
+    )
+    .await;
+    let by_iban = store::parties_by_iban(db, COMPANY).await.expect("parties");
+    let live = by_iban
+        .get("DE89370400440532013000")
+        .expect("matched by normalised IBAN");
+    assert_eq!(live.id, "party-live");
+    assert_eq!(live.name, "Halden Works GmbH");
+    assert!(
+        !by_iban.contains_key("GB82WEST12345698765432"),
+        "a merged party is not a counterparty"
+    );
+    let other = store::parties_by_iban(db, "01OTHERCOMPANY000000000000B")
+        .await
+        .expect("parties of another company");
+    assert!(
+        other.is_empty(),
+        "another company's parties are not this company's counterparties"
+    );
+}
+
+#[test]
+fn parties_are_matched_to_counterparties_by_iban_on_every_dialect() {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(ledgers_ledger::LedgerModule),
+            Box::new(DbModule),
+            Box::new(BillsModule),
+            Box::new(BankModule),
+        ]
+    }) {
+        pollster::block_on(parties_match_by_iban(&*kit.db));
+    }
+}
+
 #[test]
 fn bank_store_on_every_available_dialect() {
     for kit in TestHarness::all_dialects(|| {

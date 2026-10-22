@@ -128,7 +128,8 @@ pub fn compose(
                     .unwrap_or_else(|| public_url.clone()),
             )
             .with_document_key(document_key.clone())
-            .with_model_reader(optional.selection.settings),
+            .with_model_reader(optional.selection.settings)
+            .with_vies_enabled(cfg.get("LEDGERS_VIES").as_deref() == Some("1")),
     );
 
     // Generate domain modules

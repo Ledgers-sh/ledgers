@@ -4,10 +4,12 @@
 //! the ledger's own: an agent's post into a protected account is held for a
 //! person, and the bill records the entry it became.
 
+use crate::iban;
 use crate::model::{
     BillInput, BillLine, BillView, CheckView, FLAG_INSTRUCTION_TEXT, PreviewLine, Status,
     VendorView, derive_status, entry_lines, open_flags,
 };
+use crate::parties::{MatchCandidate, match_party};
 use crate::store::{self, BillRow};
 use cratefield_core::{Database, Problem, Statement};
 use ledgers_commands::auth::Tier;
@@ -21,6 +23,7 @@ use ledgers_ledger::surface::{
     SerializableLine, SerializablePostedEntry,
 };
 use ledgers_ledger::units::{self, UnitScope};
+use ledgers_tax::normalize_vat_id;
 use schemars::JsonSchema;
 use sea_query::Value;
 use serde::{Deserialize, Serialize};
@@ -193,32 +196,19 @@ fn checks_and_flags(
     (checks, flags)
 }
 
-fn normalise_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn normalise_iban(iban: &str) -> String {
-    iban.chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_uppercase()
-}
-
 /// Whether an invoice IBAN differs from the IBAN the vendor is known by. A
 /// vendor with no known IBAN, or an invoice with none, differs from nothing.
 fn iban_differs(known: Option<&str>, seen: Option<&str>) -> bool {
     match (known, seen) {
-        (Some(known), Some(seen)) => normalise_iban(known) != normalise_iban(seen),
+        (Some(known), Some(seen)) => iban::normalise(known) != iban::normalise(seen),
         _ => false,
     }
 }
 
-/// The vendor a bill belongs to: matched by VAT id, then by normalised name,
-/// otherwise a new vendor that needs a person. Returns the vendor and
-/// whether its IBAN differs from the one the vendor is known by.
+/// The vendor a bill belongs to: the party with the same VAT id, then with the
+/// same normalised name (`parties::match_party`), otherwise a new vendor that
+/// needs a person. Returns the vendor, the vendor to create (if any) and
+/// whether the invoice IBAN differs from the one the vendor is known by.
 async fn resolve_vendor(
     db: &dyn Database,
     company_id: &str,
@@ -226,24 +216,24 @@ async fn resolve_vendor(
     ctx: &CommandContext,
 ) -> Result<(VendorView, Option<VendorView>, bool), CommandError> {
     let known = store::vendors(db, company_id).await?;
-    let by_vat = input.vendor_vat_id.as_deref().and_then(|vat| {
-        known
+    let candidates: Vec<MatchCandidate> = known
+        .iter()
+        .map(|v| MatchCandidate {
+            id: v.id.clone(),
+            name: v.name.clone(),
+            vat_id: v.vat_id.as_deref().map(normalize_vat_id),
+        })
+        .collect();
+    if let Some(found) = match_party(
+        &candidates,
+        input.vendor_vat_id.as_deref(),
+        input.vendor_name.as_deref(),
+    ) {
+        let vendor = known
             .iter()
-            .find(|v| v.vat_id.as_deref() == Some(vat))
+            .find(|v| v.id == found.id)
             .cloned()
-    });
-    let by_name = input.vendor_name.as_deref().and_then(|name| {
-        let wanted = normalise_name(name);
-        (!wanted.is_empty())
-            .then(|| {
-                known
-                    .iter()
-                    .find(|v| normalise_name(&v.name) == wanted)
-                    .cloned()
-            })
-            .flatten()
-    });
-    if let Some(vendor) = by_vat.or(by_name) {
+            .ok_or_else(|| CommandError::InvalidInput("the matched vendor is missing".into()))?;
         let changed = iban_differs(vendor.iban.as_deref(), input.vendor_iban.as_deref());
         return Ok((vendor, None, changed));
     }
@@ -255,7 +245,11 @@ async fn resolve_vendor(
     let vendor = VendorView {
         id: format!("ven_{}", ctx.event_id),
         name,
-        vat_id: input.vendor_vat_id.clone(),
+        vat_id: input
+            .vendor_vat_id
+            .as_deref()
+            .map(normalize_vat_id)
+            .filter(|v| !v.is_empty()),
         iban: input.vendor_iban.clone(),
         needs_review: true,
     };
@@ -1224,13 +1218,10 @@ mod tests {
     #[test]
     fn vendor_names_match_regardless_of_case_and_punctuation() {
         assert_eq!(
-            normalise_name("Halden Supplies GmbH."),
-            normalise_name("halden supplies gmbh")
+            crate::parties::normalise_name("Halden Supplies GmbH."),
+            crate::parties::normalise_name("halden supplies gmbh")
         );
-        assert_eq!(
-            normalise_iban("de89 3704 0044"),
-            "DE89370400 44".replace(' ', "")
-        );
+        assert_eq!(iban::normalise("de89 3704 0044"), "DE8937040044");
     }
 
     #[test]

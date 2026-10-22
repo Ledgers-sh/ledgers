@@ -58,7 +58,7 @@ pub use error::TaxError;
 pub use module::TaxModule;
 pub use rate::{DatedRate, Jurisdiction, RateCategory, RateTable};
 pub use settings::{SettingsError, set_tax_settings, tax_settings};
-pub use validate::Validator;
+pub use validate::{Validator, check_vat_id, normalize_vat_id};
 pub use vat_return::{
     EcSalesListRow, GenericReturn, OssRow, ReturnClass, UstvaBox, UstvaReturn, VatRecord,
     VatReturnError, prepare_ec_sales_list, prepare_generic_return, prepare_oss, prepare_ustva,

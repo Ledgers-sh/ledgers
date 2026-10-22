@@ -1118,6 +1118,7 @@ fn transaction_view(
         matched,
         suggestions,
         flags,
+        party: None,
     }
 }
 
@@ -1226,6 +1227,7 @@ impl Command for TransactionsList {
             .cloned()
             .collect();
         let candidates = candidates(db, company, &page_accounts).await?;
+        let parties = store::parties_by_iban(db, company).await?;
         let mut transactions = Vec::with_capacity(rows.len());
         for row in &rows {
             let suggestions = if row.status == "unmatched" {
@@ -1242,7 +1244,11 @@ impl Command for TransactionsList {
             } else {
                 Vec::new()
             };
-            let view = transaction_view(row, suggestions);
+            let mut view = transaction_view(row, suggestions);
+            view.party = row
+                .counterparty_iban
+                .as_deref()
+                .and_then(|iban| parties.get(&ledgers_bills::iban::normalise(iban)).cloned());
             if want.as_deref().is_none_or(|w| w == view.status) {
                 transactions.push(view);
             }

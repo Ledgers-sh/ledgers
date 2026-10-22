@@ -650,6 +650,20 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "/v1/bills/{id}/confirm",
             "ledgers bills confirm",
         ),
+        human_entry(
+            "parties.set_bank",
+            "draft",
+            "POST",
+            "/v1/parties/{id}/set-bank",
+            "ledgers parties set-bank",
+        ),
+        human_entry(
+            "parties.merge",
+            "draft",
+            "POST",
+            "/v1/parties/{id}/merge",
+            "ledgers parties merge",
+        ),
         human_entry("keys.list", "read", "GET", "/v1/keys", "ledgers keys list"),
         human_entry(
             "keys.create",

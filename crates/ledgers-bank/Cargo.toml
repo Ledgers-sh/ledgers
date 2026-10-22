@@ -13,6 +13,7 @@ postgres = ["cratefield-testing/postgres"]
 [dependencies]
 cratefield-core = { workspace = true }
 cratefield-text-guard = { workspace = true }
+ledgers-bills = { workspace = true }
 ledgers-commands = { workspace = true }
 ledgers-db = { workspace = true }
 ledgers-documents = { workspace = true }
@@ -34,7 +35,6 @@ quick-xml = "=0.41.0"
 pollster = { workspace = true }
 proptest = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
-ledgers-bills = { workspace = true }
 ledgers-storage = { workspace = true }
 
 [lints]

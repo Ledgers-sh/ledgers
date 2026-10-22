@@ -2,7 +2,7 @@
 //! Bank accounts, statement import and reconciliation (docs/PLAN.md section 6,
 //! issues #26 and #48).
 //!
-//! - [`iban`]: IBAN validation with the mod-97 check.
+//! - [`iban`]: IBAN validation with the mod-97 check (owned by ledgers-bills).
 //! - [`parse`]: pure readers for `camt.053`, MT940 and delimited CSV with a
 //!   saved column mapping. They return [`statement::ParsedStatement`]s whose
 //!   balances are checked by [`statement::check_balances`].
@@ -17,7 +17,7 @@
 
 pub mod commands;
 pub mod fingerprint;
-pub mod iban;
+pub use ledgers_bills::iban;
 pub mod model;
 pub mod module;
 pub mod money;

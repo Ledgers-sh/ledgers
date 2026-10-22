@@ -67,6 +67,15 @@ pub struct BalanceView {
     pub amount: SerializableAmount,
 }
 
+/// The party a counterparty is: the unmerged party whose IBAN is the line's.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PartyRef {
+    /// The party id.
+    pub id: String,
+    /// The party's name.
+    pub name: String,
+}
+
 /// What a line was matched to.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MatchedView {
@@ -107,6 +116,8 @@ pub struct TransactionView {
     pub suggestions: Vec<Suggestion>,
     /// Warnings: the remittance reads like an instruction. Shown, never acted on.
     pub flags: Vec<String>,
+    /// The party whose IBAN is the counterparty's, when one is on file.
+    pub party: Option<PartyRef>,
 }
 
 /// The reconciliation of an account as of a date.

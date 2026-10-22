@@ -345,3 +345,42 @@ fn check_eu_vat(number: &str) -> Result<(), String> {
         Err("The body of an EU VAT number is 2 to 12 letters or digits.".to_owned())
     }
 }
+
+/// Upper-cases a VAT ID and drops the spaces, dots and dashes people type
+/// between its groups.
+#[must_use]
+pub fn normalize_vat_id(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !matches!(c, ' ' | '.' | '-' | '\t'))
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
+/// Checks a VAT ID against its country's pack (`ledgers_tax::country`). An
+/// empty VAT ID is allowed (the company may not be VAT registered). A country
+/// no pack covers accepts its own prefix and two to twelve letters or digits.
+///
+/// # Errors
+/// A plain message, shown next to the field.
+pub fn check_vat_id(country: &str, vat_id: &str) -> Result<(), String> {
+    if vat_id.is_empty() {
+        return Ok(());
+    }
+    if country.is_empty() {
+        return Err("Choose the country before entering a VAT ID.".to_owned());
+    }
+    if !vat_id.starts_with(country) {
+        return Err(format!("A {country} VAT ID starts with {country}."));
+    }
+    let number = Validator::normalize(vat_id);
+    let pack = crate::country::pack_for_country(country).map_err(|err| err.to_string())?;
+    if let Some(pack) = pack {
+        return pack.registration.validator.check(&number);
+    }
+    let body = number.get(country.len()..).unwrap_or("");
+    if (2..=12).contains(&body.len()) && body.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        Ok(())
+    } else {
+        Err(format!("This is not a valid {country} VAT ID format."))
+    }
+}

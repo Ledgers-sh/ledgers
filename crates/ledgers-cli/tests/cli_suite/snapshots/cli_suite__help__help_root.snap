@@ -23,6 +23,7 @@ Commands:
   fiscal-years       Commands under `ledgers fiscal-years`
   keys               Commands under `ledgers keys`
   numbering          Commands under `ledgers numbering`
+  parties            Commands under `ledgers parties`
   periods            Commands under `ledgers periods`
   reports            Commands under `ledgers reports`
   tax-settings       Commands under `ledgers tax-settings`

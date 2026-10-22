@@ -11,8 +11,10 @@
 //! an extraction on its own: posting is always a command.
 
 pub mod commands;
+pub mod iban;
 pub mod model;
 pub mod module;
+pub mod parties;
 pub mod store;
 
 pub use module::BillsModule;
@@ -34,6 +36,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "bill_unit",
         include_str!("../migrations/sqlite/0003_bill_unit.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "parties",
+        include_str!("../migrations/sqlite/0004_parties.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite.
@@ -52,6 +59,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0003",
         "bill_unit",
         include_str!("../migrations/postgres/0003_bill_unit.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "parties",
+        include_str!("../migrations/postgres/0004_parties.sql"),
     ),
 ];
 

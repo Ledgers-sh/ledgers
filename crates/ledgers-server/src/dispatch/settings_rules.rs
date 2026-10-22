@@ -28,44 +28,7 @@ pub const MIN_REQUEST_TTL_HOURS: u32 = 1;
 /// The longest request expiry, in hours (one week).
 pub const MAX_REQUEST_TTL_HOURS: u32 = 168;
 
-/// Upper-cases a VAT ID and drops the spaces, dots and dashes people type
-/// between its groups.
-#[must_use]
-pub fn normalize_vat_id(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| !matches!(c, ' ' | '.' | '-' | '\t'))
-        .flat_map(char::to_uppercase)
-        .collect()
-}
-
-/// Checks a VAT ID against its country's pack (`ledgers_tax::country`). An
-/// empty VAT ID is allowed (the company may not be VAT registered). A country
-/// no pack covers accepts its own prefix and two to twelve letters or digits.
-///
-/// # Errors
-/// A plain message, shown next to the field.
-pub fn check_vat_id(country: &str, vat_id: &str) -> Result<(), String> {
-    if vat_id.is_empty() {
-        return Ok(());
-    }
-    if country.is_empty() {
-        return Err("Choose the country before entering a VAT ID.".to_owned());
-    }
-    if !vat_id.starts_with(country) {
-        return Err(format!("A {country} VAT ID starts with {country}."));
-    }
-    let number = ledgers_tax::Validator::normalize(vat_id);
-    let pack = ledgers_tax::pack_for_country(country).map_err(|err| err.to_string())?;
-    if let Some(pack) = pack {
-        return pack.registration.validator.check(&number);
-    }
-    let body = number.get(country.len()..).unwrap_or("");
-    if (2..=12).contains(&body.len()) && body.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        Ok(())
-    } else {
-        Err(format!("This is not a valid {country} VAT ID format."))
-    }
-}
+pub use ledgers_tax::validate::{check_vat_id, normalize_vat_id};
 
 /// The text fields may hold printable characters only: no control characters,
 /// so nothing can break a line in the audit trail or a PDF.

@@ -196,13 +196,13 @@ pub async fn bill_for_invoice(
     Ok(rows.first().and_then(|row| row.get::<String>("id")))
 }
 
-/// Every vendor in `company_id`.
+/// Every unmerged vendor (party) in `company_id`.
 ///
 /// # Errors
 /// A database error.
 pub async fn vendors(db: &dyn Database, company_id: &str) -> Result<Vec<VendorView>, DbError> {
     let stmt = Statement::with_values(
-        "SELECT id, name, vat_id, iban, needs_review FROM vendor WHERE company_id = ? ORDER BY name, id".to_owned(),
+        "SELECT id, name, vat_id, iban, needs_review FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY name, id".to_owned(),
         vec![Value::from(company_id)],
     );
     let rows = db.query(&stmt).await?;
