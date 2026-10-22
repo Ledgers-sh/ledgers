@@ -5,6 +5,7 @@
 
 use crate::dispatch::{DISPATCH_PORTS, Deps};
 use crate::people::presented_from;
+use crate::query_input::get_input;
 use crate::rate_limiting::admit;
 use crate::timing::{self, CountingDb, DbTiming};
 use cratefield_core::axum::response::IntoResponse;
@@ -14,11 +15,11 @@ use cratefield_core::axum::{
     routing::{get, post},
 };
 use cratefield_core::{
-    Config, ConfigError, Migrations, Module, ModuleContext, Port, Problem, Scope,
+    Config, ConfigError, Migrations, Module, ModuleContext, Port, Problem, ProblemDef, Scope,
 };
 use ledgers_commands::{Principal, Registry};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// How a request presents its caller: an agent key, or a person's session.
@@ -75,18 +76,41 @@ pub trait Dispatch: Send + Sync {
     }
 }
 
+/// One command route of a domain: the HTTP method, the path relative to the
+/// domain, the command, and the command's input schema (which types the
+/// parameters of a GET route).
+#[derive(Clone, Debug)]
+pub struct CommandRoute {
+    /// `GET` or `POST`.
+    pub method: String,
+    /// The path under the domain, such as `/{number}` or `/`.
+    pub path: String,
+    /// The command's name, such as `accounts.get`.
+    pub command: String,
+    /// The command's input JSON schema.
+    pub input_schema: Arc<Value>,
+}
+
+/// 422: a path or query parameter does not fit the type its command field has.
+static INVALID_PARAMETER: ProblemDef = ProblemDef {
+    slug: "invalid-parameter",
+    status: axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+    title: "Invalid request parameter",
+    description: "A path or query parameter does not match the type of its command input field.",
+};
+
 /// A domain module from the registry.
 pub struct DomainModule {
     name: &'static str,
     dispatch: Arc<dyn Dispatch>,
-    routes: Vec<(String, String, String)>, // (method, path_pattern, command_name)
+    routes: Vec<CommandRoute>,
 }
 
 impl DomainModule {
     pub(crate) fn new(
         name: &'static str,
         dispatch: Arc<dyn Dispatch>,
-        routes: Vec<(String, String, String)>,
+        routes: Vec<CommandRoute>,
     ) -> Self {
         Self {
             name,
@@ -98,13 +122,15 @@ impl DomainModule {
     fn mount(&self, deps: &Arc<Deps>, timing: Option<&Arc<DbTiming>>) -> axum::Router {
         let mut router = axum::Router::new();
 
-        for (method, path_pattern, command_name) in &self.routes {
+        for route in &self.routes {
             let dispatch = Arc::clone(&self.dispatch);
-            let cmd = command_name.clone();
+            let path_pattern = route.path.as_str();
+            let cmd = route.command.clone();
+            let schema = Arc::clone(&route.input_schema);
             let deps = Arc::clone(deps);
             let timing = timing.cloned();
 
-            match method.as_str() {
+            match route.method.as_str() {
                 "POST" => {
                     router = router.route(
                         path_pattern,
@@ -152,30 +178,35 @@ impl DomainModule {
                         get(
                             move |scope: Scope,
                                   headers: axum::http::HeaderMap,
-                                  params: Option<Path<HashMap<String, String>>>,
-                                  Query(query): Query<HashMap<String, String>>| {
+                                  params: Option<Path<BTreeMap<String, String>>>,
+                                  Query(query): Query<Vec<(String, String)>>| {
                                 let dispatch = Arc::clone(&dispatch);
                                 let deps = Arc::clone(&deps);
                                 let cmd = cmd.clone();
+                                let schema = Arc::clone(&schema);
                                 let timing = timing.clone();
 
                                 async move {
                                     let request_id = scope.request_id.clone();
                                     let presented = presented_from(&headers, true);
 
-                                    // Path and query parameters are the command's input:
-                                    // every value arrives as a string.
-                                    let mut input = serde_json::Map::new();
-                                    let path_params = params.map(|Path(p)| p).unwrap_or_default();
-                                    for (key, value) in query.into_iter().chain(path_params) {
-                                        input.insert(key, json!(value));
-                                    }
-
                                     if let Err(limited) =
                                         admit(dispatch.as_ref(), &deps, presented.as_ref()).await
                                     {
                                         return limited.into_response();
                                     }
+
+                                    // Path and query parameters are the command's input,
+                                    // each converted to the type its schema field names.
+                                    let path_params = params.map(|Path(p)| p).unwrap_or_default();
+                                    let input = match get_input(&schema, &query, &path_params) {
+                                        Ok(input) => input,
+                                        Err(err) => {
+                                            return Problem::new(&INVALID_PARAMETER)
+                                                .with_detail(err.to_string())
+                                                .into_response();
+                                        }
+                                    };
                                     respond(
                                         dispatch
                                             .dispatch(
@@ -262,10 +293,10 @@ impl Module for DomainModule {
 }
 
 /// The command routes of one registry domain (`documents` for
-/// `/v1/documents/...`): `(method, relative path, command name)`. A module
-/// that owns the domain mounts these itself, next to its own routes.
+/// `/v1/documents/...`). A module that owns the domain mounts these itself,
+/// next to its own routes.
 #[must_use]
-pub fn domain_routes(registry: &Registry, domain: &str) -> Vec<(String, String, String)> {
+pub fn domain_routes(registry: &Registry, domain: &str) -> Vec<CommandRoute> {
     registry
         .iter()
         .filter_map(|descriptor| {
@@ -273,11 +304,12 @@ pub fn domain_routes(registry: &Registry, domain: &str) -> Vec<(String, String, 
             let first = after_v1.split('/').next().unwrap_or("");
             (first == domain).then(|| {
                 let relative = after_v1.strip_prefix(&format!("{domain}/")).unwrap_or("");
-                (
-                    descriptor.http_method.clone(),
-                    format!("/{relative}"),
-                    descriptor.name.clone(),
-                )
+                CommandRoute {
+                    method: descriptor.http_method.clone(),
+                    path: format!("/{relative}"),
+                    command: descriptor.name.clone(),
+                    input_schema: Arc::new(descriptor.input_schema.clone()),
+                }
             })
         })
         .collect()
@@ -308,7 +340,7 @@ pub fn domain_modules(
         "openapi",
     ];
 
-    let mut domains: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
+    let mut domains: HashMap<String, Vec<CommandRoute>> = HashMap::new();
 
     for descriptor in registry.iter() {
         let path = &descriptor.http_path;
@@ -321,11 +353,12 @@ pub fn domain_modules(
                 after_v1.strip_prefix(&format!("{domain}/")).unwrap_or("")
             );
 
-            domains.entry(domain).or_default().push((
-                descriptor.http_method.clone(),
-                relative_path,
-                descriptor.name.clone(),
-            ));
+            domains.entry(domain).or_default().push(CommandRoute {
+                method: descriptor.http_method.clone(),
+                path: relative_path,
+                command: descriptor.name.clone(),
+                input_schema: Arc::new(descriptor.input_schema.clone()),
+            });
         }
     }
 

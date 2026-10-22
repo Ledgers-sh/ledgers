@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod native;
 pub mod openapi;
 pub mod people;
+pub mod query_input;
 pub mod rate_limiting;
 pub mod routes;
 pub mod status;

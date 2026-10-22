@@ -58,7 +58,7 @@ pub struct DocumentsModule {
     company_id: String,
     signing_key: Vec<u8>,
     dispatch: Arc<dyn Dispatch>,
-    routes: Vec<(String, String, String)>,
+    routes: Vec<crate::routes::CommandRoute>,
 }
 
 impl DocumentsModule {
@@ -69,7 +69,7 @@ impl DocumentsModule {
         company_id: impl Into<String>,
         signing_key: Vec<u8>,
         dispatch: Arc<dyn Dispatch>,
-        routes: Vec<(String, String, String)>,
+        routes: Vec<crate::routes::CommandRoute>,
     ) -> Self {
         Self {
             company_id: company_id.into(),
