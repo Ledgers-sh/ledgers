@@ -18,14 +18,19 @@ use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
 use ledgers_documents::sign;
 use ledgers_documents::store::{self, Document};
-use ledgers_extract::llm::{AnthropicExtractor, Transport};
+use ledgers_extract::llm::Transport;
+use ledgers_extract::minimax::Pause;
 use ledgers_extract::rules::RuleExtractor;
 use ledgers_extract::schema::ExtractedInvoice;
-use ledgers_extract::{DocumentInput, Extraction, Extractor, Source};
+use ledgers_extract::{DocumentInput, ExtractError, Extraction, Extractor, Reader, Source};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// The warning a scanned PDF gets when no configured reader can take it.
+pub const NEEDS_PHOTO_WARNING: &str = "A scanned PDF needs a photo upload or the Anthropic provider. Type the fields in by hand, or upload a photo of the invoice.";
 
 /// `bills.extract`'s gate and reader: the caller needs the draft tier, and
 /// the document must be stored.
@@ -89,6 +94,32 @@ pub struct ExtractReport {
     pub mode: String,
     /// What the person should know about the reading.
     pub warnings: Vec<String>,
+    /// True when the file is a scanned PDF that no configured reader takes:
+    /// it needs a photo upload or the fields typed in by hand.
+    pub needs_photo: bool,
+}
+
+/// What the readers made of one document.
+enum ReadOutcome {
+    /// Fields were read, by a model or by the rules.
+    Read(Box<Extraction>),
+    /// A scanned PDF no reader takes.
+    NeedsPhoto,
+    /// Nothing could be read, and the reason is in the warnings.
+    Unread,
+}
+
+/// Waits on the harness clock. The retry of a model call uses it.
+pub struct ClockPause(pub Arc<dyn cratefield_core::Clock>);
+
+#[async_trait::async_trait]
+impl Pause for ClockPause {
+    async fn pause(&self, delay: Duration) {
+        // The timeout of a never-ready future is the wait itself.
+        let _ =
+            cratefield_core::timeout::<()>(self.0.as_ref(), std::future::pending::<()>(), delay)
+                .await;
+    }
 }
 
 /// The response of `bills.extract`.
@@ -128,10 +159,59 @@ impl Transport for PortTransport {
     }
 }
 
+/// The placeholder vendor of a draft nothing could read. A bill needs a
+/// vendor, so the draft carries this name until a person replaces it; the
+/// review screen says why.
+pub const UNREAD_VENDOR: &str = "Unread document";
+
+/// The fields of a draft nothing could read: no amounts, the placeholder vendor.
+fn unread_draft() -> ExtractedInvoice {
+    ExtractedInvoice {
+        vendor_name: Some(UNREAD_VENDOR.to_owned()),
+        ..ExtractedInvoice::default()
+    }
+}
+
+/// The draft fields a read outcome makes: the invoice, the source and reader
+/// it came from, the mode the report names, and whether a photo is needed.
+fn draft_of(
+    outcome: ReadOutcome,
+) -> (
+    ExtractedInvoice,
+    Option<Source>,
+    Option<Reader>,
+    &'static str,
+    bool,
+) {
+    match outcome {
+        ReadOutcome::Read(extraction) => {
+            let Extraction {
+                invoice,
+                source,
+                reader,
+            } = *extraction;
+            let mode = match source {
+                Source::Llm => "model",
+                Source::Rules => "text-layer",
+            };
+            (invoice, Some(source), Some(reader), mode, false)
+        }
+        ReadOutcome::NeedsPhoto => (
+            unread_draft(),
+            None,
+            Some(Reader::UnreadScan),
+            "manual",
+            true,
+        ),
+        ReadOutcome::Unread => (unread_draft(), None, None, "manual", false),
+    }
+}
+
 /// The bill input an extraction becomes, before the command checks it.
 fn bill_input_of(
     invoice: &ExtractedInvoice,
     source: &str,
+    reader: Option<&str>,
     document_id: &str,
     created_by: &str,
 ) -> Value {
@@ -151,6 +231,7 @@ fn bill_input_of(
         "gross_minor": invoice.gross_minor,
         "lines": lines,
         "source": source,
+        "reader": reader,
         "created_by": created_by,
     })
 }
@@ -231,23 +312,16 @@ impl ServerDispatch {
             mime: &document.mime,
             text_layer: text.as_deref(),
         };
-        let extraction = self.read_document(deps, &doc_input, &mut warnings).await;
-        let (invoice, source, mode) = match extraction {
-            Some(Extraction { invoice, source }) => {
-                let mode = match source {
-                    Source::Llm => "model",
-                    Source::Rules => "text-layer",
-                };
-                (invoice, source, mode)
-            }
-            None => (ExtractedInvoice::default(), Source::Rules, "manual"),
-        };
-        let source_name = if mode == "manual" {
-            "manual"
-        } else {
-            source.as_str()
-        };
-        let mut bill_input = bill_input_of(&invoice, source_name, &document.id, &caller);
+        let outcome = self.read_document(deps, &doc_input, &mut warnings).await;
+        let (invoice, source, reader, mode, needs_photo) = draft_of(outcome);
+        let source_name = source.map_or("manual", Source::as_str);
+        let mut bill_input = bill_input_of(
+            &invoice,
+            source_name,
+            reader.map(Reader::as_str),
+            &document.id,
+            &caller,
+        );
         bill_input["id"] = json!(deps.id_gen.ulid());
         let created = self
             .execute(deps, &BillsCreate, presented, request_id, bill_input)
@@ -267,6 +341,7 @@ impl ServerDispatch {
             extraction: ExtractReport {
                 mode: mode.to_owned(),
                 warnings,
+                needs_photo,
             },
         };
         serde_json::to_value(response).map_err(|err| {
@@ -276,33 +351,45 @@ impl ServerDispatch {
         })
     }
 
-    /// Runs the configured extractor, falling back to the rules over the text
-    /// layer when the model fails. Returns `None` when nothing can be read.
+    /// Runs the configured model reader, then the rules over the text layer
+    /// when the model fails. A scanned PDF that no reader takes is reported as
+    /// such, with the photo flag, and never as a silent empty draft.
     async fn read_document(
         &self,
         deps: &Deps,
         doc: &DocumentInput<'_>,
         warnings: &mut Vec<String>,
-    ) -> Option<Extraction> {
-        if let (Some(key), Some(http)) = (&self.extract_key, &deps.http) {
-            let model = AnthropicExtractor::new(key.clone(), Arc::new(PortTransport(http.clone())));
-            match model.extract(doc).await {
-                Ok(extraction) => return Some(extraction),
+    ) -> ReadOutcome {
+        if let (Some(settings), Some(http)) = (&self.model, &deps.http) {
+            let reader = settings.extractor(
+                Arc::new(PortTransport(http.clone())),
+                Arc::new(ClockPause(deps.clock.clone())),
+            );
+            match reader.extract(doc).await {
+                Ok(extraction) => return ReadOutcome::Read(Box::new(extraction)),
+                Err(ExtractError::NeedsPhoto) => {
+                    warnings.push(NEEDS_PHOTO_WARNING.to_owned());
+                    return ReadOutcome::NeedsPhoto;
+                }
                 Err(err) => warnings.push(format!(
                     "The model could not read this document ({err}). The text layer was used instead."
                 )),
             }
-        } else if self.extract_key.is_none() {
+        } else if self.model.is_none() {
             warnings.push(
                 "No model key is configured, so only the PDF text layer is read. Scans and images need the fields typed in by hand."
                     .to_owned(),
             );
         }
         match RuleExtractor.extract(doc).await {
-            Ok(extraction) => Some(extraction),
+            Ok(extraction) => ReadOutcome::Read(Box::new(extraction)),
+            Err(_) if doc.mime == "application/pdf" && doc.text_layer.is_none() => {
+                warnings.push(NEEDS_PHOTO_WARNING.to_owned());
+                ReadOutcome::NeedsPhoto
+            }
             Err(err) => {
                 warnings.push(err.to_string());
-                None
+                ReadOutcome::Unread
             }
         }
     }

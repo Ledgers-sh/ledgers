@@ -42,6 +42,8 @@ pub struct BillRow {
     pub iban_changed: bool,
     /// The extractor (or manual).
     pub source: String,
+    /// The reader that produced the fields, when one did.
+    pub reader: Option<String>,
     /// The posted entry, once posted.
     pub posted_entry_id: Option<String>,
     /// When a person discarded the draft.
@@ -57,7 +59,7 @@ pub struct BillRow {
 /// The columns a bill read selects, with the vendor joined.
 pub const BILL_SELECT: &str = "SELECT b.id, b.document_id, b.vendor_id, b.invoice_number, b.invoice_date, \
      b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.lines_json, b.confidence_json, b.checks_json, \
-     b.instruction_flags, b.iban_changed, b.source, b.posted_entry_id, b.discarded_at, b.created_by, \
+     b.instruction_flags, b.iban_changed, b.source, b.reader, b.posted_entry_id, b.discarded_at, b.created_by, \
      b.created_at, b.updated_at, v.name AS vendor_name, v.vat_id AS vendor_vat_id, v.iban AS vendor_iban, \
      v.needs_review AS vendor_needs_review FROM bill b JOIN vendor v ON v.id = b.vendor_id";
 
@@ -97,6 +99,7 @@ fn from_row(row: &Row) -> Result<BillRow, DbError> {
         instruction_flags: json_column(row, "instruction_flags")?,
         iban_changed: row.get::<i64>("iban_changed").unwrap_or(0) == 1,
         source: text(row, "source")?,
+        reader: row.get::<Option<String>>("reader").flatten(),
         posted_entry_id: row.get::<Option<String>>("posted_entry_id").flatten(),
         discarded_at: row.get::<Option<String>>("discarded_at").flatten(),
         created_by: text(row, "created_by")?,

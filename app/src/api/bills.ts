@@ -71,6 +71,8 @@ export interface Bill {
   /** Confidence per extracted field, 0 to 100. Empty for manual bills. */
   confidence: Record<string, number>;
   source: string;
+  /** Which reader produced the fields: rules, anthropic, minimax, unread-scan; null when typed by hand. */
+  reader: string | null;
   posted_entry_id: string | null;
   journal_preview: PreviewLine[];
   created_by: string;
@@ -81,7 +83,7 @@ export interface Bill {
 export interface BillExtraction {
   bill: Bill;
   document: Document;
-  extraction: { mode: 'model' | 'text-layer' | 'manual'; warnings: string[] };
+  extraction: { mode: 'model' | 'text-layer' | 'manual'; warnings: string[]; needs_photo: boolean };
 }
 
 /** The fields a person can correct on a bill. Amounts are minor units. */

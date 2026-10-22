@@ -5,7 +5,7 @@
 
 use crate::money::{exponent_of, parse_minor};
 use crate::schema::{ExtractedInvoice, format_iso_date};
-use crate::{DocumentInput, ExtractError, Extraction, Extractor, Source};
+use crate::{DocumentInput, ExtractError, Extraction, Extractor, Reader, Source};
 use time::{Date, Month};
 
 /// Confidence given to a field found by its label.
@@ -32,6 +32,7 @@ impl Extractor for RuleExtractor {
         Ok(Extraction {
             invoice: parse_text(text),
             source: Source::Rules,
+            reader: Reader::Rules,
         })
     }
 }

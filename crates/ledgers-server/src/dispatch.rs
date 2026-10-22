@@ -36,6 +36,7 @@ use ledgers_commands::{
     PendingApproval, Plan, Registry,
 };
 use ledgers_documents::commands::{DocumentsGet, DocumentsList, DocumentsRegister};
+use ledgers_extract::provider::ModelSettings;
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
 use ledgers_ledger::report;
@@ -144,8 +145,8 @@ pub struct ServerDispatch {
     /// The key that signs document download links; empty until configured,
     /// and then download links are refused.
     document_key: Vec<u8>,
-    /// The Messages API key of the model extractor, when one is configured.
-    extract_key: Option<String>,
+    /// The model reader the configuration selected, when one is configured.
+    model: Option<ModelSettings>,
 }
 
 impl ServerDispatch {
@@ -158,7 +159,7 @@ impl ServerDispatch {
             app_origins: Vec::new(),
             app_url: String::new(),
             document_key: Vec::new(),
-            extract_key: None,
+            model: None,
         }
     }
 
@@ -169,10 +170,10 @@ impl ServerDispatch {
         self
     }
 
-    /// The Messages API key of the model extractor (never logged).
+    /// The model reader for documents (its key is never logged or shown).
     #[must_use]
-    pub fn with_extract_key(mut self, key: Option<String>) -> Self {
-        self.extract_key = key.filter(|k| !k.trim().is_empty());
+    pub fn with_model_reader(mut self, settings: Option<ModelSettings>) -> Self {
+        self.model = settings;
         self
     }
 

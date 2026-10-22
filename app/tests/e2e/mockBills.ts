@@ -51,6 +51,7 @@ interface MockBill {
   lines: Array<{ description: string; net_minor: number | null; vat_rate_bp: number | null; vat_minor: number | null; gross_minor: number | null; expense_account: string | null; suggested_from: string | null }>;
   confidence: Record<string, number>;
   source: string;
+  reader?: string | null;
   posted_entry_id: string | null;
   discarded: boolean;
   created_at: string;
@@ -83,7 +84,17 @@ export function resetBills(): void {
 const FILES: Record<string, { mime: string; bytes: Buffer }> = {
   'invoice.pdf': { mime: 'application/pdf', bytes: readFileSync(join(FIXTURES, 'invoice.pdf')) },
   'scan.png': { mime: 'image/png', bytes: readFileSync(join(FIXTURES, 'scan.png')) },
+  'blank-scan.pdf': { mime: 'application/pdf', bytes: readFileSync(join(FIXTURES, 'blank-scan.pdf')) },
 };
+
+/** A scanned PDF with no text layer: no reader that takes PDFs reads it, so the draft needs a photo. */
+const UNREAD_SCAN = 'blank-scan.pdf';
+
+/** The reader a canned reading names, as the server stores it. */
+function readerOf(name: string, source: string): string | null {
+  if (name === UNREAD_SCAN) return 'unread-scan';
+  return source === 'rules' ? 'rules' : null;
+}
 
 function sha(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -143,6 +154,7 @@ function billView(bill: MockBill) {
     flags,
     confidence: bill.confidence,
     source: bill.source,
+    reader: bill.reader ?? null,
     posted_entry_id: bill.posted_entry_id,
     journal_preview: bill.posted_entry_id === null ? journal : [],
     created_by: 'person:person-owner',
@@ -157,6 +169,21 @@ function findBill(id: string): MockBill | undefined {
 
 /** The canned reading of a fixture: the header fields and the totals the text layer carries. */
 function readingOf(name: string): Pick<MockBill, 'vendor' | 'invoice_number' | 'invoice_date' | 'due_date' | 'currency' | 'net_minor' | 'vat_minor' | 'gross_minor' | 'lines' | 'confidence' | 'source'> {
+  if (name === UNREAD_SCAN) {
+    return {
+      vendor: { id: '', name: 'Unread document', vat_id: null, iban: null, needs_review: true },
+      invoice_number: null,
+      invoice_date: null,
+      due_date: null,
+      currency: 'EUR',
+      net_minor: null,
+      vat_minor: null,
+      gross_minor: null,
+      lines: [],
+      confidence: {},
+      source: 'manual',
+    };
+  }
   if (name === 'invoice.pdf') {
     return {
       vendor: { id: '', name: 'Halden Supplies GmbH', vat_id: 'DE123456789', iban: 'DE89370400440532013000', needs_review: true },
@@ -256,6 +283,7 @@ export function handleBills(method: string, url: URL, bodyText: string, raw: Buf
       id: `bill_${billsMock.bills.length + 1}`,
       document_id: doc.id,
       ...reading,
+      reader: readerOf(doc.original_name, reading.source),
       vendor: { ...reading.vendor, id: `ven_${billsMock.bills.length + 1}` },
       posted_entry_id: null,
       discarded: false,
@@ -270,6 +298,7 @@ export function handleBills(method: string, url: URL, bodyText: string, raw: Buf
         document: documentView(doc),
         extraction: {
           mode,
+          needs_photo: doc.original_name === UNREAD_SCAN,
           warnings:
             mode === 'manual'
               ? ['No model key is configured, so only the PDF text layer is read. Scans and images need the fields typed in by hand.']

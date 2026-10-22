@@ -240,7 +240,15 @@ export function BillReview({ billId }: { billId: string }) {
             <span class={`badge bill-status bill-status-${current.status}`}>{t(statusKey(current.status))}</span>
           </div>
           <div class="panel-body entry-form">
+            {current.reader === 'unread-scan' && (
+              <div class="banner human" role="status" data-testid="needs-photo">
+                {t('bills.needs_photo')}
+              </div>
+            )}
             {current.status === 'needs-review' && <div class="banner human">{t('bills.needs_review_note')}</div>}
+            <p class="muted reader-note" data-testid="reader">
+              {t('bills.read_by', { reader: t(readerKey(current.reader)) })}
+            </p>
             {posted && (
               <div class="banner" role="status">
                 {t('bills.posted_as', { number: posted.number })}{' '}
@@ -446,6 +454,22 @@ const CHECK_IDS = [
   'currency', 'invoice-date', 'due-date', 'totals-present', 'gross-equals-net-plus-vat', 'lines-present',
   'lines-net-sum', 'lines-vat-sum', 'vat-rate', 'line-gross', 'amounts-in-document',
 ];
+
+/** The message key that names the reader of a bill, for the review screen. */
+export function readerKey(reader: string | null): MessageKey {
+  switch (reader) {
+    case 'rules':
+      return 'bills.reader_rules';
+    case 'minimax':
+      return 'bills.reader_minimax';
+    case 'anthropic':
+      return 'bills.reader_anthropic';
+    case 'unread-scan':
+      return 'bills.reader_none';
+    default:
+      return 'bills.reader_manual';
+  }
+}
 
 function flagText(flag: string, tr: (key: MessageKey) => string): string {
   if (flag.startsWith('instruction-text')) return tr('bills.flag_instruction');
