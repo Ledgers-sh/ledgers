@@ -42,6 +42,7 @@ pub mod module;
 pub mod posting;
 pub mod rate;
 pub mod settings;
+pub mod vat_return;
 
 pub use calc::{
     Basis, CalculateParams, RoundingScope, TaxCalculation, TaxLine, TaxLineInput, calculate,
@@ -51,6 +52,10 @@ pub use error::TaxError;
 pub use module::TaxModule;
 pub use rate::{DatedRate, Jurisdiction, RateCategory, RateTable};
 pub use settings::{SettingsError, set_tax_settings, tax_settings};
+pub use vat_return::{
+    EcSalesListRow, GenericReturn, OssRow, ReturnClass, UstvaBox, UstvaReturn, VatRecord,
+    VatReturnError, prepare_ec_sales_list, prepare_generic_return, prepare_oss, prepare_ustva,
+};
 
 /// The tax settings migration, in apply order: the portable set (SQLite dialect,
 /// lint-checked, runs on D1, rusqlite and — for the tables — Postgres).
