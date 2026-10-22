@@ -48,6 +48,49 @@ pub async fn reverse_entry(
     sleep_fn: impl FnMut(Duration),
     audit: &ledgers_audit::AuditContext,
 ) -> Result<PostedEntry, JournalError> {
+    let entry = reversal_entry(db, reverse_ctx).await?;
+    post_entry(db, &entry, post_ctx, policy, sleep_fn, audit).await
+}
+
+/// Plans the reversal of an entry for the command executor: the same
+/// validated mirror entry as [`reverse_entry`], converted to statements
+/// (no execution). The executor appends the audit event and runs the
+/// batch. The reversal's entry id is `request_id`, so a replay of the
+/// same request is idempotent, as for [`crate::posting::plan_post_entry`].
+///
+/// # Errors
+/// As [`reversal_entry`], plus the errors of [`crate::posting::plan_post_entry`].
+pub async fn plan_reverse_entry(
+    token: &ledgers_commands::ExecToken,
+    db: &dyn Database,
+    reverse_ctx: &ReverseContext,
+    now: &str,
+    request_id: &str,
+) -> Result<(Vec<cratefield_core::Statement>, PostedEntry), JournalError> {
+    let entry = reversal_entry(db, reverse_ctx).await?;
+    let fiscal_year = i64::from(entry.posting_date.year());
+    crate::posting::plan_post_entry(
+        token,
+        db,
+        &reverse_ctx.company_id,
+        &entry,
+        fiscal_year,
+        now,
+        request_id,
+    )
+    .await
+}
+
+/// Builds the validated, unposted mirror entry of `reverse_ctx.entry_id`:
+/// the original's lines with sides flipped, dated by the period rules.
+///
+/// # Errors
+/// [`JournalError::ForeignReversal`] when the entry is not found for this
+/// company; [`JournalError::PeriodNotOpen`] when no open period can take it.
+pub async fn reversal_entry(
+    db: &dyn Database,
+    reverse_ctx: &ReverseContext,
+) -> Result<Entry, JournalError> {
     let (original, lines) =
         read_entry_with_lines(db, &reverse_ctx.company_id, &reverse_ctx.entry_id).await?;
 
@@ -81,8 +124,7 @@ pub async fn reverse_entry(
         lines: mirror_lines,
     };
 
-    let entry = Entry::from_draft(draft, &reverse_ctx.company_id)?;
-    post_entry(db, &entry, post_ctx, policy, sleep_fn, audit).await
+    Entry::from_draft(draft, &reverse_ctx.company_id)
 }
 
 async fn determine_posting_date(
@@ -179,7 +221,7 @@ async fn determine_posting_date(
     })
 }
 
-async fn read_entry_with_lines(
+pub(crate) async fn read_entry_with_lines(
     db: &dyn Database,
     company_id: &str,
     entry_id: &str,

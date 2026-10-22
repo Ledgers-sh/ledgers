@@ -182,17 +182,17 @@ pub async fn record(
     policy: RetryPolicy,
     mut sleep: impl FnMut(std::time::Duration),
 ) -> Result<Appended, AuditError> {
-    // The last attempt's plan is what committed, shared via `Rc` with
+    // The last attempt's plan is what committed, shared via `Arc` with
     // the plan closure so the caller learns the seq and hash actually
     // written rather than ones an earlier attempt planned.
-    let written = std::rc::Rc::new(std::cell::RefCell::new(None::<Appended>));
+    let written = std::sync::Arc::new(std::sync::Mutex::new(None::<Appended>));
 
     retry::run_batch_with_retry(
         db,
         policy,
         || {
             let (context, record) = (context.clone(), record.clone());
-            let written = std::rc::Rc::clone(&written);
+            let written = std::sync::Arc::clone(&written);
             async move {
                 let head = chain::read_head(db, company_id).await?;
                 // A serialisation failure cannot become a `DbError`, but
@@ -201,7 +201,9 @@ pub async fn record(
                 // re-serialising the same event fails the same way.
                 let planned = append_statements(company_id, &head, &context, &record, at, config)
                     .map_err(|err| cratefield_core::DbError::Execute(err.to_string()))?;
-                *written.borrow_mut() = Some(planned.clone());
+                *written
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(planned.clone());
                 Ok(planned.statements)
             }
         },
@@ -212,9 +214,13 @@ pub async fn record(
 
     // The batch succeeded, so the closure set `written` on the
     // attempt that committed.
-    written.borrow().clone().ok_or(AuditError::Canonical(
-        "the retry loop committed no batch".to_owned(),
-    ))
+    written
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .ok_or(AuditError::Canonical(
+            "the retry loop committed no batch".to_owned(),
+        ))
 }
 
 #[cfg(test)]

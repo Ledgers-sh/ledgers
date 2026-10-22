@@ -1,0 +1,31 @@
+/// The registry of every command the server serves: the descriptors of
+/// `ledgers_commands::default_commands()` with the input and output schemas
+/// of the typed commands filled in.
+///
+/// # Panics
+/// Never in practice: the command names are fixed and unique.
+#[must_use]
+pub fn registry() -> Registry {
+    let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
+        ("accounts.list", (schema_of::<AccountsListInput>(), schema_of::<AccountsListOutput>())),
+        ("entries.get", (schema_of::<EntriesGetInput>(), schema_of::<EntriesGetOutput>())),
+        ("entries.list", (schema_of::<EntriesListInput>(), schema_of::<EntriesListOutput>())),
+        ("entries.post", (schema_of::<EntriesPostInput>(), schema_of::<PostEntryOutput>())),
+        ("entries.reverse", (schema_of::<EntriesReverseInput>(), schema_of::<EntriesReverseOutput>())),
+        ("reports.account_balance_by_dimension", (schema_of::<DimensionBalanceInput>(), schema_of::<DimensionBalanceOutput>())),
+        ("reports.balance_sheet", (schema_of::<BalanceSheetInput>(), schema_of::<BalanceSheetOutput>())),
+        ("reports.profit_and_loss", (schema_of::<PeriodInput>(), schema_of::<ProfitAndLossOutput>())),
+        ("reports.trial_balance", (schema_of::<PeriodInput>(), schema_of::<TrialBalanceOutput>())),
+    ]);
+    let mut registry = Registry::new();
+    for mut descriptor in ledgers_commands::default_commands() {
+        if let Some((input, output)) = schemas.get(descriptor.name.as_str()) {
+            descriptor.input_schema = input.clone();
+            descriptor.output_schema = output.clone();
+        }
+        registry
+            .register(descriptor)
+            .expect("command names are unique");
+    }
+    registry
+}

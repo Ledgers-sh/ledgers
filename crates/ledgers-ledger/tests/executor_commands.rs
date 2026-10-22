@@ -49,7 +49,7 @@ impl TestAuthenticator {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Authenticator for TestAuthenticator {
     async fn authenticate(&self, _credential: &Credential) -> Result<Principal, CommandError> {
         if self.owner {

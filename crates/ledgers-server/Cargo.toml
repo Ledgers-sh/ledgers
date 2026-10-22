@@ -32,6 +32,12 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["json"] }
 bytes = { workspace = true }
+schemars = { workspace = true }
+sea-query = { workspace = true }
+time = { workspace = true }
+ledgers-audit = { workspace = true }
+# Entropy for API-key ids and secrets (the harness `RandomBytes` port is ours to supply).
+getrandom = { version = "0.4.3" }
 
 # Native runtime: tokio, SQLite, and tracing
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

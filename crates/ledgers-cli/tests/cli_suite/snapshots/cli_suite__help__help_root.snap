@@ -10,6 +10,7 @@ Commands:
   serve        Start the native Ledgers server
   completions  Generate shell completions
   mcp          Serve MCP over stdio, relaying to the server with your agent key
+  accounts     Commands under `ledgers accounts`
   entries      Commands under `ledgers entries`
   reports      Commands under `ledgers reports`
   help         Print this message or the help of the given subcommand(s)

@@ -311,7 +311,7 @@ pub struct CreateAccountOutput {
 /// The `account.create` command.
 pub struct CreateAccount;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for CreateAccount {
     const NAME: &'static str = "account.create";
     const TIER: Tier = Tier::Draft;
@@ -412,7 +412,7 @@ pub struct PostEntryOutput {
 /// The `journal.post_entry` command.
 pub struct PostEntry;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Command for PostEntry {
     const NAME: &'static str = "journal.post_entry";
     const TIER: Tier = Tier::PostWithinLimits;
