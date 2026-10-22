@@ -865,7 +865,8 @@ mod tests {
         // Test escaping: markdown, bidi overrides, truncation
         assert!(escape_document_text("Acme**[evil](url)").contains("\\*\\*"));
         assert!(escape_document_text("Vendor\u{202A}Name").len() < "Vendor\u{202A}Name".len());
-        assert!(escape_document_text(&"a".repeat(150)).len() <= 120);
+        // 120 characters plus the one-character truncation marker.
+        assert_eq!(escape_document_text(&"a".repeat(150)).chars().count(), 121);
 
         // Test card labels and bank warning
         let request = ApprovalRequest {

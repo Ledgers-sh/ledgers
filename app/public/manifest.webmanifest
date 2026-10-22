@@ -1,0 +1,16 @@
+{
+  "name": "ledgers.sh",
+  "short_name": "ledgers",
+  "description": "Agents do the books. People keep control. Open-source accounting built for AI agents.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0F1217",
+  "theme_color": "#0F1217",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

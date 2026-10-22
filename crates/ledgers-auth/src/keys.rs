@@ -139,7 +139,7 @@ impl std::fmt::Debug for AgentKeyIssue {
 ///
 /// Implementers typically delegate to [`ledgers_policy`] or return a
 /// test double.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait AgentKeyDirectory: Send + Sync {
     /// Looks up tier and limits for a key, along with expiry/revocation status.
     async fn lookup(&self, key_id: &str) -> Result<KeyDirectoryEntry, KeyError>;
@@ -300,7 +300,7 @@ impl KeyAuthenticator {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Authenticator for KeyAuthenticator {
     async fn authenticate(&self, credential: &Credential) -> Result<Principal, CommandError> {
         // Verify the key through the harness ApiKeys.verify(). No caching:

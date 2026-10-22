@@ -1,6 +1,6 @@
 ---
-source: crates/ledgers-cli/tests/help_snapshots.rs
-expression: help
+source: crates/ledgers-cli/tests/cli_suite/help.rs
+expression: help_for(path)
 ---
 Start the native Ledgers server
 

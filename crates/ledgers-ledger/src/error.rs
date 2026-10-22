@@ -236,6 +236,13 @@ pub enum AccountsError {
     /// A bundled or supplied TOML file could not be parsed at all.
     #[error(transparent)]
     Template(#[from] toml::de::Error),
+
+    /// A dimension rule string is not one of the two valid values.
+    #[error("unknown dimension rule: {value:?} (expected required|forbidden)")]
+    UnknownDimensionRule {
+        /// The offending value.
+        value: String,
+    },
 }
 
 impl From<ledgers_db::GuardError> for AccountsError {

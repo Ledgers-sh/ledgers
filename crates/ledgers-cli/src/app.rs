@@ -1,15 +1,144 @@
-//! CLI application structure: registry-driven subcommands.
+//! The clap command tree, generated from the command registry.
 //!
-//! Every command in the registry becomes a clap subcommand with:
-//! - Positional `<id>` argument if the command has a target parameter ({id})
-//! - `--input <JSON|@file|->` for the full input object (or individual prop flags)
-//! - `--dry-run` flag if the command supports it
-//! - Global flags: `--json`, `--profile`, `--url`, `--key`
+//! Each registry command becomes a subcommand path: `bills.match` is
+//! `ledgers bills match`, and `reports.trial_balance` is `ledgers reports
+//! trial-balance`. A leaf has:
+//!
+//! - one positional argument per `{placeholder}` in its HTTP path,
+//! - `--input <JSON|@FILE|->`, the full input object,
+//! - one `--<field>` flag per input-schema property (not for reserved names),
+//! - `--dry-run`, only if the command supports it.
+//!
+//! Its help text comes from the input schema's `description` fields and the
+//! command's name, HTTP route, tier and idempotence.
 
+use crate::error::{CliError, Result};
+use crate::request::{Invocation, path_param_names, property_type, schema_properties};
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use ledgers_commands::Registry;
+use ledgers_commands::{CommandDescriptor, NOT_TAX_ADVICE, Registry};
+use serde_json::{Map, Value};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
-/// Builds the root command with registry-driven subcommands.
+/// Top-level commands that are not generated from the registry.
+pub const BUILTIN_COMMANDS: [&str; 3] = ["serve", "completions", "mcp"];
+
+/// Long flag names a registry field may not use (they belong to the CLI itself).
+const RESERVED_LONG: [&str; 8] = [
+    "input",
+    "dry-run",
+    "json",
+    "profile",
+    "url",
+    "read-only",
+    "help",
+    "version",
+];
+
+/// Global flags, parsed from the root matches.
+#[derive(Clone, Debug, Default)]
+pub struct GlobalFlags {
+    /// `--json`: machine output.
+    pub json: bool,
+    /// `--profile NAME`.
+    pub profile: Option<String>,
+    /// `--url URL`.
+    pub url: Option<String>,
+}
+
+impl GlobalFlags {
+    /// Extracts the global flags from root matches.
+    #[must_use]
+    pub fn from_matches(matches: &ArgMatches) -> Self {
+        GlobalFlags {
+            json: matches.get_flag("json"),
+            profile: matches.get_one::<String>("profile").cloned(),
+            url: matches.get_one::<String>("url").cloned(),
+        }
+    }
+}
+
+/// Builds the CLI registry from the commands the workspace defines.
+///
+/// # Errors
+/// Returns an error if a command is registered twice, if two commands map to
+/// the same CLI path, if one command's path is a prefix of another's, or if a
+/// top-level group would shadow a built-in command.
+pub fn cli_registry() -> std::result::Result<Registry, String> {
+    build_cli_registry(ledgers_commands::registry::default_commands())
+}
+
+/// Builds a CLI registry from the given command descriptors, with the same
+/// checks as [`cli_registry`].
+///
+/// # Errors
+/// See [`cli_registry`].
+pub fn build_cli_registry(
+    descriptors: Vec<CommandDescriptor>,
+) -> std::result::Result<Registry, String> {
+    let mut registry = Registry::new();
+    for descriptor in descriptors {
+        registry.register(descriptor)?;
+    }
+
+    let mut leaves = BTreeSet::new();
+    for descriptor in registry.iter() {
+        let path = cli_path(&descriptor.name);
+        if !leaves.insert(path.join(" ")) {
+            return Err(format!(
+                "two commands map to the CLI path `{}`",
+                path.join(" ")
+            ));
+        }
+        if BUILTIN_COMMANDS.contains(&path[0].as_str()) {
+            return Err(format!(
+                "command {} shadows a built-in command",
+                descriptor.name
+            ));
+        }
+    }
+    for leaf in &leaves {
+        let words: Vec<&str> = leaf.split(' ').collect();
+        for prefix_len in 1..words.len() {
+            let prefix = words[..prefix_len].join(" ");
+            if leaves.contains(&prefix) {
+                return Err(format!("`{prefix}` is both a command and a group"));
+            }
+        }
+    }
+    Ok(registry)
+}
+
+/// The CLI subcommand path for a registry command name: `reports.trial_balance`
+/// becomes `["reports", "trial-balance"]`.
+#[must_use]
+pub fn cli_path(name: &str) -> Vec<String> {
+    name.split('.').map(|part| part.replace('_', "-")).collect()
+}
+
+/// Finds the registry command for a parsed subcommand path.
+#[must_use]
+pub fn find_descriptor<'a>(
+    registry: &'a Registry,
+    path: &[String],
+) -> Option<&'a CommandDescriptor> {
+    registry.iter().find(|d| cli_path(&d.name) == path)
+}
+
+/// The subcommand names from the root down to the deepest match, and that match.
+#[must_use]
+pub fn leaf_path(matches: &ArgMatches) -> (Vec<String>, &ArgMatches) {
+    let mut path = Vec::new();
+    let mut current = matches;
+    while let Some((name, sub)) = current.subcommand() {
+        path.push(name.to_string());
+        current = sub;
+    }
+    (path, current)
+}
+
+/// Builds the root command with built-ins and the registry's command tree.
+#[must_use]
 pub fn build_root(registry: &Registry) -> Command {
     let mut cmd = Command::new("ledgers")
         .version(env!("CARGO_PKG_VERSION"))
@@ -18,9 +147,9 @@ pub fn build_root(registry: &Registry) -> Command {
             "Ledgers is a double-entry accounting system designed for AI agents.\n\
              Every operation is executed with policy checks and audit logging.",
         )
+        .after_help(NOT_TAX_ADVICE)
         .subcommand_required(true)
         .arg_required_else_help(true)
-        // Global flags
         .arg(
             Arg::new("json")
                 .long("json")
@@ -39,33 +168,162 @@ pub fn build_root(registry: &Registry) -> Command {
             Arg::new("url")
                 .long("url")
                 .value_name("URL")
-                .help("Server URL (overrides profile)")
-                .env("LEDGERS_URL")
+                .help("Server URL (overrides LEDGERS_URL and the profile)")
                 .global(true),
         )
-        .arg(
-            Arg::new("key")
-                .long("key")
-                .value_name("KEY")
-                .help("API key (overrides profile)")
-                .env("LEDGERS_KEY")
-                .global(true),
-        )
-        // Subcommands
         .subcommand(build_serve())
         .subcommand(build_completions())
         .subcommand(build_mcp());
 
-    // Add registry-driven subcommands (clone to avoid lifetime issues)
-    let descriptors: Vec<_> = registry.iter().cloned().collect();
-    for descriptor in descriptors {
-        cmd = cmd.subcommand(build_registry_command(&descriptor));
+    let tree = group_tree(registry);
+    for (name, node) in &tree.children {
+        cmd = cmd.subcommand(build_node(name, node));
     }
-
     cmd
 }
 
-/// Builds the `ledgers serve` subcommand.
+/// A node in the command tree: a group of subcommands or one leaf command.
+#[derive(Default)]
+struct Node<'a> {
+    children: BTreeMap<String, Node<'a>>,
+    leaf: Option<&'a CommandDescriptor>,
+}
+
+fn group_tree(registry: &Registry) -> Node<'_> {
+    let mut root = Node::default();
+    for descriptor in registry.iter() {
+        let mut node = &mut root;
+        for part in cli_path(&descriptor.name) {
+            node = node.children.entry(part).or_default();
+        }
+        node.leaf = Some(descriptor);
+    }
+    root
+}
+
+fn build_node(name: &str, node: &Node<'_>) -> Command {
+    if let Some(descriptor) = node.leaf {
+        return build_leaf(name, descriptor);
+    }
+    let mut cmd = Command::new(intern(name))
+        .about(format!("Commands under `ledgers {name}`"))
+        .subcommand_required(true)
+        .arg_required_else_help(true);
+    for (child, child_node) in &node.children {
+        cmd = cmd.subcommand(build_node(child, child_node));
+    }
+    cmd
+}
+
+/// Returns a `'static` copy of `text`, reusing an earlier copy when there is one.
+///
+/// clap 4 takes `'static` names for commands, arguments and ids. The registry's
+/// names are only known at runtime, so each distinct name is leaked once; the set
+/// of names is fixed by the registry, so the total is bounded.
+fn intern(text: &str) -> &'static str {
+    static INTERNED: OnceLock<Mutex<BTreeSet<&'static str>>> = OnceLock::new();
+    let set = INTERNED.get_or_init(|| Mutex::new(BTreeSet::new()));
+    let mut set = set.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(existing) = set.get(text) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(text.to_string().into_boxed_str());
+    set.insert(leaked);
+    leaked
+}
+
+/// The clap argument id for a positional path placeholder.
+fn path_arg_id(placeholder: &str) -> &'static str {
+    intern(&format!("path:{placeholder}"))
+}
+
+/// The clap argument id for an input-schema field flag.
+fn field_arg_id(field: &str) -> &'static str {
+    intern(&format!("field:{field}"))
+}
+
+/// The long flag for an input field: `bill_id` becomes `--bill-id`.
+fn kebab(field: &str) -> String {
+    field.replace('_', "-")
+}
+
+fn build_leaf(name: &str, descriptor: &CommandDescriptor) -> Command {
+    let description = descriptor
+        .input_schema
+        .get("description")
+        .and_then(Value::as_str)
+        .map_or_else(|| descriptor.name.clone(), str::to_string);
+    let long_help = format!(
+        "{description}\n\nCommand: {}\nHTTP: {} {}\nTier: {}\nIdempotent: {}",
+        descriptor.name,
+        descriptor.http_method,
+        descriptor.http_path,
+        descriptor.tier,
+        descriptor.idempotent
+    );
+    let mut cmd = Command::new(intern(name))
+        .about(description)
+        .long_about(long_help);
+
+    let placeholders = path_param_names(&descriptor.http_path);
+    for placeholder in &placeholders {
+        cmd = cmd.arg(
+            Arg::new(path_arg_id(placeholder))
+                .value_name(intern(&kebab(&placeholder.to_uppercase())))
+                .help(format!("The {placeholder} path argument"))
+                .required(true),
+        );
+    }
+
+    cmd = cmd.arg(
+        Arg::new("input")
+            .long("input")
+            .value_name("JSON|@FILE|-")
+            .help("Command input as a JSON object, @FILE to read one, or - for stdin"),
+    );
+
+    let mut seen = HashSet::new();
+    for (field, schema) in schema_properties(&descriptor.input_schema) {
+        let long = kebab(&field);
+        if RESERVED_LONG.contains(&long.as_str()) || !seen.insert(long.clone()) {
+            continue;
+        }
+        cmd = cmd.arg(field_arg(&field, &long, &schema));
+    }
+
+    if descriptor.supports_dry_run {
+        cmd = cmd.arg(
+            Arg::new("dry_run")
+                .long("dry-run")
+                .action(ArgAction::SetTrue)
+                .help("Preview the command and its policy decision; write nothing"),
+        );
+    }
+    cmd
+}
+
+fn field_arg(field: &str, long: &str, schema: &Value) -> Arg {
+    let arg = Arg::new(field_arg_id(field)).long(intern(long));
+    let arg = if property_type(schema) == "boolean" {
+        arg.action(ArgAction::SetTrue)
+    } else {
+        arg.value_name(value_name_for(property_type(schema)))
+    };
+    match schema.get("description").and_then(Value::as_str) {
+        Some(help) => arg.help(help.to_string()),
+        None => arg,
+    }
+}
+
+fn value_name_for(ty: &str) -> &'static str {
+    match ty {
+        "string" => "TEXT",
+        "integer" | "number" => "NUMBER",
+        "array" | "object" => "JSON",
+        _ => "VALUE",
+    }
+}
+
 fn build_serve() -> Command {
     Command::new("serve")
         .about("Start the native Ledgers server")
@@ -78,7 +336,6 @@ fn build_serve() -> Command {
         )
 }
 
-/// Builds the `ledgers completions` subcommand.
 fn build_completions() -> Command {
     Command::new("completions")
         .about("Generate shell completions")
@@ -90,13 +347,12 @@ fn build_completions() -> Command {
         )
 }
 
-/// Builds the `ledgers mcp` subcommand.
 fn build_mcp() -> Command {
     Command::new("mcp")
         .about("Serve MCP over stdio, relaying to the server with your agent key")
         .long_about(
             "Reads newline-delimited JSON-RPC messages from stdin, relays each to the server's \
-             /mcp endpoint with your agent key as Bearer token, and writes responses to stdout.\n\n\
+             /v1/mcp endpoint with your API key as Bearer token, and writes responses to stdout.\n\n\
              This allows MCP clients (like Claude) to use Ledgers as a tool.",
         )
         .arg(
@@ -107,93 +363,94 @@ fn build_mcp() -> Command {
         )
 }
 
-/// Builds a registry command subcommand.
-/// Maps from command name "bills.match" to "bills match".
-fn build_registry_command(descriptor: &ledgers_commands::CommandDescriptor) -> Command {
-    let parts: Vec<&str> = descriptor.name.split('.').collect();
-    let name = descriptor.name.clone();
-    let method = descriptor.http_method.clone();
-    let path = descriptor.http_path.clone();
-    let tier = descriptor.tier.clone();
-    let idempotent = descriptor.idempotent;
-    let supports_dry_run = descriptor.supports_dry_run;
-    let has_target = descriptor.http_path.contains("{id}");
+/// Builds the input object for a leaf command from its parsed arguments.
+///
+/// Precedence within the object: `--input` first, then `--<field>` flags override
+/// its keys. Path placeholders are kept in [`Invocation::path_params`].
+///
+/// # Errors
+/// Returns [`CliError::InvalidInput`] for malformed `--input` JSON, a non-object
+/// `--input`, or a field flag whose value does not parse as its schema type.
+pub fn invocation(descriptor: &CommandDescriptor, matches: &ArgMatches) -> Result<Invocation> {
+    let mut inv = Invocation::default();
 
-    // Start with the first part as the resource name
-    // Use Box::leak to get 'static strings for clap
-    let first_part: &'static str = Box::leak(parts[0].to_string().into_boxed_str());
-    let name_static: &'static str = Box::leak(name.clone().into_boxed_str());
-    let cmd = Command::new(first_part).about(name_static);
-
-    // Nest remaining parts as subcommands
-    let mut current = cmd;
-    for (i, part) in parts.iter().enumerate().skip(1) {
-        let part_static: &'static str = Box::leak(part.to_string().into_boxed_str());
-        let mut sub = Command::new(part_static);
-
-        // For the leaf (last part), add the actual command arguments
-        if i == parts.len() - 1 {
-            // Add positional id if the command has a target
-            if has_target {
-                sub = sub.arg(
-                    Arg::new("id")
-                        .value_name("ID")
-                        .help("Resource ID")
-                        .required(true),
-                );
-            }
-
-            // Add --input flag
-            sub = sub.arg(
-                Arg::new("input")
-                    .long("input")
-                    .value_name("JSON|@FILE|->")
-                    .help("Command input as JSON, file (@path), or stdin (-)"),
-            );
-
-            // Add input property flags (e.g., --bill-id, --amount)
-            // These are generated from the input_schema (TODO: implement)
-
-            // Add --dry-run if supported
-            if supports_dry_run {
-                sub = sub.arg(
-                    Arg::new("dry_run")
-                        .long("dry-run")
-                        .help("Preview only, don't execute")
-                        .action(ArgAction::SetTrue),
-                );
-            }
-
-            let long_help = format!(
-                "Command: {}\n\nHTTP: {} {}\n\nIDEMPOTENT: {}\n\nTIER: {}",
-                name, method, path, idempotent, tier
-            );
-            let help_static: &'static str = Box::leak(long_help.into_boxed_str());
-            sub = sub.about(name_static).long_about(help_static);
+    for placeholder in path_param_names(&descriptor.http_path) {
+        if let Ok(Some(value)) = matches.try_get_one::<String>(path_arg_id(&placeholder)) {
+            inv.path_params.insert(placeholder, value.clone());
         }
-
-        current = current.subcommand(sub);
     }
 
-    current
-}
+    let mut input: Map<String, Value> = match matches.try_get_one::<String>("input") {
+        Ok(Some(raw)) => read_input(raw)?,
+        _ => Map::new(),
+    };
 
-/// Parses global flags from the root matches.
-pub struct GlobalFlags {
-    pub json: bool,
-    pub profile: Option<String>,
-    pub url: Option<String>,
-    pub key: Option<String>,
-}
-
-impl GlobalFlags {
-    /// Extracts global flags from matches.
-    pub fn from_matches(matches: &ArgMatches) -> Self {
-        GlobalFlags {
-            json: matches.get_flag("json"),
-            profile: matches.get_one::<String>("profile").map(|s| s.to_string()),
-            url: matches.get_one::<String>("url").map(|s| s.to_string()),
-            key: matches.get_one::<String>("key").map(|s| s.to_string()),
+    for (field, schema) in schema_properties(&descriptor.input_schema) {
+        let id = field_arg_id(&field);
+        if property_type(&schema) == "boolean" {
+            if matches!(matches.try_get_one::<bool>(id), Ok(Some(true))) {
+                input.insert(field, Value::Bool(true));
+            }
+        } else if let Ok(Some(raw)) = matches.try_get_one::<String>(id) {
+            input.insert(
+                field.clone(),
+                parse_field(&field, property_type(&schema), raw)?,
+            );
         }
+    }
+
+    inv.input = input;
+    if descriptor.supports_dry_run {
+        inv.dry_run = matches!(matches.try_get_one::<bool>("dry_run"), Ok(Some(true)));
+    }
+    Ok(inv)
+}
+
+/// Reads `--input`: a JSON literal, `@path` for a file, or `-` for stdin.
+fn read_input(raw: &str) -> Result<Map<String, Value>> {
+    let text = if raw == "-" {
+        std::io::read_to_string(std::io::stdin().lock())
+            .map_err(|e| CliError::InvalidInput(format!("cannot read stdin: {e}")))?
+    } else if let Some(path) = raw.strip_prefix('@') {
+        std::fs::read_to_string(path)
+            .map_err(|e| CliError::InvalidInput(format!("cannot read {path}: {e}")))?
+    } else {
+        raw.to_string()
+    };
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|e| CliError::InvalidInput(format!("--input is not valid JSON: {e}")))?;
+    match value {
+        Value::Object(map) => Ok(map),
+        _ => Err(CliError::InvalidInput(
+            "--input must be a JSON object".into(),
+        )),
+    }
+}
+
+/// Parses one field flag's text according to the schema type.
+fn parse_field(field: &str, ty: &str, raw: &str) -> Result<Value> {
+    if ty == "string" {
+        return Ok(Value::String(raw.to_string()));
+    }
+    if ty == "any" {
+        return Ok(serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string())));
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| {
+        CliError::InvalidInput(format!("--{} expects a {ty} value: {e}", kebab(field)))
+    })?;
+    let ok = match ty {
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        _ => true,
+    };
+    if ok {
+        Ok(value)
+    } else {
+        Err(CliError::InvalidInput(format!(
+            "--{} expects a {ty} value",
+            kebab(field)
+        )))
     }
 }

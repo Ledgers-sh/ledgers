@@ -413,6 +413,106 @@ fn constraint_error(err: cratefield_core::DbError, number: Option<&str>) -> Acco
     AccountsError::Database(err)
 }
 
+/// Creates a dimension value in the company.
+///
+/// # Errors
+/// [`AccountsError::Database`] when the statement fails.
+pub async fn create_dimension_value(
+    db: &dyn Database,
+    company_id: &str,
+    kind: &str,
+    code: &str,
+    name: &str,
+    own_books: bool,
+    created_at: &str,
+) -> Result<(), AccountsError> {
+    use sea_query::Value as SeaValue;
+    db.execute(&Statement::with_values(
+        "INSERT INTO dimension_value (company_id, kind, code, name, own_books, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?)"
+            .to_owned(),
+        vec![
+            SeaValue::from(company_id),
+            SeaValue::from(kind),
+            SeaValue::from(code),
+            SeaValue::from(name),
+            SeaValue::BigInt(Some(i64::from(own_books))),
+            SeaValue::from(created_at),
+        ],
+    ))
+    .await
+    .map_err(AccountsError::Database)?;
+    Ok(())
+}
+
+/// Sets or updates a dimension rule on an account.
+///
+/// # Errors
+/// [`AccountsError::Database`] when the statement fails.
+pub async fn set_dimension_rule(
+    db: &dyn Database,
+    company_id: &str,
+    account_number: &str,
+    kind: &str,
+    rule: &str,
+) -> Result<(), AccountsError> {
+    use sea_query::Value as SeaValue;
+    // Delete the existing rule if present, then insert (works on both SQLite and Postgres).
+    db.execute(&Statement::with_values(
+        "DELETE FROM account_dimension_rule \
+         WHERE company_id = ? AND account_number = ? AND kind = ?"
+            .to_owned(),
+        vec![
+            SeaValue::from(company_id),
+            SeaValue::from(account_number),
+            SeaValue::from(kind),
+        ],
+    ))
+    .await
+    .map_err(AccountsError::Database)?;
+
+    db.execute(&Statement::with_values(
+        "INSERT INTO account_dimension_rule (company_id, account_number, kind, rule) \
+         VALUES (?, ?, ?, ?)"
+            .to_owned(),
+        vec![
+            SeaValue::from(company_id),
+            SeaValue::from(account_number),
+            SeaValue::from(kind),
+            SeaValue::from(rule),
+        ],
+    ))
+    .await
+    .map_err(AccountsError::Database)?;
+    Ok(())
+}
+
+/// Clears a dimension rule from an account (removes the row).
+///
+/// # Errors
+/// [`AccountsError::Database`] when the statement fails.
+pub async fn clear_dimension_rule(
+    db: &dyn Database,
+    company_id: &str,
+    account_number: &str,
+    kind: &str,
+) -> Result<(), AccountsError> {
+    use sea_query::Value as SeaValue;
+    db.execute(&Statement::with_values(
+        "DELETE FROM account_dimension_rule \
+         WHERE company_id = ? AND account_number = ? AND kind = ?"
+            .to_owned(),
+        vec![
+            SeaValue::from(company_id),
+            SeaValue::from(account_number),
+            SeaValue::from(kind),
+        ],
+    ))
+    .await
+    .map_err(AccountsError::Database)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

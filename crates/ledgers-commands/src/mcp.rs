@@ -61,6 +61,11 @@ pub fn escape_document_text(text: &str) -> String {
     result
 }
 
+/// Not tax or legal advice disclaimer.
+/// See docs/legal/DISCLAIMER.md for the full disclaimer and policy.
+pub const NOT_TAX_ADVICE: &str =
+    "Ledgers is not tax or legal advice. Check rates and returns before you file.";
+
 #[derive(Clone, Copy, Debug)]
 pub struct ToolScope {
     pub tier: Tier,
@@ -376,7 +381,7 @@ pub async fn handle(
                 "protocolVersion": "2025-06-18",
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "ledgers", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": UNTRUSTED_DATA_RULE
+                "instructions": format!("{} {}", UNTRUSTED_DATA_RULE, NOT_TAX_ADVICE)
             }
         })),
         "ping" => Some(json!({"jsonrpc": "2.0", "id": id_val, "result": {}})),

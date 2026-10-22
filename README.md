@@ -127,7 +127,81 @@ cargo run -p ledgers-server
 | `BLOB_DIR` | `./blobs` (document storage) |
 | `LISTEN_ADDR` | `127.0.0.1:3000` |
 
+### Try it: a development server and a curl walk-through
+
+With `LEDGERS_DEV=1` the server is for local use only. On start it creates a demo
+company with the generic small-business chart and the general journal `GN`, opens the
+current year, generates a throwaway `HARNESS_SECRET` if you did not set one (with a
+warning), and prints one full-tier API key once:
+
+```sh
+LEDGERS_DEV=1 LISTEN_ADDR=127.0.0.1:3000 cargo run -p ledgers-server
+# dev key: lk_live_…   (copy it; it is not shown again)
+export LEDGERS_KEY=lk_live_…   # the printed key
+export LEDGERS_URL=http://127.0.0.1:3000
+TODAY=$(date -u +%Y-%m-%d); PERIOD=${TODAY:0:7}
+```
+
+The walk-through posts a consulting invoice (5010 debit, 4000 credit, 1000.00 EUR), reads the
+trial balance and the P&L, reverses the entry, and reads the trial balance again:
+
+```sh
+# 1. Post a balanced entry (external_id is the idempotency key you choose)
+curl -X POST "$LEDGERS_URL/v1/entries" -H "Authorization: Bearer $LEDGERS_KEY" \
+  -H 'Content-Type: application/json' --data "{\"entry\": {
+    \"journal_id\": \"\", \"document_date\": \"$TODAY\", \"posting_date\": \"$TODAY\",
+    \"tax_point_date\": null, \"base_currency\": \"EUR\", \"description\": \"Consulting invoice\",
+    \"source_documents\": [], \"external_id\": \"quickstart-1\", \"source_app\": null, \"reverses\": null,
+    \"lines\": [
+      {\"account_number\": \"5010\", \"side\": \"debit\", \"base\": {\"minor\": \"100000\", \"currency\": \"EUR\"}, \"fx\": null, \"tax_code\": null, \"dimensions\": {}, \"memo\": null},
+      {\"account_number\": \"4000\", \"side\": \"credit\", \"base\": {\"minor\": \"100000\", \"currency\": \"EUR\"}, \"fx\": null, \"tax_code\": null, \"dimensions\": {}, \"memo\": null}
+    ]}}"
+
+# 2. Trial balance for the period (debits and credits per account)
+curl "$LEDGERS_URL/v1/reports/trial-balance?period=$PERIOD" -H "Authorization: Bearer $LEDGERS_KEY"
+
+# 3. Profit and loss for the period
+curl "$LEDGERS_URL/v1/reports/p-and-l?period=$PERIOD" -H "Authorization: Bearer $LEDGERS_KEY"
+
+# 4. Reverse the entry (posted entries are never edited; this posts the mirror)
+curl -X POST "$LEDGERS_URL/v1/entries/quickstart-1/reverse" -H "Authorization: Bearer $LEDGERS_KEY" \
+  -H 'Content-Type: application/json' --data '{}'
+
+# 5. The trial balance nets to zero again
+curl "$LEDGERS_URL/v1/reports/trial-balance?period=$PERIOD" -H "Authorization: Bearer $LEDGERS_KEY"
+```
+
+Without a credential every command answers `401`; a key below the command's tier answers `403`.
+The same walk-through runs as a script that exits non-zero on any failed check:
+`bash tools/quickstart-smoke.sh`. The HTTP routes are the registry's (`GET /v1/accounts`,
+`GET /v1/entries`, `GET /v1/entries/{external_id}`, `POST /v1/entries`,
+`POST /v1/entries/{external_id}/reverse`, and the four `GET /v1/reports/…` routes).
+
 The full set of checks CI runs on every pull request is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Run the app
+
+The web app in [`app/`](app/) talks to a local server. Start the server in dev mode, which prints a
+one-time key and allows the app's origin through CORS:
+
+```sh
+LEDGERS_DEV=1 cargo run -p ledgers-server
+# listens on http://127.0.0.1:3000 and prints "dev key: <key>" once
+```
+
+Copy the dev key, then in a second terminal:
+
+```sh
+cd app
+npm install
+npm run dev
+```
+
+Open http://localhost:5173, keep the server URL at `http://127.0.0.1:3000`, paste the key and
+connect. The key is kept in `sessionStorage` for that tab only. Passkey sign-in comes with issue #12.
+
+Checks for the app: `npm run typecheck`, `npm test` (unit tests), `npm run build`, and
+`npm run test:e2e` (Playwright against a local fake API, no server needed).
 
 ## MCP
 
@@ -170,6 +244,12 @@ change was agreed in an issue first.
 
 Every pull request must pass `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the wasm check, `cargo deny check` and the three guard scripts.
+
+## Legal and Compliance
+
+> Ledgers is not tax or legal advice. Check rates and returns before you file.
+
+See [docs/legal/DISCLAIMER.md](docs/legal/DISCLAIMER.md) for the full disclaimer.
 
 ## License
 

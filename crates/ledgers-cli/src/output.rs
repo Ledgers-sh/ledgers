@@ -1,78 +1,132 @@
-//! Output formatting: human-readable and JSON.
+//! Output formatting for `--json` and human-readable modes.
+//!
+//! Where output goes:
+//! - success, dry-run preview, and approval URL: stdout
+//! - denial and errors in human mode: stderr
+//! - `--json`: every outcome, including denials and errors, is one JSON object on stdout
 
-use crate::CallOutcome;
-use serde_json::Value;
+use crate::error::CliError;
+use crate::http::CallOutcome;
+use serde_json::{Value, json};
+use std::io::{self, Write};
 
-/// Formats command output for human or machine consumption.
-pub fn format_outcome(outcome: &CallOutcome, json: bool) -> String {
+/// Writes a command outcome.
+///
+/// # Errors
+/// Returns an error if writing to `out` or `err` fails.
+pub fn write_outcome(
+    outcome: &CallOutcome,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> io::Result<()> {
     match outcome {
         CallOutcome::Done(value) => {
             if json {
-                serde_json::to_string_pretty(value).unwrap_or_default()
+                writeln!(out, "{}", pretty(value))
             } else {
-                format_human(value)
+                writeln!(out, "{}", format_human(value))
             }
         }
         CallOutcome::DryRun(preview) => {
             if json {
-                serde_json::to_string_pretty(preview).unwrap_or_default()
+                writeln!(out, "{}", pretty(preview))
             } else {
-                format!("Dry-run preview:\n{}", format_human(preview))
+                writeln!(
+                    out,
+                    "Dry run (nothing was written):\n{}",
+                    format_human(preview)
+                )
             }
         }
         CallOutcome::NeedsApproval {
-            url,
             approval_id,
+            url,
             reason,
             preview,
         } => {
             if json {
-                serde_json::json!({
-                    "needsApproval": {
+                let body = json!({
+                    "status": "needs-approval",
+                    "approval": {
                         "approval_id": approval_id,
                         "url": url,
                         "reason": reason,
-                        "preview": preview
+                        "preview": preview,
                     }
-                })
-                .to_string()
+                });
+                writeln!(out, "{}", pretty(&body))
             } else {
-                format!(
-                    "needs approval: {}\n\nReason: {}\n\nView/approve at:\n{}",
-                    approval_id, reason, url
+                writeln!(
+                    out,
+                    "Approval needed: {reason}\nApproval ID: {approval_id}\nApprove at: {url}"
                 )
             }
         }
         CallOutcome::Denied(reason) => {
             if json {
-                serde_json::json!({
-                    "denied": reason
-                })
-                .to_string()
+                writeln!(
+                    out,
+                    "{}",
+                    pretty(&json!({"status": "denied", "reason": reason}))
+                )
             } else {
-                format!("denied: {}", reason)
+                writeln!(err, "denied: {reason}")
             }
         }
     }
 }
 
-/// Simple human-readable formatting of JSON.
-fn format_human(value: &Value) -> String {
+/// Writes an error.
+///
+/// # Errors
+/// Returns an error if writing to `out` or `err` fails.
+pub fn write_error(
+    error: &CliError,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> io::Result<()> {
+    if json {
+        writeln!(
+            out,
+            "{}",
+            pretty(&json!({"status": "error", "error": error.to_json()}))
+        )
+    } else {
+        writeln!(err, "error: {error}")
+    }
+}
+
+fn pretty(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+/// Renders JSON for people: one `key: value` line per object field, one `- item`
+/// line per array element. Nested values are compact JSON.
+#[must_use]
+pub fn format_human(value: &Value) -> String {
     match value {
-        Value::Object(obj) => {
-            let items: Vec<String> = obj
-                .iter()
-                .map(|(k, v)| format!("  {}: {}", k, format_human(v)))
-                .collect();
-            format!("{{\n{}\n}}", items.join(",\n"))
-        }
-        Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(format_human).collect();
-            format!("[\n  {}\n]", items.join(",\n  "))
-        }
-        Value::String(s) => format!("\"{}\"", s.escape_default()),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
+        Value::Object(map) if map.is_empty() => "(empty)".to_string(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(key, v)| format!("{key}: {}", inline(v)))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Array(items) if items.is_empty() => "(none)".to_string(),
+        Value::Array(items) => items
+            .iter()
+            .map(|v| format!("- {}", inline(v)))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => inline(other),
+    }
+}
+
+fn inline(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
         Value::Null => "null".to_string(),
+        other => other.to_string(),
     }
 }

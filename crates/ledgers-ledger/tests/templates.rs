@@ -169,3 +169,50 @@ fn consts_parse_through_the_public_path() {
         ledgers_ledger::mapping::parse_mapping(text).expect("bundled mapping parses");
     }
 }
+
+#[test]
+fn every_bundled_template_file_is_documented_in_licenses() {
+    use std::fs;
+
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let templates_dir = manifest_dir.join("../../templates");
+    let licenses = fs::read_to_string(templates_dir.join("LICENSES.md"))
+        .expect("templates/LICENSES.md exists");
+
+    let mut files = Vec::new();
+    let mut queue = vec![templates_dir.clone()];
+
+    while let Some(dir) = queue.pop() {
+        for entry in fs::read_dir(&dir).expect("can read dir") {
+            let entry = entry.expect("can read entry");
+            let path = entry.path();
+            if path.is_dir() {
+                queue.push(path);
+            } else if path.is_file() {
+                let relative = path
+                    .strip_prefix(&templates_dir)
+                    .expect("path is under templates");
+                let relative_str = relative.to_string_lossy().replace('\\', "/");
+                if relative_str != "LICENSES.md" {
+                    files.push(relative_str);
+                }
+            }
+        }
+    }
+
+    for file in files {
+        assert!(
+            licenses.contains(&file),
+            "templates/LICENSES.md must document {file}"
+        );
+    }
+}
+
+#[test]
+fn notice_mentions_templates_licenses() {
+    let notice = include_str!("../../../NOTICE");
+    assert!(
+        notice.contains("templates/LICENSES.md"),
+        "NOTICE must mention templates/LICENSES.md"
+    );
+}

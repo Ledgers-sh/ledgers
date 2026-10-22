@@ -1,0 +1,113 @@
+/**
+ * Browser-side session state. The API key lives in sessionStorage only (never
+ * localStorage), so closing the tab forgets it. Every storage access is wrapped:
+ * private windows and blocked storage must not break the app.
+ */
+import { createContext } from 'preact';
+import { useContext } from 'preact/hooks';
+import type { ClientConfig } from './api/client';
+import { currentPeriod, isPeriod } from './lib/period';
+
+export const DEFAULT_SERVER_URL = 'http://127.0.0.1:3000';
+
+export interface Credentials {
+  baseUrl: string;
+  apiKey: string;
+}
+
+const KEY_URL = 'ledgers.baseUrl';
+const KEY_API = 'ledgers.apiKey';
+const KEY_PERIOD = 'ledgers.period';
+const KEY_CURRENCY = 'ledgers.currency';
+const THEME_KEY = 'ledgers.theme';
+
+function readSession(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(key: string, value: string | null): void {
+  try {
+    if (value === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, value);
+  } catch {
+    // Storage unavailable: the session simply lasts for this page view.
+  }
+}
+
+export function loadCredentials(): Credentials | null {
+  const apiKey = readSession(KEY_API);
+  if (!apiKey) return null;
+  return { baseUrl: readSession(KEY_URL) ?? DEFAULT_SERVER_URL, apiKey };
+}
+
+export function saveCredentials(credentials: Credentials): void {
+  writeSession(KEY_URL, credentials.baseUrl);
+  writeSession(KEY_API, credentials.apiKey);
+}
+
+export function clearCredentials(): void {
+  writeSession(KEY_API, null);
+  writeSession(KEY_URL, null);
+  writeSession(KEY_PERIOD, null);
+}
+
+export function loadPeriod(): string {
+  const stored = readSession(KEY_PERIOD);
+  return stored && isPeriod(stored) ? stored : currentPeriod();
+}
+
+export function savePeriod(period: string): void {
+  writeSession(KEY_PERIOD, period);
+}
+
+export function loadCurrency(): string {
+  const stored = readSession(KEY_CURRENCY);
+  return stored && /^[A-Z]{3}$/.test(stored) ? stored : 'EUR';
+}
+
+export function saveCurrency(currency: string): void {
+  writeSession(KEY_CURRENCY, currency);
+}
+
+export type Theme = 'dark' | 'light';
+
+export function loadTheme(): Theme {
+  try {
+    return window.localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+export function saveTheme(theme: Theme): void {
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Theme is a convenience; ignore storage failures.
+  }
+}
+
+export type ToastKind = 'ok' | 'error';
+
+export interface Session {
+  client: ClientConfig;
+  period: string;
+  setPeriod: (period: string) => void;
+  currency: string;
+  setCurrency: (currency: string) => void;
+  online: boolean;
+  toast: (message: string, kind?: ToastKind) => void;
+  signOut: () => void;
+}
+
+export const SessionContext = createContext<Session | null>(null);
+
+export function useSession(): Session {
+  const value = useContext(SessionContext);
+  if (!value) throw new Error('useSession outside SessionContext');
+  return value;
+}

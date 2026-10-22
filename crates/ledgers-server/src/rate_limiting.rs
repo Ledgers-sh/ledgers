@@ -1,87 +1,89 @@
-//! Rate limiting dispatch wrapper for agent keys.
+//! Rate limiting for agent keys.
 //!
-//! Wraps the command dispatch to check rate limits per agent key before
-//! executing commands. Person principals pass through unchanged.
+//! [`RateLimitingDispatch`] wraps the server's [`Dispatch`] so every HTTP and
+//! MCP command from an agent key is checked against the harness
+//! `RateLimiter` before it runs. Person principals pass through unchanged.
+//!
+//! The limiter is read from the request's [`Deps`] (the ports the module
+//! context resolved), not captured at harness build time, because the
+//! Cloudflare runtime resolves its rate-limiting binding per request.
 
-use cratefield_core::Problem;
+use async_trait::async_trait;
+use cratefield_core::{Problem, RateLimiter};
 use ledgers_commands::{CommandError, Principal};
 use serde_json::Value;
 use std::sync::Arc;
 
+use crate::dispatch::Deps;
 use crate::routes::Dispatch;
 
-/// Dispatch wrapper that enforces rate limiting on agent keys.
-///
-/// The rate limiter is optional: if None, no rate limiting is applied.
-/// Rate limiter errors fail closed for agent keys (deny the request).
+/// Dispatch wrapper that enforces the per-agent-key rate limit.
 pub struct RateLimitingDispatch {
     wrapped: Arc<dyn Dispatch>,
-    rate_limiter: Option<Arc<dyn cratefield_core::RateLimiter>>,
 }
 
 impl RateLimitingDispatch {
-    /// Creates a new rate-limiting dispatch wrapper.
-    pub fn new(
-        wrapped: Arc<dyn Dispatch>,
-        rate_limiter: Option<Arc<dyn cratefield_core::RateLimiter>>,
-    ) -> Self {
-        Self {
-            wrapped,
-            rate_limiter,
-        }
+    /// Wraps `wrapped` with the agent-key rate limit.
+    #[must_use]
+    pub fn new(wrapped: Arc<dyn Dispatch>) -> Self {
+        Self { wrapped }
     }
 }
 
-#[async_trait::async_trait]
+/// Applies the agent-key limit to `principal`.
+///
+/// Person principals are never limited. With no limiter configured the call
+/// is not throttled. A limiter that refuses the request, or fails, denies
+/// it: the failure case returns `RateLimited` with a 60 second retry hint.
+///
+/// # Errors
+/// `RateLimited` (HTTP 429) when the key is over its limit or the limiter
+/// cannot answer.
+pub async fn enforce_agent_limit(
+    limiter: Option<&Arc<dyn RateLimiter>>,
+    principal: &Principal,
+) -> Result<(), Problem> {
+    let (Principal::Agent { key_id, .. }, Some(limiter)) = (principal, limiter) else {
+        return Ok(());
+    };
+    // The key id, never the secret, names the bucket.
+    let rate_limit_key = format!("agent-key:{key_id}");
+    match limiter.limit(&rate_limit_key).await {
+        Ok(decision) if decision.ok => Ok(()),
+        Ok(decision) => Err(CommandError::RateLimited {
+            retry_after_secs: decision.retry_after.map(|d| d.as_secs()),
+        }
+        .to_problem()),
+        Err(_) => Err(CommandError::RateLimited {
+            retry_after_secs: Some(60),
+        }
+        .to_problem()),
+    }
+}
+
+#[async_trait]
 impl Dispatch for RateLimitingDispatch {
     async fn dispatch(
         &self,
+        deps: &Deps,
         command: &str,
         input: Value,
         request_id: &str,
         credential: Option<String>,
     ) -> Result<Value, Problem> {
-        // Resolve the principal to check if it's an agent key.
-        let Ok(principal) = self.principal(credential.as_deref().unwrap_or("")).await else {
-            // Unauthenticated: let the wrapped dispatch handle it.
-            return self
-                .wrapped
-                .dispatch(command, input, request_id, credential)
-                .await;
-        };
-
-        // Check rate limit for agent keys only.
-        if let Principal::Agent { key_id, .. } = &principal
-            && let Some(limiter) = &self.rate_limiter
+        // An unresolvable credential is left to the wrapped dispatch, which
+        // answers it as unauthenticated.
+        if let Some(credential) = credential.as_deref()
+            && let Ok(principal) = self.wrapped.principal(deps, credential).await
         {
-            // Fail closed: rate limiter errors deny the request for agent keys.
-            let rate_limit_key = format!("agent-key:{key_id}");
-            match limiter.limit(&rate_limit_key).await {
-                Ok(decision) if !decision.ok => {
-                    let retry_secs = decision.retry_after.map(|d| d.as_secs());
-                    return Err(CommandError::RateLimited {
-                        retry_after_secs: retry_secs,
-                    }
-                    .to_problem());
-                }
-                Err(_) => {
-                    // Backend unavailable: fail closed (deny).
-                    return Err(CommandError::RateLimited {
-                        retry_after_secs: Some(60),
-                    }
-                    .to_problem());
-                }
-                Ok(_) => {} // ok == true, proceed
-            }
+            enforce_agent_limit(deps.rate_limiter.as_ref(), &principal).await?;
         }
-
-        // Proceed with the wrapped dispatch.
         self.wrapped
-            .dispatch(command, input, request_id, credential)
+            .dispatch(deps, command, input, request_id, credential)
             .await
     }
 
-    async fn principal(&self, credential: &str) -> Result<Principal, Problem> {
-        self.wrapped.principal(credential).await
+    async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem> {
+        self.wrapped.principal(deps, credential).await
     }
 }

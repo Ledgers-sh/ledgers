@@ -1,24 +1,24 @@
-//! Rate limiting test: agent keys are rejected when rate limited.
+//! Agent-key rate limiting: the limiter throttles agent keys, fails closed,
+//! and never throttles a person.
 
-use cratefield_core::{Decision, Problem, RateLimitError, RateLimiter};
+use cratefield_core::{Decision, RateLimitError, RateLimiter};
 use ledgers_commands::{Limits, Principal, Tier};
-use ledgers_server::Dispatch;
-use serde_json::Value;
+use ledgers_server::rate_limiting::enforce_agent_limit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// Fake rate limiter that allows N requests, then denies the rest.
+/// Allows the first `limit` requests, then denies the rest.
 struct FakeRateLimiter {
     limit: usize,
-    call_count: AtomicUsize,
+    calls: AtomicUsize,
 }
 
 impl FakeRateLimiter {
     fn new(limit: usize) -> Arc<Self> {
-        Arc::new(FakeRateLimiter {
+        Arc::new(Self {
             limit,
-            call_count: AtomicUsize::new(0),
+            calls: AtomicUsize::new(0),
         })
     }
 }
@@ -26,7 +26,7 @@ impl FakeRateLimiter {
 #[async_trait::async_trait]
 impl RateLimiter for FakeRateLimiter {
     async fn limit(&self, _key: &str) -> Result<Decision, RateLimitError> {
-        let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+        let count = self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(Decision {
             ok: count < self.limit,
             retry_after: Some(Duration::from_secs(60)),
@@ -35,100 +35,62 @@ impl RateLimiter for FakeRateLimiter {
     }
 }
 
-struct TestDispatch;
+/// A limiter whose backend is down.
+struct BrokenRateLimiter;
 
 #[async_trait::async_trait]
-impl Dispatch for TestDispatch {
-    async fn dispatch(
-        &self,
-        _: &str,
-        _: Value,
-        _: &str,
-        _: Option<String>,
-    ) -> Result<Value, Problem> {
-        Ok(serde_json::json!({"ok": true}))
+impl RateLimiter for BrokenRateLimiter {
+    async fn limit(&self, _key: &str) -> Result<Decision, RateLimitError> {
+        Err(RateLimitError::Transport("backend unavailable".to_string()))
     }
+}
 
-    async fn principal(&self, credential: &str) -> Result<Principal, Problem> {
-        match credential {
-            "agent_key" => Ok(Principal::Agent {
-                key_id: "key_1".to_string(),
-                tier: Tier::Read,
-                limits: Limits::new(),
-            }),
-            "person_key" => Ok(Principal::Person {
-                person_id: "user_1".to_string(),
-            }),
-            _ => Err(Problem::validation_failed("unauthorized")),
-        }
+fn agent() -> Principal {
+    Principal::Agent {
+        key_id: "key_1".to_string(),
+        tier: Tier::Read,
+        limits: Limits::new(),
+    }
+}
+
+fn person() -> Principal {
+    Principal::Person {
+        person_id: "user_1".to_string(),
     }
 }
 
 #[tokio::test]
-async fn agent_key_rate_limited_after_limit() {
-    let wrapped = Arc::new(TestDispatch);
+async fn agent_key_is_limited_after_its_allowance() {
     let limiter = FakeRateLimiter::new(2);
-    let dispatch = ledgers_server::rate_limiting::RateLimitingDispatch::new(
-        wrapped.clone(),
-        Some(limiter.clone() as Arc<dyn RateLimiter>),
-    );
+    let dyn_limiter: Arc<dyn RateLimiter> = limiter.clone();
+    let limiter_ref = Some(&dyn_limiter);
 
-    // Requests 1-2: should succeed
-    for i in 1..=2 {
-        let result = dispatch
-            .dispatch(
-                "test",
-                serde_json::json!({}),
-                &format!("req_{i}"),
-                Some("agent_key".to_string()),
-            )
-            .await;
-        assert!(result.is_ok(), "request {i} should succeed");
-    }
-
-    // Request 3: should be rate limited (429)
-    let result = dispatch
-        .dispatch(
-            "test",
-            serde_json::json!({}),
-            "req_3",
-            Some("agent_key".to_string()),
-        )
-        .await;
-    assert!(result.is_err(), "request 3 should be rate limited");
-    let err = result.unwrap_err();
-    assert_eq!(err.status.as_u16(), 429, "should be 429 Too Many Requests");
-    assert!(
-        err.title.to_lowercase().contains("rate"),
-        "title should mention rate"
-    );
-
-    // Verify rate limiter was called exactly 3 times (not called for person)
-    assert_eq!(limiter.call_count.load(Ordering::SeqCst), 3);
+    assert!(enforce_agent_limit(limiter_ref, &agent()).await.is_ok());
+    assert!(enforce_agent_limit(limiter_ref, &agent()).await.is_ok());
+    let err = enforce_agent_limit(limiter_ref, &agent())
+        .await
+        .expect_err("third request is over the limit");
+    assert_eq!(err.status.as_u16(), 429);
+    assert_eq!(limiter.calls.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]
-async fn person_principal_bypasses_rate_limiting() {
-    let wrapped = Arc::new(TestDispatch);
-    let limiter = FakeRateLimiter::new(0); // Deny all
-    let dispatch = ledgers_server::rate_limiting::RateLimitingDispatch::new(
-        wrapped.clone(),
-        Some(limiter.clone() as Arc<dyn RateLimiter>),
-    );
-
-    // Person request: should succeed even though limiter denies all
-    let result = dispatch
-        .dispatch(
-            "test",
-            serde_json::json!({}),
-            "req_1",
-            Some("person_key".to_string()),
-        )
-        .await;
+async fn person_principal_is_never_limited() {
+    let limiter = FakeRateLimiter::new(0);
+    let dyn_limiter: Arc<dyn RateLimiter> = limiter.clone();
     assert!(
-        result.is_ok(),
-        "person principal should not be rate limited"
+        enforce_agent_limit(Some(&dyn_limiter), &person())
+            .await
+            .is_ok()
     );
-    // Limiter should not be called for person
-    assert_eq!(limiter.call_count.load(Ordering::SeqCst), 0);
+    assert_eq!(limiter.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn limiter_failure_denies_an_agent_key() {
+    let dyn_limiter: Arc<dyn RateLimiter> = Arc::new(BrokenRateLimiter);
+    let err = enforce_agent_limit(Some(&dyn_limiter), &agent())
+        .await
+        .expect_err("a failing limiter fails closed");
+    assert_eq!(err.status.as_u16(), 429);
 }

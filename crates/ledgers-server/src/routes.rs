@@ -1,13 +1,14 @@
 //! HTTP routes from the command registry.
 //!
 //! Routes are organized by domain: each unique domain gets a harness Module
-//! that mounts routes from the registry, dispatching through async Dispatch.
+//! that mounts routes from the registry, dispatching through [`Dispatch`].
 
+use crate::dispatch::{DISPATCH_PORTS, Deps};
 use cratefield_core::axum::http::header;
 use cratefield_core::axum::response::IntoResponse;
 use cratefield_core::axum::{
     self,
-    extract::{Json, Path},
+    extract::{Json, Path, Query},
     routing::{get, post},
 };
 use cratefield_core::{
@@ -18,11 +19,14 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Dispatches commands: async handler.
+/// Dispatches commands: the registry's commands run against the harness
+/// database, behind authentication, policy and audit.
 #[async_trait::async_trait]
 pub trait Dispatch: Send + Sync {
+    /// Runs `command` with `input` for the principal behind `credential`.
     async fn dispatch(
         &self,
+        deps: &Deps,
         command: &str,
         input: Value,
         request_id: &str,
@@ -30,29 +34,8 @@ pub trait Dispatch: Send + Sync {
     ) -> Result<Value, Problem>;
 
     /// Resolves the principal behind a bearer credential, for surfaces that
-    /// need it before dispatching (the MCP tool list). Fails closed until the
-    /// dispatcher is wired to the key authenticator.
-    async fn principal(&self, _credential: &str) -> Result<Principal, Problem> {
-        Err(Problem::validation_failed("unauthorized"))
-    }
-}
-
-/// Default Dispatch: 501 Not Implemented.
-pub struct Unwired;
-
-#[async_trait::async_trait]
-impl Dispatch for Unwired {
-    async fn dispatch(
-        &self,
-        command: &str,
-        _input: Value,
-        request_id: &str,
-        _credential: Option<String>,
-    ) -> Result<Value, Problem> {
-        Err(Problem::internal()
-            .with_detail(format!("command '{command}' not yet implemented"))
-            .instance(request_id))
-    }
+    /// need it before dispatching (the MCP tool list and scope).
+    async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem>;
 }
 
 /// A domain module from the registry.
@@ -75,48 +58,44 @@ impl DomainModule {
         }
     }
 
-    fn router(&self) -> axum::Router {
+    fn mount(&self, deps: &Arc<Deps>) -> axum::Router {
         let mut router = axum::Router::new();
 
         for (method, path_pattern, command_name) in &self.routes {
             let dispatch = Arc::clone(&self.dispatch);
             let cmd = command_name.clone();
-
-            let axum_path = path_pattern
-                .replace("{id}", ":id")
-                .replace("{target}", ":target");
+            let deps = Arc::clone(deps);
 
             match method.as_str() {
                 "POST" => {
                     router = router.route(
-                        &axum_path,
+                        path_pattern,
                         post(
                             move |scope: Scope,
                                   headers: axum::http::HeaderMap,
-                                  Path(params): Path<HashMap<String, String>>,
+                                  params: Option<Path<HashMap<String, String>>>,
                                   Json(mut input): Json<Value>| {
                                 let dispatch = Arc::clone(&dispatch);
+                                let deps = Arc::clone(&deps);
                                 let cmd = cmd.clone();
 
                                 async move {
                                     let request_id = scope.request_id.clone();
                                     let credential = extract_bearer(&headers);
 
-                                    if let Value::Object(ref mut obj) = input {
+                                    if let (Value::Object(obj), Some(Path(params))) =
+                                        (&mut input, params)
+                                    {
                                         for (key, value) in params {
                                             obj.insert(key, json!(value));
                                         }
                                     }
 
-                                    match dispatch
-                                        .dispatch(&cmd, input, &request_id, credential)
-                                        .await
-                                    {
-                                        Ok(body) => {
-                                            (axum::http::StatusCode::OK, Json(body)).into_response()
-                                        }
-                                        Err(problem) => problem_to_response(problem),
-                                    }
+                                    respond(
+                                        dispatch
+                                            .dispatch(&deps, &cmd, input, &request_id, credential)
+                                            .await,
+                                    )
                                 }
                             },
                         ),
@@ -124,29 +103,39 @@ impl DomainModule {
                 }
                 "GET" => {
                     router = router.route(
-                        &axum_path,
+                        path_pattern,
                         get(
                             move |scope: Scope,
                                   headers: axum::http::HeaderMap,
-                                  Path(params): Path<HashMap<String, String>>| {
+                                  params: Option<Path<HashMap<String, String>>>,
+                                  Query(query): Query<HashMap<String, String>>| {
                                 let dispatch = Arc::clone(&dispatch);
+                                let deps = Arc::clone(&deps);
                                 let cmd = cmd.clone();
 
                                 async move {
                                     let request_id = scope.request_id.clone();
                                     let credential = extract_bearer(&headers);
-                                    let mut input = json!({});
 
-                                    for (key, value) in params {
-                                        input[&key] = json!(value);
+                                    // Path and query parameters are the command's input:
+                                    // every value arrives as a string.
+                                    let mut input = serde_json::Map::new();
+                                    let path_params = params.map(|Path(p)| p).unwrap_or_default();
+                                    for (key, value) in query.into_iter().chain(path_params) {
+                                        input.insert(key, json!(value));
                                     }
 
-                                    match dispatch.dispatch(&cmd, input, &request_id, credential).await {
-                                        Ok(body) => {
-                                            (axum::http::StatusCode::OK, Json(body)).into_response()
-                                        }
-                                        Err(problem) => problem_to_response(problem),
-                                    }
+                                    respond(
+                                        dispatch
+                                            .dispatch(
+                                                &deps,
+                                                &cmd,
+                                                Value::Object(input),
+                                                &request_id,
+                                                credential,
+                                            )
+                                            .await,
+                                    )
                                 }
                             },
                         ),
@@ -160,6 +149,27 @@ impl DomainModule {
     }
 }
 
+/// Maps a dispatch result to an HTTP response: 200 with the JSON body, or
+/// the problem document.
+fn respond(result: Result<Value, Problem>) -> axum::response::Response {
+    match result {
+        Ok(body) => (axum::http::StatusCode::OK, Json(body)).into_response(),
+        Err(problem) => problem_to_response(problem),
+    }
+}
+
+/// Convert a problem to a response, adding Retry-After for rate-limited errors.
+fn problem_to_response(problem: Problem) -> axum::response::Response {
+    let mut response = problem.into_response();
+    // Add Retry-After for rate-limited responses (429 status).
+    if response.status() == axum::http::StatusCode::TOO_MANY_REQUESTS {
+        response
+            .headers_mut()
+            .insert(header::RETRY_AFTER, "60".parse().unwrap());
+    }
+    response
+}
+
 impl Module for DomainModule {
     fn name(&self) -> &'static str {
         self.name
@@ -170,11 +180,13 @@ impl Module for DomainModule {
     }
 
     fn requires(&self) -> &'static [Port] {
-        &[]
+        DISPATCH_PORTS
     }
 
-    fn router(&self, _ctx: ModuleContext) -> axum::Router {
-        self.router()
+    fn router(&self, ctx: ModuleContext) -> axum::Router {
+        let deps = Deps::from_ports(&ctx.ports)
+            .expect("the dispatch ports (db, clock, id_gen) are declared in requires()");
+        self.mount(&Arc::new(deps))
     }
 
     fn migrations(&self) -> Migrations {
@@ -191,18 +203,6 @@ fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer ").map(ToString::to_string))
-}
-
-/// Convert a problem to a response, adding Retry-After for rate-limited errors.
-fn problem_to_response(problem: Problem) -> axum::response::Response {
-    let mut response = problem.into_response();
-    // Add Retry-After for rate-limited responses (429 status).
-    if response.status() == axum::http::StatusCode::TOO_MANY_REQUESTS {
-        response
-            .headers_mut()
-            .insert(header::RETRY_AFTER, "60".parse().unwrap());
-    }
-    response
 }
 
 /// Generate domain modules from the registry.

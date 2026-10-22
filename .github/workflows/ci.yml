@@ -114,9 +114,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.98.1"
+      - name: Test guard checks
+        run: bash tools/test-guards.sh
       - name: Open-core boundary (docs/adr/0002)
         run: bash tools/check-boundary.sh
       - name: Harness pins - exactly one cratefield-core (docs/adr/0001)
         run: bash tools/check-harness-pins.sh
       - name: Harness git revs are on harness main (docs/adr/0001)
         run: bash tools/check-harness-rev.sh
+
+  # The web app (app/, docs/adr/0007): install from the lockfile, typecheck,
+  # unit tests and production build. Playwright e2e runs locally (npm run test:e2e).
+  app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

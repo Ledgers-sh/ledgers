@@ -143,18 +143,14 @@ fn preview_to_effect_and_accounts(
 
     for line in &preview.lines {
         accounts.insert(line.account.clone());
-        if line.side != "debit" {
-            continue;
-        }
-        // Parse the base amount.
-        #[allow(clippy::collapsible_if)]
-        if let Ok(currency) =
-            ledgers_money::Currency::from_code(line.base.split(' ').next().unwrap_or(""))
+    }
+    // Per-currency debit totals: the preview keys them by currency code, and
+    // its lines carry bare canonical amounts with no currency to parse.
+    for (code, total) in &preview.totals {
+        if let Ok(currency) = ledgers_money::Currency::from_code(code)
+            && let Ok(amount) = Amount::parse_canonical(total, currency)
         {
-            if let Ok(amount) = Amount::parse_canonical(&line.base, currency) {
-                let entry = effect.entry(currency.code().to_string()).or_insert(0);
-                *entry += amount.minor();
-            }
+            *effect.entry(currency.code().to_string()).or_insert(0) += amount.minor();
         }
     }
 

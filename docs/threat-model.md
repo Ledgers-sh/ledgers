@@ -23,8 +23,8 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 │  Ledgers Server (SQLite/Postgres + audit chain)     │
 │  • Policy engine (tiers, limits, risk flags)        │
 │  • Approval service (passkeys)                      │
-│  • Rate limiter per agent key (native: SQLite-based;│
-│    Workers: Cloudflare Rate Limiting)               │
+│  • Rate limiter per agent key (Workers: Cloudflare   │
+│    Rate Limiting; native: only if configured)       │
 │  • Hash-chained audit log (append-only)             │
 └──────┬──────────────────────┬──────────────────┬────┘
        │                      │                  │
@@ -60,7 +60,7 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 | Tampering | Hmac or request signing | Not yet wired (planned M2) |
 | Repudiation | Every command in audit with principal and timestamp | Verified existing (ledgers-audit) |
 | Elevation | Policy enforced server-side, never delegated to agent/MCP/CLI | Implemented (decide.rs `PolicyChange` deny; decide.rs check order 1–8) |
-| DoS | Rate limiter per agent key (rate_limiting.rs); fail closed (429) | Implemented: native via SQLite (ports().rate_limiter); Workers via Cloudflare Rate Limiting binding |
+| DoS | Rate limiter per agent key (rate_limiting.rs, read per request from `Deps`); limiter error or refusal returns 429 | Implemented on Workers (RATE_LIMITER binding). Native server: active only when a limiter is configured on the `Native` runtime (none by default, so agent keys are not throttled there yet) |
 | Disclosure | Document text never logged (only hash); approval preview is frozen JSON | Implemented |
 
 ### Approval cards & passkey step-up

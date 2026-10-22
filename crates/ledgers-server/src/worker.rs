@@ -6,7 +6,6 @@
 use crate::harness;
 use cratefield_core::{Config, Harness};
 use cratefield_runtime_cloudflare::{Cloudflare, serve};
-use ledgers_commands::Registry;
 use std::sync::OnceLock;
 use worker::{Context, Env, Request, Response, event};
 
@@ -20,19 +19,17 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         // Create configuration from environment
         let cfg = WorkerConfig { env: env.clone() };
 
-        // Set up the Cloudflare runtime with D1, R2, and rate limiting bindings
-        // The rate limiter binding is named in wrangler.toml and resolved at request time in serve()
+        // Set up the Cloudflare runtime with D1, R2, and rate limiting bindings.
+        // The limiter binding (wrangler.toml) is resolved per request in serve().
         let runtime = Cloudflare::new()
             .db("DB")
             .blob("DOCUMENTS")
             .rate_limiter("RATE_LIMITER");
 
         // Build the harness with the runtime (so it knows which ports are provided)
-        let registry = Registry::new();
-        // The rate limiter is extracted via serve() when ports are resolved with the Env,
-        // so it is applied per-request rather than at harness build time for Workers
+        let registry = crate::dispatch::registry();
         let harness_instance =
-            harness(&registry, &cfg, runtime.clone(), None).expect("Failed to build harness");
+            harness(&registry, &cfg, runtime.clone()).expect("Failed to build harness");
 
         (harness_instance, runtime)
     });
