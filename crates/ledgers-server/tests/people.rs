@@ -181,6 +181,9 @@ fn fixture() -> Fixture {
         Box::new(LedgerModule),
         Box::new(DbModule),
         Box::new(PolicyModule),
+        Box::new(ledgers_storage::StorageModule),
+        Box::new(ledgers_approvals::module::ApprovalsModule),
+        Box::new(ledgers_approvals::module::ApprovalsInboxModule),
         Box::new(ApiKeysModule),
         Box::new(PeopleModule::new(Some(config()))),
     ];
@@ -206,6 +209,20 @@ fn fixture() -> Fixture {
         id_gen: ids,
         rate_limiter: None,
     };
+    // The company row approval requests reference; the served bootstrap creates it.
+    pollster::block_on(deps.db.execute(&cratefield_core::Statement::with_values(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (id) DO NOTHING"
+            .to_owned(),
+        vec![
+            sea_query::Value::from(COMPANY),
+            sea_query::Value::from("Halden Works GmbH"),
+            sea_query::Value::from("EUR"),
+            sea_query::Value::from(START),
+            sea_query::Value::from(START),
+        ],
+    )))
+    .expect("company row");
     let api_key = pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("bootstrap");
     Fixture {
         router: kit.router.clone(),
@@ -784,7 +801,11 @@ fn from_config_reads_the_issuer_and_refuses_a_partial_setup() {
 fn people_module_declares_the_session_migration() {
     let module = PeopleModule::new(None);
     let migrations = module.migrations();
-    assert_eq!(people::PEOPLE_MIGRATIONS.len(), 1);
+    assert_eq!(people::PEOPLE_MIGRATIONS.len(), 2);
     assert_eq!(people::PEOPLE_MIGRATIONS[0].name, "people_session");
-    assert_eq!(migrations.sqlite.len(), 1);
+    assert_eq!(
+        people::PEOPLE_MIGRATIONS[1].name,
+        "people_session_auth_time"
+    );
+    assert_eq!(migrations.sqlite.len(), 2);
 }

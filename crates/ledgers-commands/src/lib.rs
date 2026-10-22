@@ -39,7 +39,10 @@ pub mod registry;
 pub use auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 pub use command::{Command, CommandContext, Plan};
 pub use error::{CommandError, PROBLEM_BASE};
-pub use exec::{Approval, ExecToken, Execute, Executed, Executor, request_hash};
+pub use exec::{
+    Approval, ApprovalPersist, ExecToken, Execute, Executed, Executor, PendingApproval,
+    request_hash,
+};
 pub use journal_preview::JournalPreview;
 pub use mcp::{
     ApprovalCard, NOT_TAX_ADVICE, ToolCaller, ToolOutcome, ToolScope, UNTRUSTED_DATA_RULE,

@@ -1957,6 +1957,7 @@ dependencies = [
  "base64 0.22.1",
  "cratefield-core",
  "cratefield-testing",
+ "futures-util",
  "hex",
  "ledgers-audit",
  "ledgers-commands",

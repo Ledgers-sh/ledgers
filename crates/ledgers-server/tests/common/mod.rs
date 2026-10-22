@@ -128,6 +128,9 @@ pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
         Box::new(LedgerModule),
         Box::new(ledgers_db::module::DbModule),
         Box::new(ledgers_policy::module::PolicyModule),
+        Box::new(ledgers_storage::StorageModule),
+        Box::new(ledgers_approvals::module::ApprovalsModule),
+        Box::new(ledgers_approvals::module::ApprovalsInboxModule),
         Box::new(ApiKeysModule),
     ];
     let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
@@ -150,6 +153,20 @@ pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
         rate_limiter: None,
     };
 
+    // The company row approval requests reference; the served bootstrap creates it.
+    pollster::block_on(deps.db.execute(&cratefield_core::Statement::with_values(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (id) DO NOTHING"
+            .to_owned(),
+        vec![
+            sea_query::Value::from(COMPANY),
+            sea_query::Value::from("Halden Works GmbH"),
+            sea_query::Value::from("EUR"),
+            sea_query::Value::from(NOW),
+            sea_query::Value::from(NOW),
+        ],
+    )))
+    .expect("company row");
     let full = pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("bootstrap");
     let draft = issue(&deps, Tier::Draft, eur_limits());
     let read = issue(&deps, Tier::Read, eur_limits());

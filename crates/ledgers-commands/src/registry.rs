@@ -249,32 +249,33 @@ impl Default for Registry {
 /// cannot see the domain types); the server fills them in from the typed
 /// commands.
 #[must_use]
-pub fn default_commands() -> Vec<CommandDescriptor> {
-    fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
-        CommandDescriptor {
-            name: name.to_string(),
-            tier: tier.to_string(),
-            human_only: false,
-            supports_dry_run: false,
-            idempotent: true,
-            http_method: method.to_string(),
-            http_path: path.to_string(),
-            cli: cli.to_string(),
-            mcp: Some(name.replace('.', "_")),
-            curl: if method == "GET" {
-                format!(
-                    "curl -X GET \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
-                )
-            } else {
-                format!(
-                    "curl -X POST \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
-                )
-            },
-            input_schema: serde_json::json!({}),
-            output_schema: serde_json::json!({}),
-        }
+fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
+    CommandDescriptor {
+        name: name.to_string(),
+        tier: tier.to_string(),
+        human_only: false,
+        supports_dry_run: false,
+        idempotent: true,
+        http_method: method.to_string(),
+        http_path: path.to_string(),
+        cli: cli.to_string(),
+        mcp: Some(name.replace('.', "_")),
+        curl: if method == "GET" {
+            format!("curl -X GET \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\"")
+        } else {
+            format!(
+                "curl -X POST \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+            )
+        },
+        input_schema: serde_json::json!({}),
+        output_schema: serde_json::json!({}),
     }
-    vec![
+}
+
+/// The command registry's built-in descriptors.
+#[must_use]
+pub fn default_commands() -> Vec<CommandDescriptor> {
+    let mut commands = vec![
         entry(
             "accounts.list",
             "read",
@@ -338,7 +339,49 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/reports/trial-balance",
             "ledgers reports trial-balance",
         ),
+    ];
+    commands.extend(approval_commands());
+    commands
+}
+
+/// The approval inbox commands: person only, so agent keys are refused them.
+fn approval_commands() -> Vec<CommandDescriptor> {
+    vec![
+        human_only(entry(
+            "approvals.list",
+            "read",
+            "GET",
+            "/v1/approval-requests",
+            "ledgers approvals list",
+        )),
+        human_only(entry(
+            "approvals.get",
+            "read",
+            "GET",
+            "/v1/approval-requests/{id}",
+            "ledgers approvals get",
+        )),
+        human_only(entry(
+            "approvals.decide",
+            "read",
+            "POST",
+            "/v1/approval-requests/{id}/decision",
+            "ledgers approvals decide",
+        )),
+        human_only(entry(
+            "approvals.decide_bulk",
+            "read",
+            "POST",
+            "/v1/approval-requests/bulk-decision",
+            "ledgers approvals decide-bulk",
+        )),
     ]
+}
+
+/// Marks a descriptor human-only: agent keys are refused it.
+fn human_only(mut descriptor: CommandDescriptor) -> CommandDescriptor {
+    descriptor.human_only = true;
+    descriptor
 }
 
 #[cfg(test)]

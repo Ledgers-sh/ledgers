@@ -20,13 +20,18 @@ pub mod rules;
 pub mod service;
 pub mod stepup;
 
-pub use approval::{ApprovalRequest, Status};
+pub use approval::{ApprovalRequest, Risk, Status};
 pub use config::ApprovalConfig;
 pub use error::ApprovalError;
 pub use module::ApprovalsModule;
 pub use rules::{ApprovalRules, OwnerApprovesAll, StepUp};
-pub use service::Approvals;
-pub use stepup::{AssertionVerifier, CredentialKeys, Es256Verifier, PasskeyProof};
+pub use service::{
+    Approvals, FRESH_SIGN_IN_SECS, Listing, NewRequest, check_bulk, get_request, list_requests,
+    request_statement, risk_for_effect,
+};
+pub use stepup::{
+    AssertionVerifier, CredentialKeys, Es256Verifier, NoCredentialKeys, PasskeyProof,
+};
 
 /// The migrations for the approvals module: nonce and approval request tables.
 pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
@@ -44,5 +49,25 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
         include_str!("../migrations/postgres/0001_approvals.sql"),
     )];
 
+/// The approval inbox columns (risk, counterparty, decision and result
+/// references). A module of their own, registered after every other module,
+/// so the D1 files of the modules before it keep their numbers.
+pub const INBOX_SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
+    &[cratefield_core::SqlMigration::new(
+        "0001",
+        "approvals_inbox",
+        include_str!("../migrations/sqlite/inbox/0001_approvals_inbox.sql"),
+    )];
+
+/// The Postgres migrations for the approval inbox columns.
+pub const INBOX_POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
+    &[cratefield_core::SqlMigration::new(
+        "0001",
+        "approvals_inbox",
+        include_str!("../migrations/postgres/inbox/0001_approvals_inbox.sql"),
+    )];
+
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(INBOX_SQLITE_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(INBOX_POSTGRES_MIGRATIONS);
