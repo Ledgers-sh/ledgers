@@ -50,14 +50,19 @@ Guard probe rows are batch-local scratch: the plan deletes them
 
 The patterns around them, all in `ledgers-db`:
 
-- **Gapless numbering** — the batch provisions the counter row
-  (idempotent upsert), bumps it (the `UPDATE` takes the row lock that
-  serialises concurrent posters), and inserts the entry with
-  `INSERT … SELECT next_number FROM numbering_counter` in the same
-  batch, so number and increment commit or roll back together.
-  `UNIQUE (journal_id, fiscal_year, number)` is the backstop. Provision
-  must run first: an `INSERT … SELECT` from a missing row inserts
-  nothing, silently, because batches report no row counts.
+- **Gapless numbering** — the plan reads the counter before the batch
+  (`read_counter`), computing the expected number — needed pre-batch
+  as it forms the audit event's hashed input, letting `post_entry`
+  return it without a post-commit read. Inside the batch, provisions
+  the counter row (idempotent upsert), bumps it (the `UPDATE` takes the
+  row lock that serialises concurrent posters), inserts the entry with
+  that literal expected number, and verifies the counter advanced with a
+  guard statement. A race that lost rereads the counter and retries with
+  a fresh batch. `UNIQUE (journal_id, fiscal_year, number)` is the
+  backstop; the guard is the enforcer. The entry number is immutable on
+  the journal_entry row; the audit event references the entry id and the
+  number binds via input hash, so no stored number field is needed in the
+  audit event.
 - **Audit chain** — the plan reads the head, appends with
   `seq = head.seq + 1`; `UNIQUE (company_id, seq)` makes a fork a
   constraint failure, never a stored fork.
