@@ -278,8 +278,8 @@ impl CredentialKeys for TestKeys {
 fn modules() -> Vec<Box<dyn cratefield_core::Module>> {
     vec![
         Box::new(DbModule),
-        Box::new(ledgers_approvals::ApprovalsModule),
         Box::new(ledgers_storage::StorageModule),
+        Box::new(ledgers_approvals::ApprovalsModule),
     ]
 }
 
@@ -298,7 +298,8 @@ async fn setup_db(db: &dyn Database) {
     .expect("failed to create table");
 
     db.execute(&Statement::with_values(
-        "INSERT OR IGNORE INTO company (id, name, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (id) DO NOTHING"
             .to_owned(),
         vec![
             sea_query::Value::from(COMPANY_ID),
