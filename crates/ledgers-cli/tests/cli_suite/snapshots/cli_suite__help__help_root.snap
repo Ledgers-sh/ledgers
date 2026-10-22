@@ -7,18 +7,25 @@ Ledgers: agent-safe accounting
 Usage: ledgers [OPTIONS] <COMMAND>
 
 Commands:
-  serve        Start the native Ledgers server
-  completions  Generate shell completions
-  mcp          Serve MCP over stdio, relaying to the server with your agent key
-  demo         Demo company operations
-  accounts     Commands under `ledgers accounts`
-  approvals    Commands under `ledgers approvals`
-  bills        Commands under `ledgers bills`
-  documents    Commands under `ledgers documents`
-  entries      Commands under `ledgers entries`
-  keys         Commands under `ledgers keys`
-  reports      Commands under `ledgers reports`
-  help         Print this message or the help of the given subcommand(s)
+  serve              Start the native Ledgers server
+  completions        Generate shell completions
+  mcp                Serve MCP over stdio, relaying to the server with your agent key
+  demo               Demo company operations
+  accounts           Commands under `ledgers accounts`
+  approval-settings  Commands under `ledgers approval-settings`
+  approvals          Commands under `ledgers approvals`
+  audit              Commands under `ledgers audit`
+  bills              Commands under `ledgers bills`
+  company            Commands under `ledgers company`
+  documents          Commands under `ledgers documents`
+  entries            Commands under `ledgers entries`
+  fiscal-years       Commands under `ledgers fiscal-years`
+  keys               Commands under `ledgers keys`
+  numbering          Commands under `ledgers numbering`
+  periods            Commands under `ledgers periods`
+  reports            Commands under `ledgers reports`
+  tax-settings       Commands under `ledgers tax-settings`
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --json            Output machine-readable JSON

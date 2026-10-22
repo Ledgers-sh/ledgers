@@ -1,16 +1,63 @@
 import { useState } from 'preact/hooks';
 import { AgentKeys } from './AgentKeys';
 import { Icon } from './icons';
-import { PageHead } from './common';
+import { Empty, PageHead } from './common';
 import { useSession } from '../session';
-import { t } from '../i18n';
+import { t, type MessageKey } from '../i18n';
+import { CompanySettings } from './settings/CompanySettings';
+import { YearSettings } from './settings/YearSettings';
+import { NumberingSettings } from './settings/NumberingSettings';
+import { TaxSettings } from './settings/TaxSettings';
+import { ApprovalSettings } from './settings/ApprovalSettings';
+import { InvoiceSettings } from './settings/InvoiceSettings';
+import { AuditSettings } from './settings/AuditSettings';
 
-export type SettingsSection = 'agent-keys';
+/** The Settings sections, in the order the left navigation lists them. */
+export const SETTINGS_SECTIONS = [
+  'company',
+  'years',
+  'numbering',
+  'tax',
+  'approvals',
+  'invoices',
+  'audit',
+  'agent-keys',
+] as const;
+
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+const SECTION_LABEL: Record<SettingsSection, MessageKey> = {
+  company: 'settings.company',
+  years: 'settings.years',
+  numbering: 'settings.numbering',
+  tax: 'settings.tax',
+  approvals: 'settings.approvals',
+  invoices: 'settings.invoices',
+  audit: 'settings.audit',
+  'agent-keys': 'settings.agent_keys',
+};
+
+/** The section a `settings/...` route names; the company profile when the name is unknown or missing. */
+export function settingsSectionOf(route: string): SettingsSection {
+  const name = route.replace(/^settings\/?/, '');
+  return (SETTINGS_SECTIONS as readonly string[]).includes(name) ? (name as SettingsSection) : 'company';
+}
+
+const SECTION_INTRO: Record<SettingsSection, MessageKey> = {
+  company: 'settings.company_intro',
+  years: 'settings.years_intro',
+  numbering: 'settings.numbering_intro',
+  tax: 'settings.tax_intro',
+  approvals: 'settings.approvals_intro',
+  invoices: 'settings.invoices_intro',
+  audit: 'settings.audit_intro',
+  'agent-keys': 'agentKeys.intro',
+};
 
 /**
- * Settings: one section for now, agent keys. Each section has its own address
- * under #/settings. Same shell as the other screens: a page head, the section
- * tabs, and panels.
+ * Settings: a left navigation of sections, each with its own address under
+ * #/settings/<section>. Every section is a person's screen: an agent key gets
+ * the explanation instead of forms that would fail.
  */
 export function Settings({ section }: { section: SettingsSection }) {
   const { client } = useSession();
@@ -33,12 +80,45 @@ export function Settings({ section }: { section: SettingsSection }) {
       >
         {t('settings.intro')}
       </PageHead>
-      <nav class="tabs" aria-label={t('settings.sections')}>
-        <a class="tab" href="#/settings/agent-keys" aria-current={section === 'agent-keys' ? 'page' : undefined}>
-          {t('settings.agent_keys')}
-        </a>
-      </nav>
-      {section === 'agent-keys' && <AgentKeys creating={creating} onCreatingChange={setCreating} />}
+      <div class="settings">
+        <nav class="settings-nav" aria-label={t('settings.sections')}>
+          <ul>
+            {SETTINGS_SECTIONS.map((name) => (
+              <li key={name}>
+                <a
+                  class="settings-link"
+                  href={`#/settings/${name}`}
+                  aria-current={name === section ? 'page' : undefined}
+                >
+                  {t(SECTION_LABEL[name])}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div class="settings-body">
+          <p class="muted settings-intro">{t(SECTION_INTRO[section])}</p>
+          {!personal && section !== 'agent-keys' ? (
+            <Empty title={t('settings.person_title')}>{t('settings.person_body')}</Empty>
+          ) : section === 'company' ? (
+            <CompanySettings />
+          ) : section === 'years' ? (
+            <YearSettings />
+          ) : section === 'numbering' ? (
+            <NumberingSettings />
+          ) : section === 'tax' ? (
+            <TaxSettings />
+          ) : section === 'approvals' ? (
+            <ApprovalSettings />
+          ) : section === 'invoices' ? (
+            <InvoiceSettings />
+          ) : section === 'audit' ? (
+            <AuditSettings />
+          ) : (
+            <AgentKeys creating={creating} onCreatingChange={setCreating} />
+          )}
+        </div>
+      </div>
     </>
   );
 }

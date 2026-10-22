@@ -1,0 +1,11 @@
+---
+source: crates/ledgers-cli/tests/cli_suite/help.rs
+expression: help_for(path)
+---
+fiscal_years.list
+
+Usage: list [OPTIONS]
+
+Options:
+      --input <JSON|@FILE|->  Command input as a JSON object, @FILE to read one, or - for stdin
+  -h, --help                  Print help (see more with '--help')

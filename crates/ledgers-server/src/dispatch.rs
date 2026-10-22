@@ -12,11 +12,13 @@
 mod accounts;
 mod approvals;
 mod bills;
+mod settings;
+mod settings_rules;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
 use accounts::AccountsGet;
-use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
+use approvals::{ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
     ApiKeys, Blob, Clock, Database, DbError, HttpClient, IdGen, Port, Ports, Problem, RateLimiter,
@@ -51,8 +53,13 @@ use ledgers_policy::store::{deserialize_key, parse_keys, serialize_key};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
+use settings::{
+    ApprovalSettingsGet, ApprovalSettingsUpdate, AuditList, CompanyGet, CompanyUpdate,
+    FiscalYearsList, NumberingList, NumberingSetNext, TaxSettingsGet,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use time::format_description::well_known::Iso8601;
 use time::{Date, OffsetDateTime, UtcOffset};
 
@@ -267,12 +274,15 @@ impl ServerDispatch {
 
         // A needs-approval outcome stores its request in the same guarded batch
         // as its audit row (docs/PLAN.md section 5).
+        let rules = settings::approval_rules_for::<C>(deps.db.as_ref(), &self.company_id)
+            .await
+            .map_err(|err| fail(CommandError::Database(err)))?;
+        let ttl = Duration::from_hours(u64::from(rules.ttl_hours));
         let approval_id = deps.id_gen.ulid();
         let raised: Mutex<Option<ApprovalRequest>> = Mutex::new(None);
         let persist = |pending: &PendingApproval| -> Result<Vec<Statement>, CommandError> {
             let preview = serde_json::to_value(&pending.preview)
                 .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
-            let limits = approvals::low_risk_limits();
             let (statement, request) = request_statement(&NewRequest {
                 id: &approval_id,
                 company_id: &self.company_id,
@@ -285,8 +295,8 @@ impl ServerDispatch {
                 requested_by: &pending.requested_by,
                 counterparty: None,
                 now: &now,
-                ttl: APPROVAL_TTL,
-                low_risk_limits: &limits,
+                ttl,
+                low_risk_limits: &rules.low_risk,
             })
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
             // The Created notice is enqueued in the same batch as the request.
@@ -633,6 +643,59 @@ impl Dispatch for ServerDispatch {
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
+            "company.get" => {
+                self.execute(deps, &CompanyGet, presented, request_id, input)
+                    .await
+            }
+            "company.update" => {
+                self.execute(deps, &CompanyUpdate, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.list" => {
+                self.execute(deps, &FiscalYearsList, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.create" => {
+                self.fiscal_years_create(deps, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.close" => {
+                self.fiscal_years_close(deps, presented, request_id, input)
+                    .await
+            }
+            "periods.close" => self.periods_close(deps, presented, request_id, input).await,
+            "periods.reopen" => {
+                self.periods_reopen(deps, presented, request_id, input)
+                    .await
+            }
+            "numbering.list" => {
+                self.execute(deps, &NumberingList, presented, request_id, input)
+                    .await
+            }
+            "numbering.set_next" => {
+                self.execute(deps, &NumberingSetNext, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.get" => {
+                self.execute(deps, &TaxSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.update" => {
+                self.tax_settings_update(deps, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.get" => {
+                self.execute(deps, &ApprovalSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.update" => {
+                self.execute(deps, &ApprovalSettingsUpdate, presented, request_id, input)
+                    .await
+            }
+            "audit.list" => {
+                self.execute(deps, &AuditList, presented, request_id, input)
+                    .await
+            }
             other => Err(
                 Problem::validation_failed(format!("unknown command {other:?}"))
                     .instance(request_id),
@@ -1485,6 +1548,104 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::commands::ConfirmInput>(),
                 schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "company.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "company.update",
+            (
+                schema_of::<settings::CompanyUpdateInput>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::FiscalYearsListOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.create",
+            (
+                schema_of::<settings::FiscalYearCreateInput>(),
+                schema_of::<settings::FiscalYearView>(),
+            ),
+        ),
+        (
+            "fiscal_years.close",
+            (
+                schema_of::<settings::FiscalYearCloseInput>(),
+                schema_of::<settings::FiscalYearCloseOutput>(),
+            ),
+        ),
+        (
+            "periods.close",
+            (
+                schema_of::<settings::PeriodCloseInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "periods.reopen",
+            (
+                schema_of::<settings::PeriodReopenInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "numbering.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::NumberingListOutput>(),
+            ),
+        ),
+        (
+            "numbering.set_next",
+            (
+                schema_of::<settings::NumberingSetNextInput>(),
+                schema_of::<settings::NumberingSetNextInput>(),
+            ),
+        ),
+        (
+            "tax_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "tax_settings.update",
+            (
+                schema_of::<settings::TaxSettingsInput>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "approval_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "approval_settings.update",
+            (
+                schema_of::<settings::ApprovalSettingsInput>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "audit.list",
+            (
+                schema_of::<settings::AuditListInput>(),
+                schema_of::<settings::AuditListOutput>(),
             ),
         ),
     ]);
