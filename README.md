@@ -171,6 +171,12 @@ change was agreed in an issue first.
 Every pull request must pass `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the wasm check, `cargo deny check` and the three guard scripts.
 
+## Legal and Compliance
+
+> Ledgers is not tax or legal advice. Check rates and returns before you file.
+
+See [docs/legal/DISCLAIMER.md](docs/legal/DISCLAIMER.md) for the full disclaimer.
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Factory Zero.

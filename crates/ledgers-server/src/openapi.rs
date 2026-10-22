@@ -6,7 +6,7 @@
 
 use cratefield_core::axum::{self, extract::Json, routing::get};
 use cratefield_core::{Config, ConfigError, Migrations, Module, ModuleContext, Port};
-use ledgers_commands::Registry;
+use ledgers_commands::{NOT_TAX_ADVICE, Registry};
 use serde_json::{Value, json};
 
 /// `OpenAPI` module serving /v1/openapi
@@ -60,6 +60,7 @@ impl Module for OpenApiModule {
 /// Generates an `OpenAPI` 3.1.0 document from the registry.
 /// Self-contained: all $refs are resolved within the document.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn document(registry: &Registry) -> Value {
     let mut paths: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut components_schemas: serde_json::Map<String, Value> = serde_json::Map::new();
@@ -185,6 +186,13 @@ pub fn document(registry: &Registry) -> Value {
     let mut info = serde_json::Map::new();
     info.insert("title".to_string(), json!("Ledgers"));
     info.insert("version".to_string(), json!(env!("CARGO_PKG_VERSION")));
+    info.insert("description".to_string(), json!(NOT_TAX_ADVICE));
+
+    let mut license = serde_json::Map::new();
+    license.insert("name".to_string(), json!("MIT"));
+    license.insert("identifier".to_string(), json!("MIT"));
+    info.insert("license".to_string(), Value::Object(license));
+
     doc.insert("info".to_string(), Value::Object(info));
 
     doc.insert("paths".to_string(), Value::Object(paths));
@@ -270,6 +278,8 @@ mod tests {
         let registry = Registry::new();
         let doc = document(&registry);
         assert_eq!(doc["info"]["title"], "Ledgers");
+        assert_eq!(doc["info"]["description"], NOT_TAX_ADVICE);
+        assert_eq!(doc["info"]["license"]["identifier"], "MIT");
     }
 
     #[test]

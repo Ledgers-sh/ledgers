@@ -7,7 +7,7 @@
 //! - Global flags: `--json`, `--profile`, `--url`, `--key`
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use ledgers_commands::Registry;
+use ledgers_commands::{NOT_TAX_ADVICE, Registry};
 
 /// Builds the root command with registry-driven subcommands.
 pub fn build_root(registry: &Registry) -> Command {
@@ -18,6 +18,7 @@ pub fn build_root(registry: &Registry) -> Command {
             "Ledgers is a double-entry accounting system designed for AI agents.\n\
              Every operation is executed with policy checks and audit logging.",
         )
+        .after_help(NOT_TAX_ADVICE)
         .subcommand_required(true)
         .arg_required_else_help(true)
         // Global flags
