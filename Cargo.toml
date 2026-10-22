@@ -98,6 +98,15 @@ time = "=0.3.55"
 # this; ledgers-ledger's interim period hashes still stamp with it.
 sha2 = "0.10"
 
+# Secure zero-copy types for PIN handling (issue #57):
+zeroize = { version = "1", features = ["derive"] }
+
+# Hex encoding for external_id (issue #57):
+hex = "0.4"
+
+# FinTS 3.0 PIN/TAN bank feed (issue #57, ledgers-fints crate):
+fints-rs = "=0.2.0"
+
 # Dev dependencies for ledgers-commands (issue #10):
 insta = { version = "1", features = ["json"] }
 trybuild = "1"
