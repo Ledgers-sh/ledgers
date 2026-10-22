@@ -147,6 +147,7 @@ pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
         db: kit.db.clone(),
         clock,
         id_gen: ids,
+        rate_limiter: None,
     };
 
     let full = pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("bootstrap");
