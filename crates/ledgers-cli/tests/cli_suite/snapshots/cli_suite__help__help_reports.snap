@@ -12,6 +12,7 @@ Commands:
   profit-and-loss               reports.profit_and_loss
   trends                        reports.trends
   trial-balance                 reports.trial_balance
+  units-summary                 reports.units_summary
   help                          Print this message or the help of the given subcommand(s)
 
 Options:

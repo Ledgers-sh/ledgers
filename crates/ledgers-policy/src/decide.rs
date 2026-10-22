@@ -415,6 +415,7 @@ mod tests {
             last_used_at: None,
             revoked_at: if tc.revoked { Some(now) } else { None },
             chart_changes: false,
+            unit: None,
         }
     }
 
@@ -707,6 +708,7 @@ mod tests {
             last_used_at: None,
             revoked_at: None,
             chart_changes: false,
+            unit: None,
         };
 
         let meta = CommandMeta {
@@ -852,6 +854,7 @@ mod tests {
             last_used_at: None,
             revoked_at: None,
             chart_changes: false,
+            unit: None,
         };
         let mut e = BTreeMap::new();
         e.insert("EUR".to_string(), 10_000);
@@ -891,6 +894,7 @@ mod tests {
             last_used_at: None,
             revoked_at: Some(now),
             chart_changes: false,
+            unit: None,
         };
         let inp2 = DecisionInput {
             now,
