@@ -1,0 +1,23 @@
+[package]
+name = "ledgers-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The fixture is pure data (no dependencies): entries, dimension values and
+# the golden totals the reports must reproduce. Money is integer minor units
+# (docs/PLAN.md section 3).
+
+[dev-dependencies]
+# Tests check the fixture against the bundled chart, the German VAT rates
+# and the money rules it must follow.
+ledgers-ledger = { workspace = true }
+ledgers-tax = { workspace = true }
+ledgers-money = { workspace = true }
+time = { workspace = true }
+
+[lints]
+workspace = true

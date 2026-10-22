@@ -812,7 +812,7 @@ fn guard_statements(
 /// # Errors
 /// [`JournalError::Money`] when an amount does not fit the storage width.
 pub async fn plan_post_entry(
-    _token: &ledgers_commands::ExecToken,
+    token: &ledgers_commands::ExecToken,
     db: &dyn Database,
     company_id: &str,
     entry: &Entry,
@@ -843,10 +843,11 @@ pub async fn plan_post_entry(
         outbox_id,
     };
 
-    // Plan the batch with default options (no period override, not human).
-    // This returns only the domain statements; the executor appends the audit event.
+    // The executor authenticated the principal: a person's post records
+    // `human`, an agent's records `agent` (docs/PLAN.md section 5). The
+    // executor appends the audit event.
     let options = PostOptions {
-        human: false,
+        human: token.acts_as_person(),
         ..Default::default()
     };
     let (statements, number) = plan_post_batch_statements_only(db, &raw, &ctx, &options).await?;

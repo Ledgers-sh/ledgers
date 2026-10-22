@@ -391,7 +391,7 @@ async fn load_key(
 
 /// The policy for one request: every agent key of the company, the chart's
 /// protected accounts, and the clock for expiry and rolling days.
-async fn load_policy(
+pub(crate) async fn load_policy(
     db: &dyn Database,
     company_id: &str,
     now: OffsetDateTime,

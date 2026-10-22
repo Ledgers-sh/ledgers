@@ -19,6 +19,7 @@ cratefield-core = { workspace = true }
 ledgers-approvals = { workspace = true }
 ledgers-auth = { workspace = true }
 ledgers-commands = { workspace = true }
+ledgers-demo = { workspace = true }
 ledgers-ext = { workspace = true }
 ledgers-ledger = { workspace = true }
 ledgers-storage = { workspace = true }
