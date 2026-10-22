@@ -80,6 +80,9 @@ LEDGERS_ALLOW_DEMO_SEED = "1"
 # Staging only: never set this in production.
 LEDGERS_SERVER_TIMING = "1"
 DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
+# The model reader for scanned invoices on staging: MiniMax, read with the
+# LEDGERS_MINIMAX_API_KEY secret (docs/deploy.md). Production sets nothing here.
+LEDGERS_EXTRACT_PROVIDER = "minimax"
 
 [[env.staging.d1_databases]]
 binding = "DB"

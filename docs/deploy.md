@@ -58,6 +58,7 @@ is set by the repository; the operator sets them the same way:
 ```sh
 openssl rand -hex 32 | npx wrangler@4.148.0 secret put LEDGERS_DOCUMENT_SIGNING_KEY --env staging
 npx wrangler@4.148.0 secret put LEDGERS_EXTRACT_API_KEY --env staging
+npx wrangler@4.148.0 secret put LEDGERS_MINIMAX_API_KEY --env staging
 ```
 
 - `LEDGERS_DOCUMENT_SIGNING_KEY` signs the five-minute download links for
@@ -67,9 +68,21 @@ npx wrangler@4.148.0 secret put LEDGERS_EXTRACT_API_KEY --env staging
   extractor (`claude-haiku-4-5`) uses to read scans and photos. Without it only
   PDFs with a text layer are read, and the Bills screen says so. The key is
   never logged or returned by any endpoint.
+- `LEDGERS_MINIMAX_API_KEY` is the MiniMax key for the MiniMax reader
+  (`https://api.minimax.io/v1/chat/completions`). It reads images (JPEG, PNG,
+  GIF, WEBP) and PDFs with a text layer. A scanned PDF without a text layer
+  gets the "needs a photo" flag, because MiniMax's documented inputs do not
+  include PDF files. The key must be an API key from the MiniMax platform; a
+  coding-plan subscription on its own is not one.
+- `LEDGERS_EXTRACT_PROVIDER` chooses the reader: `anthropic`, `minimax` or
+  `rules`. Unset, it is `anthropic` when `LEDGERS_EXTRACT_API_KEY` is set,
+  `minimax` when only `LEDGERS_MINIMAX_API_KEY` is set, and the rules otherwise.
+  Naming a provider whose key is missing is a configuration error at startup,
+  never a silent fallback. `LEDGERS_MINIMAX_MODEL` overrides the MiniMax model
+  id (default `MiniMax-M3`).
 
-Neither value appears in `wrangler.toml`; `[env.staging.vars]` needs no new
-entries for this feature.
+Staging sets `LEDGERS_EXTRACT_PROVIDER = "minimax"` in `[env.staging.vars]`;
+production sets no provider and keeps the default.
 
 ## 4. Apply the migrations
 

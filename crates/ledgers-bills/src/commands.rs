@@ -293,6 +293,7 @@ fn row_of(
         instruction_flags: flags,
         iban_changed,
         source: input.source.clone().unwrap_or_else(|| "manual".to_owned()),
+        reader: input.reader.clone(),
         posted_entry_id,
         discarded_at: None,
         created_by: input.created_by.clone(),
@@ -350,6 +351,7 @@ fn view_of(row: BillRow, journal_preview: Vec<PreviewLine>) -> BillView {
         checks: row.checks,
         flags,
         source: row.source,
+        reader: row.reader,
         posted_entry_id: row.posted_entry_id,
         journal_preview: if posted { Vec::new() } else { journal_preview },
         created_by: row.created_by,
@@ -503,8 +505,8 @@ fn insert_bill(company_id: &str, row: &BillRow) -> Result<Statement, CommandErro
     Ok(Statement::with_values(
         "INSERT INTO bill (id, company_id, document_id, vendor_id, invoice_number, invoice_date, due_date, \
          currency, net_minor, vat_minor, gross_minor, lines_json, confidence_json, checks_json, \
-         instruction_flags, iban_changed, source, posted_entry_id, created_by, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)"
+         instruction_flags, iban_changed, source, reader, posted_entry_id, created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)"
             .to_owned(),
         vec![
             Value::from(row.id.as_str()),
@@ -524,6 +526,7 @@ fn insert_bill(company_id: &str, row: &BillRow) -> Result<Statement, CommandErro
             Value::from(json_text(&row.instruction_flags)?),
             Value::from(i64::from(row.iban_changed)),
             Value::from(row.source.as_str()),
+            Value::from(row.reader.clone()),
             Value::from(row.created_by.as_str()),
             Value::from(row.created_at.as_str()),
             Value::from(row.updated_at.as_str()),
@@ -590,6 +593,7 @@ impl Command for BillsUpdate {
         let mut fields = input.fields.clone();
         fields.document_id = existing.document_id.clone();
         fields.source = Some(existing.source.clone());
+        fields.reader = existing.reader.clone();
         fields.created_by = existing.created_by.clone();
         let text = document_text(db, &ctx.company_id, &existing.document_id).await?;
         check_duplicates(

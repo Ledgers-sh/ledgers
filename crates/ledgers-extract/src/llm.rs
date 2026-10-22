@@ -15,7 +15,7 @@
 
 use crate::guard::neutralise_markup;
 use crate::schema::ExtractedInvoice;
-use crate::{DocumentInput, ExtractError, Extraction, Extractor, Source};
+use crate::{DocumentInput, ExtractError, Extraction, Extractor, Reader, Source};
 use base64::Engine;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -134,6 +134,7 @@ impl AnthropicExtractor {
             .get("input")
             .cloned()
             .ok_or_else(|| ExtractError::Malformed("the tool call has no input".to_owned()))?;
+        crate::schema::check_reply_shape(&input).map_err(ExtractError::Malformed)?;
         serde_json::from_value(input).map_err(|err| ExtractError::Malformed(err.to_string()))
     }
 }
@@ -167,6 +168,7 @@ impl Extractor for AnthropicExtractor {
         Ok(Extraction {
             invoice: Self::parse_answer(&answer)?,
             source: Source::Llm,
+            reader: Reader::Anthropic,
         })
     }
 }
@@ -283,6 +285,7 @@ mod tests {
         let result = pollster::block_on(extractor.extract(&doc)).expect("extracts");
         assert_eq!(result.invoice.gross_minor, Some(119_000));
         assert_eq!(result.source, Source::Llm);
+        assert_eq!(result.reader, Reader::Anthropic);
         assert_eq!(recorded.calls.lock().expect("lock").len(), 1);
         assert!(!format!("{extractor:?}").contains("sk-test-secret"));
     }

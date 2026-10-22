@@ -35,6 +35,7 @@ test.describe('bills: inbox, review and posting (issues #20 to #22, #32, #34)', 
 
     await row.getByRole('link', { name: 'Review' }).click();
     await expect(page.getByRole('heading', { name: 'Review bill' })).toBeVisible();
+    await expect(page.getByTestId('reader')).toContainText('PDF text layer (rules)');
     // The document is on the left, the fields on the right, the checks beside them.
     await expect(page.getByRole('region', { name: 'Document' }).locator('iframe.doc-frame')).toBeVisible();
     await expect(page.getByRole('complementary', { name: 'Checks' }).getByText('Line items are present')).toBeVisible();
@@ -103,6 +104,20 @@ test.describe('bills: inbox, review and posting (issues #20 to #22, #32, #34)', 
     await upload(page, 'invoice.pdf');
     await expect(page.getByRole('status').filter({ hasText: 'already stored' })).toBeVisible();
     await expect(page.getByRole('row', { name: /Halden Supplies GmbH/ })).toHaveCount(1);
+  });
+
+  test('a scanned PDF no reader takes is flagged for a photo, and the review names the reader', async ({ page }) => {
+    await mockApi({ person: true });
+    await signInPerson(page);
+    await page.goto('#/bills');
+    await upload(page, 'blank-scan.pdf');
+    await expect(page.getByRole('row', { name: /Unread document/ })).toBeVisible();
+    await page.getByRole('row', { name: /Unread document/ }).getByRole('link', { name: 'Review' }).click();
+    await expect(page.getByTestId('needs-photo')).toContainText('needs a photo upload or the Anthropic provider');
+    await expect(page.getByTestId('reader')).toContainText('no reader (scanned PDF)');
+    if (process.env.BILLS_SHOT_DIR) {
+      await page.screenshot({ path: join(SHOT_DIR, 'review-unread-desktop-light.png'), fullPage: true });
+    }
   });
 
   test('a photo without a model key is entered by hand, and the screen says so', async ({ page }) => {

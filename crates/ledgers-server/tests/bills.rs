@@ -138,6 +138,8 @@ fn a_pdf_extracts_to_a_draft_that_needs_review_and_names_its_fields() {
     assert_eq!(bill["vendor"]["needs_review"], true);
     assert_eq!(bill["gross_minor"], 119_000);
     assert_eq!(reply.body["extraction"]["mode"], "text-layer");
+    assert_eq!(bill["reader"], "rules", "the reader is named on the bill");
+    assert_eq!(reply.body["extraction"]["needs_photo"], false);
     assert!(
         reply.body["extraction"]["warnings"]
             .as_array()
@@ -626,4 +628,43 @@ fn a_discarded_draft_cannot_post_and_nothing_is_written() {
         None,
     );
     assert_eq!(entry.status, StatusCode::NOT_FOUND);
+}
+
+#[test]
+fn a_scanned_pdf_no_reader_takes_is_flagged_for_a_photo_and_not_left_as_a_silent_empty_draft() {
+    let fx = fixture();
+    // A PDF whose text layer is empty: a scan, as far as the readers can tell.
+    let (status, upload) = upload_pdf(
+        &fx,
+        &fx.keys.draft,
+        &ledgers_extract::fixture::pdf_with_text(&[]),
+    );
+    assert_eq!(status, StatusCode::CREATED);
+    let reply = extract(&fx, &fx.keys.full, &doc_id_of(&upload));
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.body["bill"]["reader"], "unread-scan");
+    assert_eq!(reply.body["bill"]["source"], "manual");
+    assert_eq!(reply.body["extraction"]["needs_photo"], true);
+    assert_eq!(reply.body["extraction"]["mode"], "manual");
+    assert!(
+        reply.body["extraction"]["warnings"]
+            .as_array()
+            .is_some_and(|w| w
+                .iter()
+                .any(|x| x.as_str().unwrap_or("").contains("photo upload"))),
+        "the scan is named as needing a photo: {}",
+        reply.body
+    );
+    // The bill is read back with the same reader.
+    let bill_id = reply.body["bill"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_owned();
+    let read = fx.send(
+        Method::GET,
+        &format!("/v1/bills/{bill_id}"),
+        &fx.keys.read,
+        None,
+    );
+    assert_eq!(read.json()["bill"]["reader"], "unread-scan");
 }

@@ -1078,6 +1078,14 @@
                     ],
                     "default": null
                   },
+                  "reader": {
+                    "description": "Which reader produced the fields: `rules`, `anthropic`, `minimax`, or\n`unread-scan` for a scanned PDF no configured reader takes. Filled by\nthe server from the extraction.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
                   "created_by": {
                     "description": "The caller, recorded on the bill (filled by the server).",
                     "type": "string",
@@ -1729,6 +1737,14 @@
                   },
                   "source": {
                     "description": "Which extractor (or `manual`) produced the fields.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "reader": {
+                    "description": "Which reader produced the fields: `rules`, `anthropic`, `minimax`, or\n`unread-scan` for a scanned PDF no configured reader takes. Filled by\nthe server from the extraction.",
                     "type": [
                       "string",
                       "null"
@@ -3330,6 +3346,13 @@
             "description": "Which extractor produced the fields.",
             "type": "string"
           },
+          "reader": {
+            "description": "Which reader produced the fields, when one did (see `BillInput::reader`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "posted_entry_id": {
             "description": "The posted journal entry, once posted.",
             "type": [
@@ -3634,11 +3657,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "needs_photo": {
+            "description": "True when the file is a scanned PDF that no configured reader takes:\nit needs a photo upload or the fields typed in by hand.",
+            "type": "boolean"
           }
         },
         "required": [
           "mode",
-          "warnings"
+          "warnings",
+          "needs_photo"
         ]
       },
       "PostedEntryView": {

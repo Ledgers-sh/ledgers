@@ -10,6 +10,13 @@
 //! - [`llm::AnthropicExtractor`] sends the file (a PDF document block or an
 //!   image) to the Messages API and reads the fields back through one forced
 //!   tool call with the [`schema::ExtractedInvoice`] schema.
+//! - [`minimax::MiniMaxExtractor`] sends images as data URLs and PDF text
+//!   layers as text to `MiniMax`'s OpenAI-compatible chat API, reading the
+//!   fields back through one tool call with the same schema. It never sends a
+//!   PDF file: a scan without a text layer is refused with
+//!   [`ExtractError::NeedsPhoto`].
+//!
+//! [`provider::select`] picks which model reader the configuration asks for.
 //!
 //! Whatever an extractor returns goes through [`checks`] (arithmetic, dates,
 //! currency, grounding in the text) and [`guard`] (instruction-like text).
@@ -20,12 +27,41 @@ pub mod checks;
 pub mod fixture;
 pub mod guard;
 pub mod llm;
+pub mod minimax;
 pub mod money;
 pub mod pdf;
+pub mod provider;
 pub mod rules;
 pub mod schema;
 
 pub use schema::{ExtractedInvoice, ExtractedLine};
+
+/// Which reader produced the fields, as the review screen names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reader {
+    /// The fixed rules over the PDF text layer.
+    Rules,
+    /// The Anthropic Messages API.
+    Anthropic,
+    /// `MiniMax`'s chat API.
+    MiniMax,
+    /// Nothing could read the file: a scanned PDF with no text layer and no
+    /// model that takes it. The draft needs a photo or a typed entry.
+    UnreadScan,
+}
+
+impl Reader {
+    /// The stored and reported name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Reader::Rules => "rules",
+            Reader::Anthropic => "anthropic",
+            Reader::MiniMax => "minimax",
+            Reader::UnreadScan => "unread-scan",
+        }
+    }
+}
 
 /// Which extractor produced a result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +101,8 @@ pub struct Extraction {
     pub invoice: ExtractedInvoice,
     /// Which extractor read them.
     pub source: Source,
+    /// Which reader it was, for the review screen.
+    pub reader: Reader,
 }
 
 /// Why an extraction did not produce fields.
@@ -79,6 +117,9 @@ pub enum ExtractError {
     /// The service answered, but not with the expected fields.
     #[error("the extraction result is malformed: {0}")]
     Malformed(String),
+    /// A scanned PDF with no text layer, and this reader does not take PDFs.
+    #[error("scanned PDF needs a photo upload or the Anthropic provider")]
+    NeedsPhoto,
 }
 
 /// Reads one document into fields.

@@ -20,6 +20,8 @@ time = { workspace = true }
 
 [dev-dependencies]
 pollster = { workspace = true }
+# The live MiniMax check (tests/minimax_live.rs, ignored in CI only).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 
 [lints]
 workspace = true

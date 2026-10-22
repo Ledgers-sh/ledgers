@@ -101,6 +101,10 @@ pub struct BillInput {
     pub confidence: std::collections::BTreeMap<String, u8>,
     /// Which extractor (or `manual`) produced the fields.
     pub source: Option<String>,
+    /// Which reader produced the fields: `rules`, `anthropic`, `minimax`, or
+    /// `unread-scan` for a scanned PDF no configured reader takes. Filled by
+    /// the server from the extraction.
+    pub reader: Option<String>,
     /// The caller, recorded on the bill (filled by the server).
     pub created_by: String,
 }
@@ -218,6 +222,8 @@ pub struct BillView {
     pub flags: Vec<String>,
     /// Which extractor produced the fields.
     pub source: String,
+    /// Which reader produced the fields, when one did (see `BillInput::reader`).
+    pub reader: Option<String>,
     /// The posted journal entry, once posted.
     pub posted_entry_id: Option<String>,
     /// The entry the bill posts as, when every amount and account is known.

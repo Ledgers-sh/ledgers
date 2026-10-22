@@ -91,6 +91,17 @@ pub fn harness(
         errors.push(e);
         errors
     })?;
+    let model_reader = ledgers_extract::provider::select(
+        cfg.get("LEDGERS_EXTRACT_PROVIDER").as_deref(),
+        cfg.get("LEDGERS_EXTRACT_API_KEY").as_deref(),
+        cfg.get("LEDGERS_MINIMAX_API_KEY").as_deref(),
+        cfg.get("LEDGERS_MINIMAX_MODEL").as_deref(),
+    )
+    .map_err(|e| {
+        let mut errors = ConfigError::default();
+        errors.push(e);
+        errors
+    })?;
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(
         dispatch::ServerDispatch::new(company_id.clone())
             .with_app_origins(cors_origins.clone())
@@ -99,7 +110,7 @@ pub fn harness(
                     .unwrap_or_else(|| public_url.clone()),
             )
             .with_document_key(document_key.clone())
-            .with_extract_key(cfg.get("LEDGERS_EXTRACT_API_KEY")),
+            .with_model_reader(model_reader),
     );
 
     // Generate domain modules
