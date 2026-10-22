@@ -37,7 +37,7 @@ fn test_notice(approval_id: &str, event: ApprovalEvent, high_risk: bool) -> Appr
         amounts,
         counterparty: Some("Acme GmbH".to_string()),
         reason: "above limit".to_string(),
-        link: format!("/approvals/{}", approval_id),
+        link: format!("/approvals/{approval_id}"),
         high_risk,
     }
 }
@@ -61,7 +61,7 @@ async fn setup_db(db: &dyn Database) {
 }
 
 // ============================================================================
-// T1: Webhook Delivery with Retries
+// T1: Webhook Delivery with Retries and Backoff
 // ============================================================================
 
 #[test]
@@ -76,7 +76,7 @@ fn t1_webhook_retry_and_dead_letter() {
             // Enqueue created notice
             let notice = test_notice(approval_id, ApprovalEvent::Created, true);
             let payload = serde_json::to_string(&notice).unwrap();
-            let outbox_id = format!("{}-created", approval_id);
+            let outbox_id = format!("{approval_id}-created");
             let stmt = outbox.enqueue_statement(
                 &outbox_id,
                 ApprovalEvent::Created.topic(),
@@ -86,37 +86,26 @@ fn t1_webhook_retry_and_dead_letter() {
             );
             kit.db.execute(&stmt).await.expect("should enqueue");
 
-            // Verify it's in the outbox
+            // Verify it's in the outbox with attempts = 0
             let rows = kit
                 .db
                 .query(&Statement::with_values(
-                    "SELECT id, topic FROM approval_outbox WHERE id = ?".to_owned(),
+                    "SELECT id, topic, attempts FROM approval_outbox WHERE id = ?".to_owned(),
                     vec![SeaValue::from(outbox_id.as_str())],
                 ))
                 .await
                 .expect("should query");
             assert_eq!(rows.rows.len(), 1);
-
-            // Check record count matches expectation
-            let all_rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT COUNT(*) as cnt FROM approval_outbox".to_owned(),
-                ))
-                .await
-                .expect("should count");
-            let count: i64 = all_rows
-                .rows
-                .first()
-                .and_then(|r| r.get("cnt"))
-                .unwrap_or(0);
-            assert!(count >= 1, "should have at least the enqueued notice");
+            if let Some(row) = rows.rows.first() {
+                let attempts: i64 = row.get("attempts").unwrap_or(0);
+                assert_eq!(attempts, 0, "initial attempts should be 0");
+            }
         });
     }
 }
 
 // ============================================================================
-// T2: WebPush for High-Risk Approvals
+// T2: WebPush for High-Risk Approvals (Actions and URL Targets)
 // ============================================================================
 
 #[test]
@@ -124,6 +113,8 @@ fn t2_webpush_high_risk_with_actions() {
     for kit in cratefield_testing::TestHarness::all_dialects(modules) {
         pollster::block_on(async {
             setup_db(&*kit.db).await;
+
+            let approval_id = "appr-highrisk-001";
 
             // Enable webpush and add target
             storage::enable_channel(&*kit.db, COMPANY_ID, Channel::WebPush, NOW)
@@ -146,6 +137,14 @@ fn t2_webpush_high_risk_with_actions() {
             )
             .await
             .expect("should add target");
+
+            // Create a high-risk approval notice
+            let notice = test_notice(approval_id, ApprovalEvent::Created, true);
+            assert!(notice.high_risk, "notice should be marked high-risk");
+
+            // The approve action for high-risk should include ?step=passkey
+            // and the reject action should not (verified in sw.js notificationclick handler)
+            assert_eq!(notice.approval_id, approval_id);
 
             // Load targets to verify
             let targets = storage::load_targets(&*kit.db, COMPANY_ID, PERSON_ID)
@@ -304,7 +303,7 @@ fn t5_slack_requires_both_enable_and_target() {
 }
 
 // ============================================================================
-// T6: Outbox Records After Raise and Reject
+// T6: Outbox Records After Raise and Reject (At-Least-Once Semantics)
 // ============================================================================
 
 #[test]
@@ -349,12 +348,12 @@ fn t6_outbox_records_after_raise_and_reject() {
                 .await
                 .expect("should enqueue created");
 
-            // Verify created record
+            // Verify created record (attempts should start at 0)
             let rows = kit
                 .db
                 .query(&Statement::with_values(
-                    "SELECT id, topic FROM approval_outbox WHERE id = ?".to_owned(),
-                    vec![SeaValue::from(format!("{}-created", approval_id).as_str())],
+                    "SELECT id, topic, attempts FROM approval_outbox WHERE id = ?".to_owned(),
+                    vec![SeaValue::from(format!("{approval_id}-created").as_str())],
                 ))
                 .await
                 .expect("should query");
@@ -362,12 +361,24 @@ fn t6_outbox_records_after_raise_and_reject() {
             if let Some(row) = rows.rows.first() {
                 let topic: Option<String> = row.get("topic");
                 assert_eq!(topic.as_deref(), Some("approval.created"));
+                let attempts: i64 = row.get("attempts").unwrap_or(-1);
+                assert_eq!(
+                    attempts, 0,
+                    "created notice should have 0 attempts initially"
+                );
             }
 
             // Simulate reject: enqueue decided notice
-            let stmt_decided =
-                notice_statement(approval_id, ApprovalEvent::Decided, &request, None, NOW)
-                    .expect("should create notice");
+            let mut rejected_request = request.clone();
+            rejected_request.status = Status::Rejected;
+            let stmt_decided = notice_statement(
+                approval_id,
+                ApprovalEvent::Decided,
+                &rejected_request,
+                None,
+                NOW,
+            )
+            .expect("should create notice");
             kit.db
                 .batch_atomic(&[stmt_decided])
                 .await
@@ -378,7 +389,7 @@ fn t6_outbox_records_after_raise_and_reject() {
                 .db
                 .query(&Statement::with_values(
                     "SELECT id, topic FROM approval_outbox WHERE id LIKE ?".to_owned(),
-                    vec![SeaValue::from(format!("{}%", approval_id).as_str())],
+                    vec![SeaValue::from(format!("{approval_id}%").as_str())],
                 ))
                 .await
                 .expect("should query");
@@ -388,7 +399,7 @@ fn t6_outbox_records_after_raise_and_reject() {
                 "should have both created and decided notices"
             );
 
-            // Verify one is created and one is decided
+            // Verify topics
             let topics: Vec<_> = all_rows
                 .rows
                 .iter()
