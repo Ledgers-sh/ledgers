@@ -6,8 +6,24 @@ error[E0624]: associated function `new` is private
    |
   ::: $WORKSPACE/crates/ledgers-commands/src/exec.rs
    |
-   |     fn new() -> Self {
-   |     ---------------- private associated function defined here
+   |     fn new(person: bool) -> Self {
+   |     ---------------------------- private associated function defined here
+
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
+  --> tests/ui/forge_token_constructor.rs:10:18
+   |
+10 |     let _token = ledgers_commands::ExecToken::new();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- argument #1 of type `bool` is missing
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/ledgers-commands/src/exec.rs
+   |
+   |     fn new(person: bool) -> Self {
+   |        ^^^
+help: provide the argument
+   |
+10 |     let _token = ledgers_commands::ExecToken::new(/* bool */);
+   |                                                   ++++++++++
 
 error[E0277]: the trait bound `ExecToken: Default` is not satisfied
   --> tests/ui/forge_token_constructor.rs:15:19

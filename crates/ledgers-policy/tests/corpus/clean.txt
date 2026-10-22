@@ -1,0 +1,4 @@
+Invoice INV-001 from Halden Works GmbH
+Date: 2026-10-22
+Amount: EUR 500.00
+IBAN: DE89370400440532013000

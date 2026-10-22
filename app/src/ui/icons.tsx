@@ -1,9 +1,15 @@
 import type { JSX } from 'preact';
 
 type IconProps = { name: IconName; class?: string };
-export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'plus' | 'sun' | 'moon' | 'logout';
+export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'approvals' | 'plus' | 'sun' | 'moon' | 'logout' | 'settings';
 
 const PATHS: Record<IconName, JSX.Element> = {
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </>
+  ),
   overview: (
     <>
       <path d="M4 19V9" />
@@ -35,6 +41,12 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" />
       <path d="M9 8h6M9 12h6" />
+    </>
+  ),
+  approvals: (
+    <>
+      <path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" />
+      <path d="M8.5 12l2.5 2.5L16 10" />
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,

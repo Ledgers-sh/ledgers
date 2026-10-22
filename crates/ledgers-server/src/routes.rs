@@ -4,7 +4,8 @@
 //! that mounts routes from the registry, dispatching through [`Dispatch`].
 
 use crate::dispatch::{DISPATCH_PORTS, Deps};
-use cratefield_core::axum::http::header;
+use crate::people::presented_from;
+use crate::rate_limiting::admit;
 use cratefield_core::axum::response::IntoResponse;
 use cratefield_core::axum::{
     self,
@@ -19,18 +20,43 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// How a request presents its caller: an agent key, or a person's session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Presented {
+    /// `Authorization: Bearer <agent key>`.
+    Bearer(String),
+    /// The person's session cookie, with what the request is checked against.
+    Session(SessionPresented),
+    /// A principal the server vouches for in-process, such as the internal
+    /// agent the demo seed posts as. No request can present one: the HTTP
+    /// adapters only build `Bearer` and `Session`.
+    Principal(Principal),
+}
+
+/// A session cookie as the request presented it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionPresented {
+    /// The opaque session id from the cookie.
+    pub id: String,
+    /// The request's `Origin`, when it sent one.
+    pub origin: Option<String>,
+    /// Whether the method is safe (GET, HEAD, OPTIONS). State-changing methods
+    /// need an allowed origin.
+    pub safe: bool,
+}
+
 /// Dispatches commands: the registry's commands run against the harness
 /// database, behind authentication, policy and audit.
 #[async_trait::async_trait]
 pub trait Dispatch: Send + Sync {
-    /// Runs `command` with `input` for the principal behind `credential`.
+    /// Runs `command` with `input` as the caller `presented` (or anonymous).
     async fn dispatch(
         &self,
         deps: &Deps,
         command: &str,
         input: Value,
         request_id: &str,
-        credential: Option<String>,
+        presented: Option<Presented>,
     ) -> Result<Value, Problem>;
 
     /// Resolves the principal behind a bearer credential, for surfaces that
@@ -81,7 +107,7 @@ impl DomainModule {
 
                                 async move {
                                     let request_id = scope.request_id.clone();
-                                    let credential = extract_bearer(&headers);
+                                    let presented = presented_from(&headers, false);
 
                                     if let (Value::Object(obj), Some(Path(params))) =
                                         (&mut input, params)
@@ -91,9 +117,14 @@ impl DomainModule {
                                         }
                                     }
 
+                                    if let Err(limited) =
+                                        admit(dispatch.as_ref(), &deps, presented.as_ref()).await
+                                    {
+                                        return limited.into_response();
+                                    }
                                     respond(
                                         dispatch
-                                            .dispatch(&deps, &cmd, input, &request_id, credential)
+                                            .dispatch(&deps, &cmd, input, &request_id, presented)
                                             .await,
                                     )
                                 }
@@ -115,7 +146,7 @@ impl DomainModule {
 
                                 async move {
                                     let request_id = scope.request_id.clone();
-                                    let credential = extract_bearer(&headers);
+                                    let presented = presented_from(&headers, true);
 
                                     // Path and query parameters are the command's input:
                                     // every value arrives as a string.
@@ -125,6 +156,11 @@ impl DomainModule {
                                         input.insert(key, json!(value));
                                     }
 
+                                    if let Err(limited) =
+                                        admit(dispatch.as_ref(), &deps, presented.as_ref()).await
+                                    {
+                                        return limited.into_response();
+                                    }
                                     respond(
                                         dispatch
                                             .dispatch(
@@ -132,7 +168,7 @@ impl DomainModule {
                                                 &cmd,
                                                 Value::Object(input),
                                                 &request_id,
-                                                credential,
+                                                presented,
                                             )
                                             .await,
                                     )
@@ -171,6 +207,11 @@ impl Module for DomainModule {
         DISPATCH_PORTS
     }
 
+    fn optional(&self) -> &'static [Port] {
+        // The agent-key limiter, when the runtime provides one.
+        &[Port::RateLimiter]
+    }
+
     fn router(&self, ctx: ModuleContext) -> axum::Router {
         let deps = Deps::from_ports(&ctx.ports)
             .expect("the dispatch ports (db, clock, id_gen) are declared in requires()");
@@ -184,13 +225,6 @@ impl Module for DomainModule {
     fn validate_config(&self, _cfg: &dyn Config) -> Result<(), ConfigError> {
         Ok(())
     }
-}
-
-fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer ").map(ToString::to_string))
 }
 
 /// Generate domain modules from the registry.

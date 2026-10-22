@@ -4,11 +4,17 @@
  * Chrome sends for a bearer-authenticated cross-origin fetch). It keeps a small
  * ledger in memory so posting and reversing show up in the journal and reports.
  */
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
-export const API_ORIGIN = 'http://127.0.0.1:3000';
-const PORT = 3000;
+/** Port of the fake API. LEDGERS_MOCK_PORT moves it when another local server holds 3000. */
+const PORT = Number(process.env.LEDGERS_MOCK_PORT ?? 3000);
+/** Port of the app under test. LEDGERS_E2E_PORT moves it when another local server holds 5173. */
+const WEB_PORT = Number(process.env.LEDGERS_E2E_PORT ?? 5173);
+export const API_ORIGIN = `http://127.0.0.1:${PORT}`;
+export const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 export const API_KEY = 'test_sk_mock_0123456789';
 
 type Side = 'debit' | 'credit';
@@ -38,16 +44,57 @@ interface Entry {
 export interface MockOptions {
   /** Seed entries so screens are populated (screenshots). */
   seed?: boolean;
+  /**
+   * Serve a person session instead of the agent key: calls with no bearer key
+   * are the signed-in owner's, and the approvals fixtures are loaded.
+   */
+  person?: boolean;
+}
+
+export const PERSON = {
+  personId: 'person_01',
+  email: 'owner@example.test',
+  roles: ['owner'],
+  csrfToken: 'csrf_test',
+  expiresAt: null,
+};
+
+type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'superseded';
+
+export interface MockApproval {
+  id: string;
+  status: ApprovalStatus;
+  command: string;
+  risk: 'low' | 'high';
+  amount: Record<string, string>;
+  counterparty: string | null;
+  reason: string;
+  requested_by: string;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  result: Record<string, unknown> | null;
+  audit_ref: string | null;
+  request_hash: string;
+  preview: { lines: { account: string; side: Side; amount: string; currency: string }[]; totals: Record<string, string> } | null;
+}
+
+export interface ApprovalDecisionRecord {
+  id: string;
+  decision: 'approve' | 'reject';
+  reason?: string;
 }
 
 const ACCOUNTS = [
-  { number: '1000', name_key: 'account.cash', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '1200', name_key: 'account.receivables', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '2000', name_key: 'account.payables', account_type: 'liability', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '3000', name_key: 'account.capital', account_type: 'equity', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '4000', name_key: 'account.sales', account_type: 'income', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '6000', name_key: 'account.rent', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
-  { number: '6100', name_key: 'account.software', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '1000', name_key: 'account.generic_sme.cash', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '1200', name_key: 'account.generic_sme.accounts_receivable', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '2000', name_key: 'account.generic_sme.accounts_payable', account_type: 'liability', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '3000', name_key: 'account.generic_sme.share_capital', account_type: 'equity', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '4000', name_key: 'account.generic_sme.sales', account_type: 'income', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6000', name_key: 'account.generic_sme.rent', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6100', name_key: 'account.generic_sme.office_supplies', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
 ];
 
 const period = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -120,13 +167,19 @@ export interface MockApi {
   entries: Entry[];
   posts: unknown[];
   reversals: unknown[];
+  person: boolean;
+  approvals: MockApproval[];
+  decisions: ApprovalDecisionRecord[];
+  bulk: string[][];
 }
 
 /** The real server allows the app origin via CORS; the fake does the same. */
 const CORS: Record<string, string> = {
-  'Access-Control-Allow-Origin': 'http://localhost:5173',
+  'Access-Control-Allow-Origin': WEB_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  // The app sends the session cookie with credentials: 'include'.
+  'Access-Control-Allow-Credentials': 'true',
 };
 
 interface Reply {
@@ -139,12 +192,271 @@ function problem(status: number, title: string, detail?: string): Reply {
   return { status, problem: true, body: { type: 'about:blank', title, status, detail } };
 }
 
-const state: MockApi = { entries: [], posts: [], reversals: [] };
+/**
+ * The operations this fake serves: the document the real server generates for
+ * its registry (app/tests/fixtures/openapi.json, checked by the Rust test
+ * openapi_surfaces), so the palette lists what the server lists.
+ */
+const OPENAPI = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/openapi.json', import.meta.url)), 'utf8')) as Record<string, unknown>;
+
+const state: MockApi = { entries: [], posts: [], reversals: [], person: false, approvals: [], decisions: [], bulk: [] };
 let nextNumber = 1;
 
+const HOUR = 3_600_000;
+
+/** Fixtures for the approvals inbox: pending rows of each kind, an expired one, and two decided ones. */
+function approvalSeed(now = Date.now()): MockApproval[] {
+  const at = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+  const preview = (account: string, amount: string, currency: string): MockApproval['preview'] => ({
+    lines: [
+      { account, side: 'debit', amount, currency },
+      { account: '2000', side: 'credit', amount, currency },
+    ],
+    totals: { [currency]: amount },
+  });
+  const base = (overrides: Partial<MockApproval> & Pick<MockApproval, 'id'>): MockApproval => ({
+    status: 'pending',
+    command: 'entries.post',
+    risk: 'low',
+    amount: { EUR: '12500' },
+    counterparty: null,
+    reason: 'exceeds per-entry limit',
+    requested_by: 'key_agent_ledger_01',
+    created_at: at(-2 * HOUR),
+    expires_at: at(20 * HOUR),
+    decided_at: null,
+    decided_by: null,
+    decision_reason: null,
+    result: null,
+    audit_ref: null,
+    request_hash: `sha256:${overrides.id.replace(/[^a-z0-9]/gi, '').padEnd(24, '0').slice(0, 24)}`,
+    preview: null,
+    ...overrides,
+  });
+  return [
+    base({
+      id: 'apr-low-1',
+      counterparty: 'Halden Works GmbH',
+      amount: { EUR: '12500' },
+      reason: 'exceeds per-entry limit',
+      preview: preview('6000', '12500', 'EUR'),
+    }),
+    base({
+      id: 'apr-low-2',
+      counterparty: 'Nordvik Office AS',
+      amount: { EUR: '8000' },
+      reason: 'supplier not on the approved list',
+      preview: preview('6100', '8000', 'EUR'),
+    }),
+    base({
+      id: 'apr-low-3',
+      counterparty: 'Bayview Supplies',
+      amount: { USD: '4000' },
+      reason: 'new supplier',
+      preview: preview('6100', '4000', 'USD'),
+    }),
+    base({
+      id: 'apr-high-1',
+      counterparty: 'Kestrel Logistics',
+      risk: 'high',
+      amount: { EUR: '500000' },
+      reason: "exceeds the agent's daily limit",
+      preview: preview('6000', '500000', 'EUR'),
+    }),
+    base({
+      id: 'apr-expired-1',
+      counterparty: 'Old Quay Ltd',
+      amount: { EUR: '1000' },
+      created_at: at(-30 * HOUR),
+      expires_at: at(-1 * HOUR),
+      preview: preview('6000', '1000', 'EUR'),
+    }),
+    base({
+      id: 'apr-hist-1',
+      status: 'approved',
+      counterparty: 'Lindqvist Print',
+      amount: { EUR: '45000' },
+      created_at: at(-26 * HOUR),
+      decided_at: at(-25 * HOUR),
+      decided_by: 'person_01',
+      audit_ref: 'audit_01HZKQ7M',
+      result: { entry: { entry_id: 'entry-apr-hist-1', journal_id: 'general', fiscal_year: 2026, number: 1 } },
+    }),
+    base({
+      id: 'apr-hist-2',
+      status: 'rejected',
+      counterparty: 'Pell & Ross',
+      amount: { EUR: '900' },
+      created_at: at(-50 * HOUR),
+      decided_at: at(-49 * HOUR),
+      decided_by: 'person_01',
+      decision_reason: 'Duplicate of invoice 2026-101',
+      audit_ref: 'audit_01HZKQ2P',
+    }),
+  ];
+}
+
+function approvalView(item: MockApproval, withPreview: boolean) {
+  const { preview, ...rest } = item;
+  return withPreview ? { ...rest, preview } : rest;
+}
+
+function problemBody(status: number, slug: string, title: string, detail: string): Reply {
+  return {
+    status,
+    problem: true,
+    body: { type: `https://ledgers.sh/problems/${slug}`, title, status, detail },
+  };
+}
+
+function findApproval(id: string): MockApproval | undefined {
+  return state.approvals.find((a) => a.id === id);
+}
+
+/** A decision as the server makes it: expiry is checked first, then the decision is written. */
+function decideOne(item: MockApproval, decision: 'approve' | 'reject', reason: string | undefined): Reply | null {
+  if (item.status !== 'pending') return problemBody(409, 'approval-not-pending', 'Conflict', 'This request is no longer pending.');
+  if (Date.parse(item.expires_at) <= Date.now()) {
+    item.status = 'expired';
+    return problemBody(409, 'approval-expired', 'Conflict', 'This request expired before it was decided.');
+  }
+  if (decision === 'approve' && item.risk === 'high') {
+    return problemBody(401, 'reauth-required', 'Sign in again', 'Approving a high-risk request needs a fresh sign-in.');
+  }
+  item.decided_at = new Date().toISOString();
+  item.decided_by = PERSON.personId;
+  item.audit_ref = `audit_mock_${item.id}`;
+  if (decision === 'approve') {
+    item.status = 'approved';
+    item.result = { entry: { entry_id: `entry-${item.id}`, journal_id: 'general', fiscal_year: 2026, number: 100 + state.approvals.indexOf(item) } };
+  } else {
+    item.status = 'rejected';
+    item.decision_reason = reason ?? null;
+  }
+  state.decisions.push({ id: item.id, decision, ...(reason !== undefined ? { reason } : {}) });
+  return null;
+}
+
+/** The approvals routes, for the signed-in person. Returns null when the path is not an approvals route. */
+function handleApprovals(method: string, url: URL, bodyText: string): Reply | null {
+  const path = url.pathname;
+  if (method === 'GET' && path === '/v1/auth/session') return { status: 200, body: PERSON };
+  if (method === 'GET' && path === '/v1/approval-requests') {
+    const status = url.searchParams.get('status') ?? 'pending';
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const pendingCount = state.approvals.filter((a) => a.status === 'pending').length;
+    const wanted = status === 'decided' ? (a: MockApproval) => a.status !== 'pending' : (a: MockApproval) => a.status === 'pending';
+    const items = state.approvals
+      .filter(wanted)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((a) => approvalView(a, false));
+    return { status: 200, body: { pending_count: pendingCount, items } };
+  }
+  const one = /^\/v1\/approval-requests\/([^/]+)$/.exec(path);
+  if (method === 'GET' && one) {
+    const item = findApproval(decodeURIComponent(one[1]));
+    return item ? { status: 200, body: approvalView(item, true) } : problemBody(404, 'not-found', 'Not found', 'No such approval request.');
+  }
+  const decision = /^\/v1\/approval-requests\/([^/]+)\/decision$/.exec(path);
+  if (method === 'POST' && decision) {
+    const item = findApproval(decodeURIComponent(decision[1]));
+    if (!item) return problemBody(404, 'not-found', 'Not found', 'No such approval request.');
+    const body = JSON.parse(bodyText || '{}') as { decision: 'approve' | 'reject'; reason?: string };
+    const failed = decideOne(item, body.decision, body.reason);
+    if (failed) return failed;
+    return { status: 200, body: { approval: approvalView(item, false), result: item.result } };
+  }
+  if (method === 'POST' && path === '/v1/approval-requests/bulk-decision') {
+    const body = JSON.parse(bodyText) as { ids: string[]; decision: 'approve' };
+    const items = body.ids.map(findApproval);
+    if (items.some((item) => item === undefined)) return problemBody(404, 'not-found', 'Not found', 'An id is unknown.');
+    const picked = items as MockApproval[];
+    const currencies = new Set(picked.flatMap((item) => Object.keys(item.amount)));
+    if (picked.some((item) => item.risk === 'high') || currencies.size > 1) {
+      return problemBody(422, 'bulk-selection-refused', 'Selection refused', 'Select low-risk requests in one currency only. Nothing was approved.');
+    }
+    state.bulk.push(body.ids);
+    const results = picked.map((item) => {
+      decideOne(item, 'approve', undefined);
+      return { id: item.id, approval: approvalView(item, false), result: item.result };
+    });
+    return { status: 200, body: { results } };
+  }
+  return null;
+}
+
 /** Routes one request against the in-memory ledger. */
+/** An agent key as the fake keeps it. The token is held here only, like the server's hash. */
+interface MockKey {
+  id: string;
+  name: string;
+  prefix: string;
+  tier: string;
+  limits: Record<string, { per_entry: string; per_day: string }>;
+  created_at: string;
+  created_by: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token: string;
+}
+
+let keyCounter = 0;
+const keyState: { keys: MockKey[] } = { keys: [] };
+
+function keyView(key: MockKey) {
+  const { token: _token, ...view } = key;
+  return view;
+}
+
+function hex(length: number, seed: number): string {
+  return Array.from({ length }, (_, i) => ((seed * 31 + i * 7) % 16).toString(16)).join('');
+}
+
+/** Key commands, for the signed-in person (keys.list, keys.create, keys.revoke). */
+function handleKeys(method: string, path: string, bodyText: string): Reply | null {
+  if (method === 'GET' && path === '/v1/keys') return { status: 200, body: { keys: keyState.keys.map(keyView) } };
+  if (method === 'POST' && path === '/v1/keys') {
+    const input = JSON.parse(bodyText || '{}') as { name?: string; tier?: string; limits?: MockKey['limits'] };
+    const name = (input.name ?? '').trim();
+    if (name === '') return problem(400, 'Invalid input', 'name is required');
+    keyCounter += 1;
+    const prefix = `lk_live_${hex(16, keyCounter)}`;
+    const token = `${prefix}_${hex(64, keyCounter + 3)}`;
+    const key: MockKey = {
+      id: `01KEY${String(keyCounter).padStart(20, '0')}`,
+      name,
+      prefix,
+      tier: input.tier ?? 'read',
+      limits: input.limits ?? {},
+      created_at: '2026-10-22T10:00:00Z',
+      created_by: PERSON.personId,
+      last_used_at: null,
+      revoked_at: null,
+      token,
+    };
+    keyState.keys.push(key);
+    return { status: 200, body: { key: keyView(key), token } };
+  }
+  const revoke = /^\/v1\/keys\/([^/]+)\/revoke$/.exec(path);
+  if (method === 'POST' && revoke) {
+    const key = keyState.keys.find((k) => k.id === decodeURIComponent(revoke[1]));
+    if (!key) return problem(404, 'Not found');
+    key.revoked_at ??= '2026-10-22T11:00:00Z';
+    return { status: 200, body: { key: keyView(key) } };
+  }
+  return null;
+}
+
 function handle(method: string, url: URL, bodyText: string): Reply {
   const path = url.pathname;
+  const approvals = handleApprovals(method, url, bodyText);
+  if (approvals) return approvals;
+  if (path.startsWith('/v1/keys')) {
+    const keys = handleKeys(method, path, bodyText);
+    if (keys) return keys;
+  }
+  if (method === 'GET' && path === '/v1/auth/session' && state.person) return { status: 200, body: PERSON };
 
   if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
   if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
@@ -168,14 +480,20 @@ function handle(method: string, url: URL, bodyText: string): Reply {
     const assets = sum(state.entries, (n) => n.startsWith('1'), 'debit') - sum(state.entries, (n) => n.startsWith('1'), 'credit');
     const liabilities = sum(state.entries, (n) => n.startsWith('2'), 'credit') - sum(state.entries, (n) => n.startsWith('2'), 'debit');
     const equity = sum(state.entries, (n) => n.startsWith('3'), 'credit') - sum(state.entries, (n) => n.startsWith('3'), 'debit');
+    const result = netIncome(state.entries);
+    const difference = assets - liabilities - (equity + result);
     return {
       status: 200,
       body: {
         as_of: url.searchParams.get('as_of'),
         assets: money(assets),
         liabilities: money(liabilities),
-        // Equity includes the period's net income, as the real balance sheet does.
-        equity: money(equity + netIncome(state.entries)),
+        // Equity includes the current year result, as the real balance sheet does.
+        equity: money(equity + result),
+        equity_accounts: money(equity),
+        current_year_result: money(result),
+        difference: money(difference),
+        balanced: difference === 0n,
       },
     };
   }
@@ -267,6 +585,12 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.entries = options.seed ? seedEntries() : [];
   state.posts = [];
   state.reversals = [];
+  state.person = options.person ?? false;
+  state.approvals = options.person ? approvalSeed() : [];
+  state.decisions = [];
+  state.bulk = [];
+  keyState.keys = [];
+  keyCounter = 0;
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -279,9 +603,36 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end();
           return;
         }
-        if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+        if (req.method === 'GET' && new URL(req.url ?? '/', API_ORIGIN).pathname === '/v1/openapi') {
+          // The public document the app reads to decide which pages to show.
+          res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(OPENAPI));
+          return;
+        }
+        // A person session: calls without a bearer key are the signed-in owner's.
+        const asPerson = state.person && !req.headers.authorization;
+        const path = new URL(req.url ?? '/', API_ORIGIN).pathname;
+        // Signed out: no key and no session. The people sign-in answers 401 here,
+        // which the app shows as the sign-in screen. Specs mock signed-in sessions.
+        if (!asPerson && path === '/v1/auth/session' && req.headers.authorization !== `Bearer ${API_KEY}`) {
+          res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(401, 'Sign-in required').body));
+          return;
+        }
+        if (!asPerson && req.headers.authorization !== `Bearer ${API_KEY}`) {
           res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(401, 'Unauthorized').body));
+          return;
+        }
+        // Agent keys may not manage keys or review approvals (the server answers 403).
+        if (path.startsWith('/v1/keys') && req.headers.authorization === `Bearer ${API_KEY}`) {
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
+          return;
+        }
+        if (!asPerson && path.startsWith('/v1/approval-requests')) {
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
         }
         const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
@@ -304,14 +655,33 @@ export async function stopMockApi(): Promise<void> {
   if (current) await new Promise<void>((resolve) => current.close(() => resolve()));
 }
 
-/** Puts the API key in sessionStorage before any page script runs (skips the connect screen). */
-export async function signIn(page: Page, theme: 'dark' | 'light' = 'dark') {
+/**
+ * Puts the API key in sessionStorage before any page script runs (skips the
+ * connect screen), with the theme and language to start in.
+ */
+export async function signIn(page: Page, theme: 'dark' | 'light' = 'dark', locale: 'en' | 'de' | 'id' | 'ar' = 'en') {
   await page.addInitScript(
-    ({ key, origin, themeValue }) => {
+    ({ key, origin, themeValue, localeValue }) => {
       window.sessionStorage.setItem('ledgers.apiKey', key);
       window.sessionStorage.setItem('ledgers.baseUrl', origin);
       window.localStorage.setItem('ledgers.theme', themeValue);
+      window.localStorage.setItem('ledgers.locale', localeValue);
     },
-    { key: API_KEY, origin: API_ORIGIN, themeValue: theme },
+    { key: API_KEY, origin: API_ORIGIN, themeValue: theme, localeValue: locale },
+  );
+}
+
+/**
+ * Starts a person session (no agent key): the screens a signed-in person sees,
+ * such as the approvals inbox, which an agent key is refused. Use with
+ * mockApi({ person: true }).
+ */
+export async function signInPerson(page: Page, theme: 'dark' | 'light' = 'dark', locale: 'en' | 'de' | 'id' | 'ar' = 'en') {
+  await page.addInitScript(
+    ({ themeValue, localeValue }) => {
+      window.localStorage.setItem('ledgers.theme', themeValue);
+      window.localStorage.setItem('ledgers.locale', localeValue);
+    },
+    { themeValue: theme, localeValue: locale },
   );
 }

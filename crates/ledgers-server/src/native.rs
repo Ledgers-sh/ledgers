@@ -3,7 +3,9 @@
 //! applies every module's migrations, runs the development bootstrap when
 //! `LEDGERS_DEV=1`, and serves until shutdown.
 
+use crate::demo;
 use crate::dispatch::{self, Deps};
+use crate::rate_limiting;
 use crate::{harness, is_dev};
 use cratefield_adapter_sqlite::SqliteDatabase;
 use cratefield_core::{Config, Database};
@@ -42,9 +44,14 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
     let dev = is_dev(&cfg);
 
     let sqlite = Arc::new(SqliteDatabase::open(&options.database_path)?);
+    // The native runtime has no Redis limiter unless one is configured; agent
+    // keys then get this per-process fixed window instead of none at all.
+    let per_minute =
+        rate_limiting::per_minute_from_setting(cfg.get("LEDGERS_RATE_LIMIT_PER_MIN").as_deref())?;
     let native = Native::new()
         .db_arc(sqlite.clone() as Arc<dyn Database>)
-        .blob_arc(DirBlob::arc(&options.blob_dir));
+        .blob_arc(DirBlob::arc(&options.blob_dir))
+        .rate_limiter(rate_limiting::InProcessRateLimiter::per_minute(per_minute));
 
     let registry = dispatch::registry();
     let harness_inst = harness(&registry, &cfg, native.clone())?;
@@ -61,6 +68,19 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
             .await
             .map_err(|err| format!("dev bootstrap failed: {err}"))?;
         println!("dev key: {token}");
+        // LEDGERS_DEMO=0 keeps the development company empty.
+        if env::var("LEDGERS_DEMO").as_deref() != Ok("0")
+            && let Some(report) = demo::seed_if_empty(&deps, &cfg.company_id(), &token)
+                .await
+                .map_err(|err| format!("dev demo company failed to load: {err}"))?
+        {
+            tracing::info!(
+                "loaded the demo company: {} entries posted, {} reversed, {} already present",
+                report.posted,
+                report.reversed,
+                report.skipped
+            );
+        }
     }
 
     tracing::info!("Starting Ledgers server");

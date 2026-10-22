@@ -5,6 +5,7 @@ use cratefield_core::axum;
 use cratefield_core::axum::body::Body;
 use cratefield_core::axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request};
 use ledgers_commands::{CommandDescriptor, Limits, Principal, Registry, Tier};
+use ledgers_server::routes::Presented;
 use ledgers_server::{Deps, Dispatch, McpModule};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -57,7 +58,7 @@ impl Dispatch for TestDispatch {
         command: &str,
         _: Value,
         _: &str,
-        _: Option<String>,
+        _: Option<Presented>,
     ) -> Result<Value, Problem> {
         if command == "bills.match" {
             return Ok(

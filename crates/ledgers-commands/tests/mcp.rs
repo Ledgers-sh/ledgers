@@ -2,7 +2,7 @@
 
 use ledgers_commands::mcp::{
     ApprovalAmount, ApprovalCard, ApprovalCardLine, NOT_TAX_ADVICE, ToolCaller, ToolOutcome,
-    ToolScope, UNTRUSTED_DATA_RULE, handle, tools,
+    ToolScope, UNTRUSTED_DATA_RULE, escape_document_text, handle, tools,
 };
 use ledgers_commands::{CommandDescriptor, Registry, Tier};
 use serde_json::{Value, json};
@@ -48,15 +48,65 @@ fn test_approval_card() {
             amount: "1000.00".to_string(),
         }],
         counterparty: Some("Acme Inc".to_string()),
+        payee_bank: None,
+        bank_details_changed: false,
         period: Some("2025-01".to_string()),
         lines: vec![ApprovalCardLine {
             account: "1000".to_string(),
             side: "debit".to_string(),
             amount: "1000.00".to_string(),
         }],
+        document_data: vec!["counterparty"],
     };
     let text = card.text();
     assert!(text.contains("Over limit") && text.contains("Acme Inc") && text.contains("EUR"));
+    assert!(text.contains("from document, unverified"));
+}
+
+#[test]
+fn test_escape_document_text() {
+    // Plain text: no changes
+    assert_eq!(escape_document_text("plain"), "plain");
+
+    // Markdown escaping
+    assert!(escape_document_text("Acme**").contains("\\*\\*"));
+    assert!(
+        escape_document_text("text[link](url)").contains("\\[")
+            && escape_document_text("text[link](url)").contains("\\]")
+    );
+
+    // Control and bidi char stripping (before truncation)
+    assert!(escape_document_text("Vendor\u{202A}Name").len() < "Vendor\u{202A}Name".len());
+
+    // Truncation: 150 chars → 120 chars + "…" marker
+    let long_text = "a".repeat(150);
+    let escaped = escape_document_text(&long_text);
+    assert!(escaped.contains("…"), "truncated text should have … marker");
+    assert!(
+        escaped.len() <= 125,
+        "escaped length should be ~120 + 3 bytes for …"
+    );
+
+    // Truncation marker only when needed
+    let short = "a".repeat(50);
+    let escaped_short = escape_document_text(&short);
+    assert!(
+        !escaped_short.contains("…"),
+        "short text should not have … marker"
+    );
+
+    // Truncation happens after control char stripping
+    // Create a 150-char string with some control chars mixed in
+    let mixed = format!(
+        "{}{}",
+        "a".repeat(100),
+        "b\u{200B}c\u{200C}d\u{200E}".repeat(15) // 30 chars with 15 control chars
+    );
+    let escaped_mixed = escape_document_text(&mixed);
+    assert!(
+        escaped_mixed.contains("…"),
+        "long mixed text should be marked as truncated"
+    );
 }
 
 fn fixture_registry() -> Registry {

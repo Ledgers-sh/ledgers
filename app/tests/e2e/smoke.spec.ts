@@ -1,5 +1,28 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { API_KEY, API_ORIGIN, mockApi, stopMockApi } from './mockApi';
+
+/** The registry's document (the fixture the Rust test keeps in step), with bills.match added as a server that offers it would. */
+const registryDocument = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/openapi.json', import.meta.url)), 'utf8')) as {
+  paths: Record<string, unknown>;
+};
+const withBillsMatch = {
+  ...registryDocument,
+  paths: {
+    ...registryDocument.paths,
+    '/v1/bills/{id}/match': {
+      post: {
+        operationId: 'bills_match',
+        'x-ledgers-command': 'bills.match',
+        'x-ledgers-tier': 'draft',
+        'x-ledgers-cli': 'ledgers bills match',
+        'x-ledgers-mcp': 'bills_match',
+        'x-ledgers-curl': 'curl -X POST "$LEDGERS_URL/v1/bills/{id}/match" -H "Authorization: Bearer $LEDGERS_KEY" --json @input.json',
+      },
+    },
+  },
+};
 
 test.describe('connect, post, reverse', () => {
   test.afterAll(stopMockApi);
@@ -8,10 +31,14 @@ test.describe('connect, post, reverse', () => {
     const api = await mockApi();
     await page.goto('/');
 
-    // Connect screen: default server URL, key kept in sessionStorage only.
+    // Signed out: the passkey sign-in is the front door. The agent-key connect is advanced.
     await expect(page.getByRole('heading', { name: 'ledgers.sh' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in with passkey' })).toBeVisible();
+    await page.getByRole('button', { name: 'Advanced: connect with an agent key' }).click();
+
+    // Connect screen: default server URL, key kept in sessionStorage only.
+    await expect(page.getByRole('heading', { name: 'Advanced: connect with an agent key' })).toBeVisible();
     await expect(page.getByLabel('Server URL')).toHaveValue(API_ORIGIN);
-    await expect(page.getByText(/passkey sign-in arrives with issue #12/i)).toBeVisible();
     await page.getByLabel('API key').fill(API_KEY);
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByText(/Connected\. /)).toBeVisible();
@@ -80,11 +107,19 @@ test.describe('connect, post, reverse', () => {
     await page.getByRole('tab', { name: 'Balance sheet' }).click();
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
     await page.goto('/#/accounts');
-    await expect(page.getByRole('cell', { name: 'Receivables' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Accounts receivable' })).toBeVisible();
   });
 
   test('bills match form calls the match endpoint', async ({ page }) => {
     await mockApi();
+    await page.route('**/v1/openapi', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify(withBillsMatch),
+      }),
+    );
     await page.addInitScript(
       ({ key, origin }) => {
         window.sessionStorage.setItem('ledgers.apiKey', key);
@@ -96,5 +131,29 @@ test.describe('connect, post, reverse', () => {
     await page.getByLabel('Bill ID').fill('bill-42');
     await page.getByRole('button', { name: 'Run match' }).click();
     await expect(page.getByText(/no_candidates/)).toBeVisible();
+  });
+
+  test('bills is hidden when the server does not list bills.match', async ({ page }) => {
+    await mockApi();
+    await page.route('**/v1/openapi', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify({ openapi: '3.1.0', paths: { '/v1/accounts': { get: { operationId: 'accounts_list' } } } }),
+      }),
+    );
+    await page.addInitScript(
+      ({ key, origin }) => {
+        window.sessionStorage.setItem('ledgers.apiKey', key);
+        window.sessionStorage.setItem('ledgers.baseUrl', origin);
+      },
+      { key: API_KEY, origin: API_ORIGIN },
+    );
+    await page.goto('/#/overview');
+    await expect(page.getByRole('link', { name: 'Journal' }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Bills', exact: true })).toHaveCount(0);
+    await page.goto('/#/bills');
+    await expect(page.getByText('Page not found')).toBeVisible();
   });
 });

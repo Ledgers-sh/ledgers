@@ -12,6 +12,7 @@ test.describe('live dev server: connect, post, reverse', () => {
   test('connect → overview → new entry → journal → reverse', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'ledgers.sh' })).toBeVisible();
+    await page.getByRole('button', { name: 'Advanced: connect with an agent key' }).click();
     await expect(page.getByLabel('Server URL')).toHaveValue(API_ORIGIN);
     await page.getByLabel('API key').fill(API_KEY);
     await page.getByRole('button', { name: 'Test connection' }).click();

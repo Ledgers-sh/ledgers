@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 //! Ledgers server composition: harness and modules.
 
+pub mod agent_keys;
 pub mod config;
+pub mod demo;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -9,6 +11,8 @@ pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 pub mod openapi;
+pub mod people;
+pub mod rate_limiting;
 pub mod routes;
 
 /// Cloudflare Workers entry point (wasm32 only)
@@ -51,14 +55,16 @@ pub fn harness(
     // LEDGERS_DEV=1 is the local development mode: a local web app on Vite's
     // default port may call the API, and the dev bootstrap runs at start.
     let dev = is_dev(cfg);
-    let mut default_origins = vec![public_url.clone(), "http://localhost:3000".to_string()];
-    if dev {
-        default_origins.push(DEV_WEB_ORIGIN.to_string());
-    }
-    let cors_origins = cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
-        || default_origins,
-        |s| s.split(',').map(|s| s.trim().to_string()).collect(),
-    );
+    let cors_origins = app_origins(cfg);
+    // Cookie-authenticated (person) calls may come from these origins only.
+    let people_config =
+        people::PeopleConfig::from_config(cfg, &public_url, cors_origins.clone(), dev).map_err(
+            |e| {
+                let mut errors = ConfigError::default();
+                errors.push(e);
+                errors
+            },
+        )?;
 
     let company_id = match cfg.get("LEDGERS_COMPANY_ID") {
         Some(id) => id,
@@ -72,11 +78,21 @@ pub fn harness(
 
     let venture = Venture::new("ledgers", &domain)
         .public_url(public_url.clone())
-        .cors_origins(cors_origins)
+        .cors_origins(cors_origins.clone())
         .env(VentureEnv::Development);
 
-    // Create dispatch
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(dispatch::ServerDispatch::new(company_id));
+    // Every command surface (HTTP routes, MCP tool calls) admits agent keys
+    // through the rate limiter before dispatch (`rate_limiting::admit`). The
+    // limiter comes from the request's ports (`Deps`), so it is resolved per
+    // request on Workers as well as natively; persons pass through.
+    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(
+        dispatch::ServerDispatch::new(company_id)
+            .with_app_origins(cors_origins.clone())
+            .with_app_url(
+                cfg.get("LEDGERS_APP_URL")
+                    .unwrap_or_else(|| public_url.clone()),
+            ),
+    );
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {
@@ -118,7 +134,34 @@ pub fn harness(
     let mcp_module = mcp::McpModule::new(Arc::new(registry.clone()), dispatch.clone(), public_url);
     let builder = builder.module(mcp_module);
 
+    // Last, so its migration follows every existing module's: the D1 files
+    // are numbered in this order and staging has already applied them.
+    let builder = builder.module(people::PeopleModule::new(people_config));
+    // The approval inbox columns come after every other module's migrations.
+    let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
+
     builder.build()
+}
+
+/// The origins the web app is served from, which the API allows for CORS and
+/// for cookie-authenticated calls: `LEDGERS_CORS_ORIGINS` (comma-separated), or
+/// the API's own origin, the local web origin and, in development, Vite's.
+#[must_use]
+pub fn app_origins(cfg: &dyn Config) -> Vec<String> {
+    let domain = cfg
+        .get("LEDGERS_DOMAIN")
+        .unwrap_or_else(|| "ledgers.localhost".to_string());
+    let public_url = cfg
+        .get("LEDGERS_PUBLIC_URL")
+        .unwrap_or_else(|| format!("http://{domain}"));
+    let mut default_origins = vec![public_url, "http://localhost:3000".to_string()];
+    if is_dev(cfg) {
+        default_origins.push(DEV_WEB_ORIGIN.to_string());
+    }
+    cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
+        || default_origins,
+        |s| s.split(',').map(|s| s.trim().to_string()).collect(),
+    )
 }
 
 /// The web app origin the development mode allows (Vite's default port).

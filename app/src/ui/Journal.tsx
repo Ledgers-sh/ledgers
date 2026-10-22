@@ -4,8 +4,10 @@ import type { EntryRecord } from '../api/types';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { todayIso } from '../lib/period';
-import { ConfirmDialog, Empty, ErrorBanner, LOCALE, Marker, Money, PageHead, Skeleton } from './common';
+import { ConfirmDialog, Empty, ErrorBanner, Marker, Money, PageHead, Skeleton } from './common';
 import { formatMinor } from '../lib/money';
+import { formatDate, intlLocale, t, tRich } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
 
 /** Entry number as shown to people: fiscal year plus the gapless number. */
 export function entryRef(entry: Pick<EntryRecord, 'fiscal_year' | 'number'>): string {
@@ -41,66 +43,66 @@ export function Journal() {
     );
   }, [state.data, query]);
 
-  if (state.loading && !state.data) return <Skeleton rows={6} label="Loading journal" />;
+  if (state.loading && !state.data) return <Skeleton rows={6} label={t('journal.loading')} />;
   if (state.error && !state.data) return <ErrorBanner error={state.error} onRetry={state.reload} />;
   const all = state.data ?? [];
 
   return (
     <>
       <PageHead
-        title="Journal"
+        title={t('journal.title')}
         actions={
           <a class="btn btn-primary" href="#/new">
-            New entry
+            {t('shell.new_entry')}
           </a>
         }
       >
-        Posted entries, newest first. Entries are never edited; a correction is a reversal plus a new entry.
+        {t('journal.intro')}
       </PageHead>
 
       {all.length === 0 ? (
         <Empty
-          title="No entries yet"
+          title={t('journal.empty_title')}
           action={
             <a class="btn btn-primary" href="#/new">
-              Post your first entry
+              {t('action.post_first')}
             </a>
           }
         >
-          The journal lists every posted entry, whether an agent or a person posted it.
+          {t('journal.empty_body')}
         </Empty>
       ) : (
-        <section class="panel" aria-label="Entries">
+        <section class="panel" aria-label={t('journal.section')}>
           <div class="panel-head">
             <label class="sr-only" for="journal-search">
-              Search entries
+              {t('journal.search_label')}
             </label>
             <input
               id="journal-search"
               ref={searchRef}
               class="input"
               type="search"
-              placeholder="Search description or number (press /)"
+              placeholder={t('journal.search_placeholder')}
               value={query}
               onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
               style={{ maxWidth: '360px' }}
             />
             <span class="grow" />
-            <span class="muted">{entries.length} of {all.length}</span>
+            <span class="muted">{t('journal.count', { shown: entries.length, total: all.length })}</span>
           </div>
           {entries.length === 0 ? (
-            <div class="panel-body muted">No entries match “{query}”.</div>
+            <div class="panel-body muted">{t('journal.no_match', { query })}</div>
           ) : (
             <div class="table-wrap">
               <table class="ledger cards">
                 <thead>
                   <tr>
-                    <th scope="col">Entry</th>
-                    <th scope="col">Posting date</th>
-                    <th scope="col">Description</th>
-                    <th scope="col">Posted by</th>
+                    <th scope="col">{t('term.entry')}</th>
+                    <th scope="col">{t('term.posting_date')}</th>
+                    <th scope="col">{t('term.description')}</th>
+                    <th scope="col">{t('entry.posted_by')}</th>
                     <th scope="col" class="num">
-                      Amount
+                      {t('term.amount')}
                     </th>
                   </tr>
                 </thead>
@@ -109,24 +111,24 @@ export function Journal() {
                     const total = entryTotal(entry);
                     return (
                       <tr key={entry.entry_id}>
-                        <td class="code" data-label="Entry">
+                        <td class="code" data-label={t('term.entry')}>
                           <a class="row-link" href={`#/journal/${encodeURIComponent(entry.external_id ?? entry.entry_id)}`}>
-                            {entryRef(entry)}
+                            <Ltr>{entryRef(entry)}</Ltr>
                           </a>
                           {entry.reversed_by && (
                             <span class="badge reversed" style={{ marginLeft: '8px' }}>
-                              reversed
+                              {t('journal.reversed')}
                             </span>
                           )}
                         </td>
-                        <td data-label="Posting date" class="mono">
-                          {entry.posting_date}
+                        <td data-label={t('term.posting_date')} class="mono">
+                          <Ltr>{formatDate(entry.posting_date)}</Ltr>
                         </td>
                         <td class="main desc">{entry.description}</td>
-                        <td data-label="Posted by">
+                        <td data-label={t('entry.posted_by')}>
                           <Marker by={entry.posted_by} />
                         </td>
-                        <td class="num" data-label="Amount">
+                        <td class="num" data-label={t('term.amount')}>
                           <Money minor={total.minor} currency={total.currency} />
                         </td>
                       </tr>
@@ -156,25 +158,27 @@ export function EntryDetail({ entryId }: { entryId: string }) {
   const [error, setError] = useState<unknown>(null);
   const [postingDate, setPostingDate] = useState(todayIso());
 
-  if (list.loading && !list.data) return <Skeleton rows={6} label="Loading entry" />;
+  if (list.loading && !list.data) return <Skeleton rows={6} label={t('entry.loading')} />;
   if (list.error && !list.data) return <ErrorBanner error={list.error} onRetry={list.reload} />;
   if (!listed) {
     return (
       <Empty
-        title="Entry not found"
+        title={t('entry.not_found_title')}
         action={
           <a class="btn" href="#/journal">
-            Back to the journal
+            {t('entry.back_journal')}
           </a>
         }
       >
-        It may belong to another period or ledger.
+        {t('entry.not_found_body')}
       </Empty>
     );
   }
   const entry: EntryRecord = fresh.data ?? listed;
   const total = entryTotal(entry);
   const reversible = entry.external_id !== null && entry.reversed_by === null;
+  const ref = entryRef(entry);
+  const locale = intlLocale();
 
   const reverse = async () => {
     if (!entry.external_id) return;
@@ -183,10 +187,10 @@ export function EntryDetail({ entryId }: { entryId: string }) {
     try {
       const result = await entriesReverse(client, entry.external_id, {
         posting_date: postingDate,
-        description: `Reversal of ${entryRef(entry)}: ${entry.description}`,
+        description: `Reversal of ${ref}: ${entry.description}`,
       });
       setConfirming(false);
-      toast(`Reversal posted as ${entryRef(result.entry)}.`);
+      toast(t('entry.reversal_posted', { ref: entryRef(result.entry) }));
       window.location.hash = '#/journal';
     } catch (err) {
       setError(err);
@@ -195,34 +199,34 @@ export function EntryDetail({ entryId }: { entryId: string }) {
     }
   };
 
+  const reverseDisabledReason = !online
+    ? t('common.offline_posting')
+    : !entry.external_id
+      ? t('entry.no_external_id')
+      : entry.reversed_by
+        ? t('entry.already_reversed')
+        : undefined;
+
   return (
     <>
       <PageHead
-        title={`Entry ${entryRef(entry)}`}
+        title={t('entry.title', { ref })}
         actions={
           <>
             <a class="btn btn-ghost" href="#/journal">
-              Back to journal
+              {t('entry.back')}
             </a>
             <button
               type="button"
               class="btn btn-danger"
               disabled={!reversible || !online}
-              title={
-                !online
-                  ? 'offline: posting needs the server'
-                  : !entry.external_id
-                    ? 'This entry has no external ID, so it cannot be reversed here.'
-                    : entry.reversed_by
-                      ? 'Already reversed.'
-                      : undefined
-              }
+              title={reverseDisabledReason}
               onClick={() => {
                 setError(null);
                 setConfirming(true);
               }}
             >
-              Reverse entry
+              {t('entry.reverse')}
             </button>
           </>
         }
@@ -232,7 +236,7 @@ export function EntryDetail({ entryId }: { entryId: string }) {
 
       {entry.reversed_by && (
         <div class="banner" role="note">
-          <span class="grow">This entry was reversed by {entry.reversed_by}. The original stays in the journal unchanged.</span>
+          <span class="grow">{t('entry.reversed_by', { by: entry.reversed_by })}</span>
         </div>
       )}
 
@@ -240,61 +244,71 @@ export function EntryDetail({ entryId }: { entryId: string }) {
         <div class="panel-body">
           <dl class="entry-meta">
             <div>
-              <dt>Posted by</dt>
+              <dt>{t('entry.posted_by')}</dt>
               <dd>
                 <Marker by={entry.posted_by} />
               </dd>
             </div>
             <div>
-              <dt>Posting date</dt>
-              <dd>{entry.posting_date}</dd>
+              <dt>{t('term.posting_date')}</dt>
+              <dd>
+                <Ltr>{formatDate(entry.posting_date)}</Ltr>
+              </dd>
             </div>
             <div>
-              <dt>Document date</dt>
-              <dd>{entry.document_date}</dd>
+              <dt>{t('entry.document_date')}</dt>
+              <dd>
+                <Ltr>{formatDate(entry.document_date)}</Ltr>
+              </dd>
             </div>
             <div>
-              <dt>Journal</dt>
-              <dd>{entry.journal_id}</dd>
+              <dt>{t('entry.journal')}</dt>
+              <dd>
+                <Ltr>{entry.journal_id}</Ltr>
+              </dd>
             </div>
             <div>
-              <dt>Recorded</dt>
-              <dd>{entry.recorded_at}</dd>
+              <dt>{t('entry.recorded')}</dt>
+              <dd>
+                <Ltr>{entry.recorded_at}</Ltr>
+              </dd>
             </div>
             <div>
-              <dt>External ID</dt>
-              <dd>{entry.external_id ?? '—'}</dd>
+              <dt>{t('entry.external_id')}</dt>
+              <dd>
+                <Ltr>{entry.external_id ?? t('common.empty_cell')}</Ltr>
+              </dd>
             </div>
           </dl>
         </div>
         <div class="table-wrap">
           <table class="ledger cards">
-            <caption class="sr-only">Lines of entry {entryRef(entry)}</caption>
+            <caption class="sr-only">{t('entry.lines_caption', { ref })}</caption>
             <thead>
               <tr>
-                <th scope="col">Account</th>
-                <th scope="col">Memo</th>
+                <th scope="col">{t('term.account')}</th>
+                <th scope="col">{t('term.memo')}</th>
                 <th scope="col" class="num">
-                  Debit
+                  {t('term.debit')}
                 </th>
                 <th scope="col" class="num">
-                  Credit
+                  {t('term.credit')}
                 </th>
               </tr>
             </thead>
             <tbody>
               {entry.lines.map((line, index) => (
                 <tr key={index}>
-                  <td class="code main" data-label="Account">
-                    {line.account_number}
+                  <td class="code main" data-label={t('term.account')}>
+                    <Ltr>{line.account_number}</Ltr>
                   </td>
-                  <td class="muted" data-label="Memo">
+                  <td class="muted" data-label={t('term.memo')}>
                     {line.memo ?? null}
                   </td>
-                  <td class="num" data-label="Debit">
+                  <td class="num" data-label={t('term.debit')}>
                     {line.side === 'debit' ? <Money minor={line.base.minor} currency={line.base.currency} /> : null}
                   </td>
-                  <td class="num" data-label="Credit">
+                  <td class="num" data-label={t('term.credit')}>
                     {line.side === 'credit' ? <Money minor={line.base.minor} currency={line.base.currency} /> : null}
                   </td>
                 </tr>
@@ -303,12 +317,12 @@ export function EntryDetail({ entryId }: { entryId: string }) {
             <tfoot>
               <tr>
                 <td class="main" colSpan={2}>
-                  Total {total.currency}
+                  {t('entry.total', { currency: total.currency })}
                 </td>
-                <td class="num" data-label="Debit total">
+                <td class="num" data-label={t('entry.debit_total')}>
                   <Money minor={total.minor} currency={total.currency} />
                 </td>
-                <td class="num" data-label="Credit total">
+                <td class="num" data-label={t('entry.credit_total')}>
                   <Money minor={total.minor} currency={total.currency} />
                 </td>
               </tr>
@@ -320,24 +334,19 @@ export function EntryDetail({ entryId }: { entryId: string }) {
       <ConfirmDialog
         open={confirming}
         onClose={() => !busy && setConfirming(false)}
-        title={`Reverse ${entryRef(entry)}?`}
-        confirmLabel="Post reversal"
+        title={t('entry.reverse_title', { ref })}
+        confirmLabel={t('entry.reverse_confirm')}
         danger
         busy={busy}
         error={error}
         onConfirm={reverse}
       >
-        <p>
-          This posts a <strong>new reversal entry</strong> that offsets {entryRef(entry)} line by line. The original entry is
-          not edited or deleted.
-        </p>
+        <p>{tRich('entry.reverse_body', { reversal: <strong>{t('entry.reversal_entry')}</strong>, ref: <Ltr>{ref}</Ltr> })}</p>
         <label class="field">
-          <span>Reversal posting date</span>
+          <span>{t('entry.reversal_date')}</span>
           <input class="input mono" type="date" value={postingDate} onInput={(event) => setPostingDate((event.target as HTMLInputElement).value)} />
         </label>
-        <p class="muted">
-          Amount reversed: {formatMinor(total.minor, total.currency, LOCALE)} {total.currency}.
-        </p>
+        <p class="muted">{t('entry.amount_reversed', { amount: formatMinor(total.minor, total.currency, locale) + ' ' + total.currency })}</p>
       </ConfirmDialog>
     </>
   );

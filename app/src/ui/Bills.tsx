@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { billsMatch } from '../api/commands';
 import { useSession } from '../session';
 import { ErrorBanner, PageHead } from './common';
+import { t } from '../i18n';
 
 /**
  * bills.match: POST /v1/bills/{id}/match. The command is not in the registry
@@ -18,7 +19,7 @@ export function Bills() {
     event.preventDefault();
     const id = billId.trim();
     if (id === '') {
-      setError(new Error('Enter a bill ID.'));
+      setError(new Error(t('bills.enter_id')));
       return;
     }
     setBusy(true);
@@ -27,7 +28,7 @@ export function Bills() {
     try {
       const response = await billsMatch(client, id);
       setResult(response);
-      toast('Match finished.');
+      toast(t('bills.done'));
     } catch (err) {
       setError(err);
     } finally {
@@ -37,32 +38,32 @@ export function Bills() {
 
   return (
     <>
-      <PageHead title="Bills match">Match a vendor bill against the books. The server returns the match result; nothing is posted from this screen.</PageHead>
+      <PageHead title={t('bills.title')}>{t('bills.intro')}</PageHead>
       <section class="panel" aria-labelledby="match-heading">
         <div class="panel-head">
           <h2 id="match-heading" class="grow">
-            Match a bill
+            {t('bills.heading')}
           </h2>
         </div>
         <form class="panel-body entry-form" onSubmit={submit} noValidate>
           <label class="field">
-            <span>Bill ID</span>
+            <span>{t('bills.id_label')}</span>
             <input class="input mono" value={billId} onInput={(e) => setBillId((e.target as HTMLInputElement).value)} autoComplete="off" />
-            <span class="hint">The identifier of the bill in Ledgers, as shown by the API.</span>
+            <span class="hint">{t('bills.id_hint')}</span>
           </label>
           {error !== null && <ErrorBanner error={error} />}
           <div class="form-actions">
-            {!online && <span class="muted grow">offline: posting needs the server</span>}
+            {!online && <span class="muted grow">{t('common.offline_posting')}</span>}
             <button type="submit" class="btn btn-primary" disabled={busy || !online} aria-busy={busy ? 'true' : undefined}>
-              {busy ? 'Matching…' : 'Run match'}
+              {busy ? t('bills.matching') : t('bills.run')}
             </button>
           </div>
         </form>
       </section>
       {result && (
-        <section class="panel" aria-label="Match result">
+        <section class="panel" aria-label={t('bills.result_section')}>
           <div class="panel-head">
-            <h2 class="grow">Result</h2>
+            <h2 class="grow">{t('bills.result')}</h2>
           </div>
           <div class="panel-body">
             <pre class="result-json">{JSON.stringify(result, null, 2)}</pre>

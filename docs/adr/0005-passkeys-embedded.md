@@ -1,6 +1,6 @@
 # 0005: Embed `cratefield-auth-passkeys` in the Ledgers server
 
-Date: 2026-10-21. Status: Accepted.
+Date: 2026-10-21. Status: Accepted (people sign-in superseded by 0008).
 
 ## Context
 

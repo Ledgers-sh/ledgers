@@ -5,6 +5,7 @@
 //! to avoid divergence.
 
 use crate::key::AgentKey;
+use crate::screen::RiskFlag;
 use ledgers_commands::{CommandMeta, Tier};
 use ledgers_money::{Amount, Currency};
 use std::collections::{BTreeMap, BTreeSet};
@@ -83,6 +84,8 @@ pub struct DecisionInput {
     pub protected_accounts: BTreeSet<String>,
     /// Origin of the entry being reversed (if any).
     pub reverses: Option<Origin>,
+    /// Risk flags from document screening (if any). A non-empty vec always routes to approval.
+    pub risk_flags: Vec<RiskFlag>,
 }
 
 /// The outcome of a decision, matching [`ledgers_commands::Decision`].
@@ -233,7 +236,19 @@ pub fn explain(actor: Actor, meta: &CommandMeta, input: &DecisionInput) -> Expla
         }
     }
 
-    // 8. Check reversal of person entry.
+    // 8. Check risk flags (document screening).
+    if !input.risk_flags.is_empty() {
+        let flag_names: Vec<&'static str> = input.risk_flags.iter().map(RiskFlag::reason).collect();
+        let reason = format!("flagged by document screening: {}", flag_names.join(", "));
+        steps.push(reason.clone());
+        return Explanation {
+            decision: Decision::NeedsApproval { reason },
+            class,
+            steps,
+        };
+    }
+
+    // 9. Check reversal of person entry.
     if let Some(Origin::Person) = input.reverses {
         let reason = "reversing an entry posted by a person requires approval".to_string();
         steps.push(reason.clone());
@@ -244,7 +259,7 @@ pub fn explain(actor: Actor, meta: &CommandMeta, input: &DecisionInput) -> Expla
         };
     }
 
-    // 9. Check protected accounts.
+    // 10. Check protected accounts.
     if !input.protected_accounts.is_empty() {
         let touching_protected: Vec<&String> = input
             .accounts
@@ -262,7 +277,7 @@ pub fn explain(actor: Actor, meta: &CommandMeta, input: &DecisionInput) -> Expla
         }
     }
 
-    // 10. Check per-currency limits (only for Post class).
+    // 11. Check per-currency limits (only for Post class).
     if class == CommandClass::Post {
         for (code, amount) in &input.effect {
             if *amount <= 0 {
@@ -602,6 +617,7 @@ mod tests {
                 accounts,
                 protected_accounts,
                 reverses: tc.reverses,
+                risk_flags: Vec::new(),
             };
 
             let decision = decide(Actor::Agent(&key), &meta, &input);
@@ -657,6 +673,7 @@ mod tests {
             accounts: BTreeSet::new(),
             protected_accounts: BTreeSet::new(),
             reverses: None,
+            risk_flags: Vec::new(),
         };
 
         let decision = decide(Actor::Person, &meta, &input);
@@ -710,6 +727,7 @@ mod tests {
                 accounts: BTreeSet::new(),
                 protected_accounts: BTreeSet::new(),
                 reverses: None,
+                risk_flags: Vec::new(),
             };
             assert_eq!(
                 decide(Actor::Agent(&key), &meta, &input),
@@ -730,6 +748,7 @@ mod tests {
                 accounts: BTreeSet::new(),
                 protected_accounts: BTreeSet::new(),
                 reverses: None,
+                risk_flags: Vec::new(),
             };
             match decide(Actor::Agent(&key), &meta, &input) {
                 Decision::NeedsApproval { .. } => {}
@@ -751,6 +770,7 @@ mod tests {
                 accounts: BTreeSet::new(),
                 protected_accounts: BTreeSet::new(),
                 reverses: None,
+                risk_flags: Vec::new(),
             };
             assert_eq!(
                 decide(Actor::Agent(&key), &meta, &input),
@@ -773,6 +793,7 @@ mod tests {
                 accounts: BTreeSet::new(),
                 protected_accounts: BTreeSet::new(),
                 reverses: None,
+                risk_flags: Vec::new(),
             };
             match decide(Actor::Agent(&key), &meta, &input) {
                 Decision::NeedsApproval { .. } => {}
@@ -792,6 +813,7 @@ mod tests {
                 accounts: BTreeSet::new(),
                 protected_accounts: BTreeSet::new(),
                 reverses: None,
+                risk_flags: Vec::new(),
             };
             match decide(Actor::Agent(&key), &meta, &input) {
                 Decision::NeedsApproval { reason } => {
@@ -799,6 +821,99 @@ mod tests {
                 }
                 _ => panic!("currency without limit should need approval"),
             }
+        }
+    }
+
+    #[test]
+    fn risk_flags_and_deny_precedence() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut limits = BTreeMap::new();
+        limits.insert(
+            "EUR".to_string(),
+            CurrencyLimit {
+                per_entry: 1_000_000,
+                per_day: 10_000_000,
+            },
+        );
+
+        // Case 1: flags with normal key → NeedsApproval
+        let key = AgentKey {
+            id: "k1".to_string(),
+            label: "k1".to_string(),
+            owner: "a".to_string(),
+            tier: Tier::PostWithinLimits,
+            limits: limits.clone(),
+            allowed_journals: None,
+            allowed_accounts: None,
+            expires_at: None,
+            created_at: now,
+            last_used_at: None,
+            revoked_at: None,
+        };
+        let mut e = BTreeMap::new();
+        e.insert("EUR".to_string(), 10_000);
+        let inp = DecisionInput {
+            now,
+            effect: e,
+            used_today: BTreeMap::new(),
+            journal: None,
+            accounts: BTreeSet::new(),
+            protected_accounts: BTreeSet::new(),
+            reverses: None,
+            risk_flags: vec![RiskFlag::NewVendor],
+        };
+        let meta = CommandMeta {
+            name: "test.post".to_string(),
+            tier: Tier::PostWithinLimits,
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: false,
+        };
+        match decide(Actor::Agent(&key), &meta, &inp) {
+            Decision::NeedsApproval { reason } => assert!(reason.contains("flagged")),
+            _ => panic!("flags should → NeedsApproval"),
+        }
+
+        // Case 2: revoked key with flags → Deny (revocation wins)
+        let revoked_key = AgentKey {
+            id: "k2".to_string(),
+            label: "k2".to_string(),
+            owner: "a".to_string(),
+            tier: Tier::PostWithinLimits,
+            limits: limits.clone(),
+            allowed_journals: None,
+            allowed_accounts: None,
+            expires_at: None,
+            created_at: now,
+            last_used_at: None,
+            revoked_at: Some(now),
+        };
+        let inp2 = DecisionInput {
+            now,
+            effect: BTreeMap::new(),
+            used_today: BTreeMap::new(),
+            journal: None,
+            accounts: BTreeSet::new(),
+            protected_accounts: BTreeSet::new(),
+            reverses: None,
+            risk_flags: vec![RiskFlag::InstructionText],
+        };
+        match decide(Actor::Agent(&revoked_key), &meta, &inp2) {
+            Decision::Deny { reason } => assert!(reason.contains("revoked")),
+            _ => panic!("revoked should → Deny despite flags"),
+        }
+
+        // Case 3: PolicyChange with flags → Deny (PolicyChange wins)
+        let policy_meta = CommandMeta {
+            name: "policy.update".to_string(),
+            tier: Tier::PostWithinLimits,
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: false,
+        };
+        match decide(Actor::Agent(&key), &policy_meta, &inp2) {
+            Decision::Deny { reason } => assert!(reason.contains("policy")),
+            _ => panic!("policy change should → Deny despite flags"),
         }
     }
 }

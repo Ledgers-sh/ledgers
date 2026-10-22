@@ -9,15 +9,22 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
-use crate::routes::Dispatch;
+mod approvals;
+
+use crate::people::SessionAuthenticator;
+use crate::routes::{Dispatch, Presented};
+use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
-use cratefield_core::{ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, Statement};
+use cratefield_core::{
+    ApiKeys, Clock, Database, DbError, IdGen, Port, Ports, Problem, RateLimiter, Statement,
+};
+use ledgers_approvals::{ApprovalRequest, NewRequest, request_statement};
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
-    Command, CommandContext, CommandError, ExecToken, Execute, Executed, Executor, JournalPreview,
-    Plan, Registry,
+    Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
+    PendingApproval, Plan, Registry,
 };
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
@@ -34,7 +41,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use time::format_description::well_known::Iso8601;
 use time::{Date, OffsetDateTime, UtcOffset};
 
@@ -76,6 +83,8 @@ pub struct Deps {
     pub clock: Arc<dyn Clock>,
     /// Ids for audit events, entries and keys.
     pub id_gen: Arc<dyn IdGen>,
+    /// The rate limiter for agent keys, when the runtime provides one.
+    pub rate_limiter: Option<Arc<dyn RateLimiter>>,
 }
 
 impl Deps {
@@ -87,6 +96,7 @@ impl Deps {
             db: ports.db.clone()?,
             clock: ports.clock.clone()?,
             id_gen: ports.id_gen.clone()?,
+            rate_limiter: ports.rate_limiter.clone(),
         })
     }
 }
@@ -97,15 +107,34 @@ pub const DISPATCH_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
 /// The server's command dispatch for one company.
 pub struct ServerDispatch {
     company_id: String,
+    app_origins: Vec<String>,
+    app_url: String,
 }
 
 impl ServerDispatch {
-    /// A dispatch serving `company_id`.
+    /// A dispatch serving `company_id`. Cookie sessions are refused unless
+    /// [`ServerDispatch::with_app_origins`] names the origins they may come from.
     #[must_use]
     pub fn new(company_id: impl Into<String>) -> Self {
         Self {
             company_id: company_id.into(),
+            app_origins: Vec::new(),
+            app_url: String::new(),
         }
+    }
+
+    /// The app's absolute URL: approval links point at `{app_url}/approvals/{id}`.
+    #[must_use]
+    pub fn with_app_url(mut self, app_url: impl Into<String>) -> Self {
+        self.app_url = app_url.into();
+        self
+    }
+
+    /// The app origins a cookie-authenticated request may come from.
+    #[must_use]
+    pub fn with_app_origins(mut self, origins: Vec<String>) -> Self {
+        self.app_origins = origins;
+        self
     }
 
     /// The company this dispatch serves.
@@ -115,20 +144,21 @@ impl ServerDispatch {
     }
 
     /// Runs one command through the executor and maps its outcome to JSON.
+    #[allow(clippy::too_many_lines)]
     async fn execute<C: Command>(
         &self,
         deps: &Deps,
         cmd: &C,
-        credential: Option<String>,
+        presented: Option<Presented>,
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        let credential = credential.ok_or_else(|| {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let presented = presented.ok_or_else(|| {
             CommandError::Unauthenticated
                 .to_problem()
                 .instance(request_id)
         })?;
-        let fail = |err: CommandError| err.to_problem().instance(request_id);
 
         let now_at = deps.clock.now();
         let ctx = CommandContext {
@@ -137,20 +167,71 @@ impl ServerDispatch {
             event_id: deps.id_gen.ulid(),
             now: rfc3339_utc(now_at),
         };
+        let now = ctx.now.clone();
         let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
             .await
             .map_err(fail)?;
-        let authenticator = KeyStore {
-            db: Arc::clone(&deps.db),
-            clock: Arc::clone(&deps.clock),
-            company_id: self.company_id.clone(),
+        let policy = match &presented {
+            Presented::Principal(principal) => internal_agent_policy(policy, principal, now_at),
+            Presented::Bearer(_) | Presented::Session(_) => policy,
+        };
+        let (authenticator, credential) = match presented {
+            Presented::Bearer(token) => (
+                Authn::Key(KeyStore {
+                    db: Arc::clone(&deps.db),
+                    clock: Arc::clone(&deps.clock),
+                    company_id: self.company_id.clone(),
+                }),
+                token,
+            ),
+            Presented::Principal(principal) => (Authn::Fixed(principal), String::new()),
+            Presented::Session(session) => {
+                let id = session.id.clone();
+                (
+                    Authn::Session(SessionAuthenticator {
+                        db: Arc::clone(&deps.db),
+                        clock: Arc::clone(&deps.clock),
+                        app_origins: self.app_origins.clone(),
+                        presented: session,
+                    }),
+                    id,
+                )
+            }
         };
         let input: C::Input = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
 
+        // A needs-approval outcome stores its request in the same guarded batch
+        // as its audit row (docs/PLAN.md section 5).
+        let approval_id = deps.id_gen.ulid();
+        let raised: Mutex<Option<ApprovalRequest>> = Mutex::new(None);
+        let persist = |pending: &PendingApproval| -> Result<Vec<Statement>, CommandError> {
+            let preview = serde_json::to_value(&pending.preview)
+                .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+            let limits = approvals::low_risk_limits();
+            let (statement, request) = request_statement(&NewRequest {
+                id: &approval_id,
+                company_id: &self.company_id,
+                command: &pending.command,
+                input: &pending.input,
+                preview: &preview,
+                reads: &pending.reads,
+                request_hash: &pending.request_hash,
+                reason: &pending.reason,
+                requested_by: &pending.requested_by,
+                counterparty: None,
+                now: &now,
+                ttl: APPROVAL_TTL,
+                low_risk_limits: &limits,
+            })
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+            *raised.lock().unwrap_or_else(PoisonError::into_inner) = Some(request);
+            Ok(vec![statement])
+        };
+
         let executor = Executor::new(deps.db.as_ref(), authenticator, policy);
         match executor
-            .run(cmd, credential, ctx, &input, Execute::Run)
+            .run_for_approval(cmd, credential, ctx, &input, &persist)
             .await
             .map_err(fail)?
         {
@@ -161,15 +242,127 @@ impl ServerDispatch {
                 preview,
                 reason,
                 reads,
-            } => Ok(json!({
-                "status": "needs-approval",
-                "reason": reason,
-                "request_hash": request_hash,
-                "preview": preview,
-                "reads": reads,
-            })),
+            } => {
+                let stored = raised
+                    .into_inner()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .ok_or_else(|| {
+                        fail(CommandError::Database(DbError::Query(
+                            "the approval request was not stored".to_owned(),
+                        )))
+                    })?;
+                Ok(json!({
+                    "status": "needs-approval",
+                    "reason": reason,
+                    "request_hash": request_hash,
+                    "preview": preview,
+                    "reads": reads,
+                    "approval": {
+                        "id": approval_id,
+                        "url": approvals::approval_url(&self.app_url, &approval_id),
+                        "status": stored.status.as_str(),
+                        "risk": stored.risk.as_str(),
+                        "expires_at": stored.expires_at,
+                    },
+                }))
+            }
             Executed::DryRun(preview) => Ok(json!({ "status": "dry-run", "preview": preview })),
         }
+    }
+}
+
+impl ServerDispatch {
+    /// The person behind a human-only command. An agent key answers 403
+    /// (`human-only`), an unknown or revoked credential 401, and a session
+    /// goes through the same origin, role and expiry checks as every command.
+    async fn person_id(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+    ) -> Result<String, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let principal = match presented
+            .ok_or(CommandError::Unauthenticated)
+            .map_err(fail)?
+        {
+            Presented::Bearer(token) => KeyStore {
+                db: Arc::clone(&deps.db),
+                clock: Arc::clone(&deps.clock),
+                company_id: self.company_id.clone(),
+            }
+            .authenticate(&token)
+            .await
+            .map_err(fail)?,
+            Presented::Session(session) => {
+                let id = session.id.clone();
+                SessionAuthenticator {
+                    db: Arc::clone(&deps.db),
+                    clock: Arc::clone(&deps.clock),
+                    app_origins: self.app_origins.clone(),
+                    presented: session,
+                }
+                .authenticate(&id)
+                .await
+                .map_err(fail)?
+            }
+            Presented::Principal(principal) => principal,
+        };
+        match principal {
+            Principal::Person { person_id } => Ok(person_id),
+            Principal::Agent { .. } => Err(fail(CommandError::HumanOnly)),
+        }
+    }
+
+    async fn keys_list(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        self.person_id(deps, presented, request_id).await?;
+        let keys = crate::agent_keys::list(deps, &self.company_id)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(crate::agent_keys::KeysListOutput { keys })
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
+    }
+
+    async fn keys_create(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let person = self.person_id(deps, presented, request_id).await?;
+        let input: crate::agent_keys::KeysCreateInput = serde_json::from_value(input)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        let output = crate::agent_keys::create(deps, &self.company_id, &person, &input)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(output)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
+    }
+
+    async fn keys_revoke(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let person = self.person_id(deps, presented, request_id).await?;
+        let input: crate::agent_keys::KeysRevokeInput = serde_json::from_value(input)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        let output = crate::agent_keys::revoke(deps, &self.company_id, &person, &input.id)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(output)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
     }
 }
 
@@ -181,51 +374,70 @@ impl Dispatch for ServerDispatch {
         command: &str,
         input: Value,
         request_id: &str,
-        credential: Option<String>,
+        presented: Option<Presented>,
     ) -> Result<Value, Problem> {
         match command {
             "entries.post" => {
-                self.execute(deps, &EntriesPost, credential, request_id, input)
+                self.execute(deps, &EntriesPost, presented, request_id, input)
                     .await
             }
             "entries.reverse" => {
-                self.execute(deps, &EntriesReverse, credential, request_id, input)
+                self.execute(deps, &EntriesReverse, presented, request_id, input)
                     .await
             }
             "entries.list" => {
-                self.execute(deps, &EntriesList, credential, request_id, input)
+                self.execute(deps, &EntriesList, presented, request_id, input)
+                    .await
+            }
+            "approvals.list" => {
+                self.execute(deps, &ApprovalsList, presented, request_id, input)
+                    .await
+            }
+            "approvals.get" => {
+                self.execute(deps, &ApprovalsGet, presented, request_id, input)
+                    .await
+            }
+            "approvals.decide" => {
+                self.approvals_decide(deps, presented, request_id, input)
+                    .await
+            }
+            "approvals.decide_bulk" => {
+                self.approvals_decide_bulk(deps, presented, request_id, input)
                     .await
             }
             "entries.get" => {
-                self.execute(deps, &EntriesGet, credential, request_id, input)
+                self.execute(deps, &EntriesGet, presented, request_id, input)
                     .await
             }
             "accounts.list" => {
-                self.execute(deps, &AccountsList, credential, request_id, input)
+                self.execute(deps, &AccountsList, presented, request_id, input)
                     .await
             }
             "reports.trial_balance" => {
-                self.execute(deps, &ReportsTrialBalance, credential, request_id, input)
+                self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
             }
             "reports.profit_and_loss" => {
-                self.execute(deps, &ReportsProfitAndLoss, credential, request_id, input)
+                self.execute(deps, &ReportsProfitAndLoss, presented, request_id, input)
                     .await
             }
             "reports.balance_sheet" => {
-                self.execute(deps, &ReportsBalanceSheet, credential, request_id, input)
+                self.execute(deps, &ReportsBalanceSheet, presented, request_id, input)
                     .await
             }
             "reports.account_balance_by_dimension" => {
                 self.execute(
                     deps,
                     &ReportsAccountBalanceByDimension,
-                    credential,
+                    presented,
                     request_id,
                     input,
                 )
                 .await
             }
+            "keys.list" => self.keys_list(deps, presented, request_id).await,
+            "keys.create" => self.keys_create(deps, presented, request_id, input).await,
+            "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
             other => Err(
                 Problem::validation_failed(format!("unknown command {other:?}"))
                     .instance(request_id),
@@ -246,13 +458,77 @@ impl Dispatch for ServerDispatch {
     }
 }
 
+/// Registers the policy row of an in-process agent principal. The principal is
+/// not in the `agent_key` table, so without this its entries would be denied as
+/// an unknown key. The row takes the principal's own tier and per-entry
+/// ceilings; the day's ceiling is the same figure, so the daily meter never
+/// binds before the per-entry one. A person principal needs no row.
+fn internal_agent_policy(
+    policy: KeyPolicy,
+    principal: &Principal,
+    now: OffsetDateTime,
+) -> KeyPolicy {
+    let Principal::Agent {
+        key_id,
+        tier,
+        limits,
+    } = principal
+    else {
+        return policy;
+    };
+    let limits = limits
+        .iter()
+        .map(|(code, limit)| {
+            (
+                code.clone(),
+                CurrencyLimit {
+                    per_entry: limit.base_ceiling,
+                    per_day: limit.base_ceiling,
+                },
+            )
+        })
+        .collect();
+    policy.with_key(AgentKey {
+        id: key_id.clone(),
+        label: "in-process".to_owned(),
+        owner: "server".to_owned(),
+        tier: *tier,
+        limits,
+        allowed_journals: None,
+        allowed_accounts: None,
+        expires_at: None,
+        created_at: now,
+        last_used_at: None,
+        revoked_at: None,
+    })
+}
+
+/// The authenticator a command runs under: an agent key, a person session, or
+/// a principal the server vouches for in-process (see [`Presented::Principal`]).
+enum Authn {
+    Key(KeyStore),
+    Session(SessionAuthenticator),
+    Fixed(Principal),
+}
+
+#[async_trait]
+impl Authenticator for Authn {
+    async fn authenticate(&self, credential: &Credential) -> Result<Principal, CommandError> {
+        match self {
+            Authn::Key(store) => store.authenticate(credential).await,
+            Authn::Session(session) => session.authenticate(credential).await,
+            Authn::Fixed(principal) => Ok(principal.clone()),
+        }
+    }
+}
+
 /// Authenticates a bearer credential as an agent key: the harness `ApiKeys`
 /// verifies the secret (no caching, so a revoked key fails at once), and the
 /// key's policy row in `agent_key` gives its tier and limits.
-struct KeyStore {
-    db: Arc<dyn Database>,
-    clock: Arc<dyn Clock>,
-    company_id: String,
+pub(crate) struct KeyStore {
+    pub(crate) db: Arc<dyn Database>,
+    pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) company_id: String,
 }
 
 #[async_trait]
@@ -280,7 +556,7 @@ impl Authenticator for KeyStore {
 
 /// The harness API-key store on the Ledgers table, with the OS entropy
 /// source.
-fn api_keys(db: &Arc<dyn Database>, clock: &Arc<dyn Clock>) -> ApiKeys {
+pub(crate) fn api_keys(db: &Arc<dyn Database>, clock: &Arc<dyn Clock>) -> ApiKeys {
     ApiKeys::new(
         Arc::clone(db),
         Arc::clone(clock),
@@ -301,7 +577,7 @@ impl cratefield_core::RandomBytes for OsRandom {
     }
 }
 
-fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
+pub(crate) fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
     key.limits
         .iter()
         .try_fold(Limits::new(), |limits, (code, limit)| {
@@ -318,7 +594,7 @@ fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
 }
 
 /// Loads one agent key's policy row for `company_id`.
-async fn load_key(
+pub(crate) async fn load_key(
     db: &dyn Database,
     company_id: &str,
     key_id: &str,
@@ -342,7 +618,7 @@ async fn load_key(
 
 /// The policy for one request: every agent key of the company, the chart's
 /// protected accounts, and the clock for expiry and rolling days.
-async fn load_policy(
+pub(crate) async fn load_policy(
     db: &dyn Database,
     company_id: &str,
     now: OffsetDateTime,
@@ -391,12 +667,48 @@ pub async fn issue_key(
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
+    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits)
+        .await
+        .map(|(_, token)| token)
+}
+
+/// [`issue_key`] with the owner recorded on the key and its audit events.
+/// Returns the new key's id (the policy row's id) and its secret, shown once.
+pub(crate) async fn issue_key_as(
+    deps: &Deps,
+    company_id: &str,
+    label: &str,
+    owner: &str,
+    tier: Tier,
+    limits: BTreeMap<String, CurrencyLimit>,
+) -> Result<(String, String), String> {
     let key_id = deps.id_gen.ulid();
+    let policy = agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits)?;
+    deps.db
+        .execute(&policy)
+        .await
+        .map_err(|err| format!("store key policy: {err}"))?;
+    let token = mint_key(deps, company_id, &key_id, owner).await?;
+    Ok((key_id, token))
+}
+
+/// The insert of an agent key's policy row, with the key's id and the time the
+/// row is stamped with. Built here so the bootstrap can run it inside its guarded
+/// batch; [`issue_key_as`] runs it on its own.
+fn agent_key_policy_statement(
+    deps: &Deps,
+    company_id: &str,
+    key_id: &str,
+    label: &str,
+    owner: &str,
+    tier: Tier,
+    limits: BTreeMap<String, CurrencyLimit>,
+) -> Result<Statement, String> {
     let now = deps.clock.now();
     let key = AgentKey {
-        id: key_id.clone(),
+        id: key_id.to_owned(),
         label: label.to_owned(),
-        owner: DEV_OWNER.to_owned(),
+        owner: owner.to_owned(),
         tier,
         limits,
         allowed_journals: None,
@@ -407,49 +719,55 @@ pub async fn issue_key(
         revoked_at: None,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
-    deps.db
-        .execute(&Statement::with_values(
-            "INSERT INTO agent_key (company_id, id, policy, updated_at) VALUES (?, ?, ?, ?)"
-                .to_owned(),
-            vec![
-                sea_query::Value::from(company_id),
-                sea_query::Value::from(key_id.as_str()),
-                sea_query::Value::from(policy),
-                sea_query::Value::from(rfc3339_utc(now)),
-            ],
-        ))
-        .await
-        .map_err(|err| format!("store key policy: {err}"))?;
+    Ok(Statement::with_values(
+        "INSERT INTO agent_key (company_id, id, policy, updated_at) VALUES (?, ?, ?, ?)".to_owned(),
+        vec![
+            sea_query::Value::from(company_id),
+            sea_query::Value::from(key_id),
+            sea_query::Value::from(policy),
+            sea_query::Value::from(rfc3339_utc(now)),
+        ],
+    ))
+}
 
+/// Mints the secret for an agent key whose policy row exists, and returns it.
+/// The secret is written as the `ApiKeys` row and returned once.
+pub(crate) async fn mint_key(
+    deps: &Deps,
+    company_id: &str,
+    key_id: &str,
+    owner: &str,
+) -> Result<String, String> {
+    let now = deps.clock.now();
     let audit = AuditContext::new(
         Actor::Person {
-            person_id: DEV_OWNER.to_owned(),
+            person_id: owner.to_owned(),
         },
         deps.id_gen.ulid(),
         deps.id_gen.ulid(),
     );
     let agent_keys = AgentKeys::new(Arc::new(api_keys(&deps.db, &deps.clock)), deps.db.clone());
     let issued = agent_keys
-        .issue(&key_id, company_id, &audit, &rfc3339_utc(now))
+        .issue(key_id, company_id, &audit, &rfc3339_utc(now))
         .await
         .map_err(|err| format!("issue key: {err}"))?;
     Ok(issued.key())
 }
 
-/// Development bootstrap for `company_id`: when the company has no chart,
-/// imports the generic SME chart, opens the general journal `GN` and the
-/// current calendar year; then issues one local key with full tier
-/// (post within limits) and returns its secret.
+/// Seeds `company_id` when it has no chart yet: imports the generic SME
+/// chart, opens the general journal (`general`, code `GN`) and the current
+/// calendar year. Idempotent: a company that already has accounts is left
+/// as it is.
 ///
 /// # Errors
 /// A message naming the failed step.
-pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();
     let audit = AuditContext::new(
         Actor::Person {
-            person_id: DEV_OWNER.to_owned(),
+            person_id: owner.to_owned(),
         },
         deps.id_gen.ulid(),
         deps.id_gen.ulid(),
@@ -492,23 +810,192 @@ pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, Stri
         .await
         .map_err(|err| format!("open fiscal year: {err}"))?;
     }
+    Ok(())
+}
 
+/// Per-currency limits of the bootstrap keys: the same generous ceilings the
+/// development key uses, in minor units.
+fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
     let mut limits = BTreeMap::new();
     limits.insert(
-        "EUR".to_owned(),
+        currency.to_owned(),
         CurrencyLimit {
             per_entry: 100_000_000_000_000,
             per_day: 1_000_000_000_000_000,
         },
     );
+    limits
+}
+
+/// Development bootstrap for `company_id`: when the company has no chart,
+/// imports the generic SME chart, opens the general journal `GN` and the
+/// current calendar year; then issues one local key with full tier
+/// (post within limits) and returns its secret.
+///
+/// # Errors
+/// A message naming the failed step.
+pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+    seed_company(deps, company_id, DEV_OWNER).await?;
     issue_key(
         deps,
         company_id,
         "dev local key",
         Tier::PostWithinLimits,
-        limits,
+        bootstrap_limits("EUR"),
     )
     .await
+}
+
+/// The owner recorded on the keys and audit events of a deployed bootstrap.
+const BOOTSTRAP_OWNER: &str = "bootstrap";
+/// The longest company name a bootstrap accepts, in characters.
+pub const BOOTSTRAP_NAME_MAX: usize = 200;
+
+/// The input of a deployed-environment bootstrap: the company's display
+/// name and its base currency (an ISO 4217 code such as `EUR`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct CompanyBootstrap {
+    /// The company's name, shown in the app and on reports.
+    pub company: String,
+    /// The base currency: three ASCII uppercase letters.
+    pub currency: String,
+}
+
+impl CompanyBootstrap {
+    /// Checks the name and the currency code.
+    ///
+    /// # Errors
+    /// A message naming the field that is out of range.
+    pub fn validate(&self) -> Result<(), String> {
+        let name = self.company.trim();
+        if name.is_empty() || name.chars().count() > BOOTSTRAP_NAME_MAX {
+            return Err(format!(
+                "company must be 1 to {BOOTSTRAP_NAME_MAX} characters"
+            ));
+        }
+        if self.currency.len() != 3 || !self.currency.bytes().all(|b| b.is_ascii_uppercase()) {
+            return Err("currency must be a three-letter ISO 4217 code, such as EUR".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Why a deployed bootstrap did not run.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BootstrapError {
+    /// The input failed [`CompanyBootstrap::validate`].
+    Invalid(String),
+    /// An agent key already exists: the bootstrap is one-shot.
+    AlreadyBootstrapped,
+    /// A storage or configuration step failed; the message names the step.
+    Failed(String),
+}
+
+/// Creates the company (when absent), seeds its chart, journal and fiscal year,
+/// and issues one full-tier (post within limits) key. Returns the key secret,
+/// which the caller shows once.
+///
+/// "No key exists yet" is decided inside the database, not by a read before the
+/// write: the first batch inserts the company and the bootstrap's agent-key policy
+/// row under a guard statement that refuses while any agent key exists for the
+/// company (`docs/adr/0004-guard-statements.md`). Two bootstraps racing on the
+/// same database cannot both pass that guard. The secret row itself is written by
+/// the `ApiKeys` port after the claim; if anything after the claim fails, the claim
+/// is released so a retry can run.
+///
+/// # Errors
+/// [`BootstrapError`] for invalid input, an already-bootstrapped database, or
+/// a failed step.
+pub async fn bootstrap_company(
+    deps: &Deps,
+    company_id: &str,
+    input: &CompanyBootstrap,
+) -> Result<String, BootstrapError> {
+    input.validate().map_err(BootstrapError::Invalid)?;
+    if company_id.trim().is_empty() {
+        return Err(BootstrapError::Failed(
+            "LEDGERS_COMPANY_ID is not set".to_owned(),
+        ));
+    }
+    let db = deps.db.as_ref();
+    let stamp = rfc3339_utc(deps.clock.now());
+    let key_id = deps.id_gen.ulid();
+    let policy = agent_key_policy_statement(
+        deps,
+        company_id,
+        &key_id,
+        "bootstrap key",
+        BOOTSTRAP_OWNER,
+        Tier::PostWithinLimits,
+        bootstrap_limits(&input.currency),
+    )
+    .map_err(BootstrapError::Failed)?;
+
+    // The claim: one batch, all or nothing. The guard refuses while the
+    // company has any agent key; the release removes the probe row again.
+    let claim = ledgers_db::guard::guard_key(&["bootstrap-claim", company_id]);
+    let batch = [
+        ledgers_db::guard::assert_statement(
+            claim.clone(),
+            "(SELECT COUNT(*) FROM agent_key WHERE company_id = ?) = 0",
+            vec![sea_query::Value::from(company_id)],
+        ),
+        Statement::with_values(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
+                .to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(input.company.trim()),
+                sea_query::Value::from(input.currency.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(company_id),
+            ],
+        ),
+        policy,
+        ledgers_db::guard::release_statement(claim),
+    ];
+    if let Err(err) = db.batch_atomic(&batch).await {
+        return Err(if is_guard_refusal(&err) {
+            BootstrapError::AlreadyBootstrapped
+        } else {
+            BootstrapError::Failed(format!("claim company: {err}"))
+        });
+    }
+
+    // The claim stands. A failure from here on releases it, so the operator can
+    // fix the cause and run the bootstrap again.
+    let outcome = async {
+        seed_company(deps, company_id, BOOTSTRAP_OWNER).await?;
+        mint_key(deps, company_id, &key_id, BOOTSTRAP_OWNER).await
+    }
+    .await;
+    match outcome {
+        Ok(key) => Ok(key),
+        Err(step) => {
+            let release = db
+                .execute(&Statement::with_values(
+                    "DELETE FROM agent_key WHERE company_id = ? AND id = ?".to_owned(),
+                    vec![
+                        sea_query::Value::from(company_id),
+                        sea_query::Value::from(key_id.as_str()),
+                    ],
+                ))
+                .await;
+            Err(BootstrapError::Failed(match release {
+                Ok(_) => step,
+                Err(err) => format!("{step}; releasing the claim also failed: {err}"),
+            }))
+        }
+    }
+}
+
+/// Whether a batch failed because a guard refused it (the guard's `ok` column
+/// is `NOT NULL`, so a refused probe reports that constraint).
+fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
+    matches!(err, cratefield_core::DbError::Batch(message)
+        if message.contains("NOT NULL constraint failed: ledger_guard.ok"))
 }
 
 /// The registry of every command the server serves: the descriptors of
@@ -581,6 +1068,27 @@ pub fn registry() -> Registry {
             (
                 schema_of::<PeriodInput>(),
                 schema_of::<TrialBalanceOutput>(),
+            ),
+        ),
+        (
+            "keys.list",
+            (
+                schema_of::<crate::agent_keys::KeysListInput>(),
+                schema_of::<crate::agent_keys::KeysListOutput>(),
+            ),
+        ),
+        (
+            "keys.create",
+            (
+                schema_of::<crate::agent_keys::KeysCreateInput>(),
+                schema_of::<crate::agent_keys::KeysCreateOutput>(),
+            ),
+        ),
+        (
+            "keys.revoke",
+            (
+                schema_of::<crate::agent_keys::KeysRevokeInput>(),
+                schema_of::<crate::agent_keys::KeysRevokeOutput>(),
             ),
         ),
     ]);
@@ -1297,8 +1805,17 @@ pub struct BalanceSheetOutput {
     pub assets: SerializableAmount,
     /// Total liabilities.
     pub liabilities: SerializableAmount,
-    /// Total equity.
+    /// Total equity as presented: `equity_accounts` plus `current_year_result`.
     pub equity: SerializableAmount,
+    /// The equity accounts alone (capital, reserves, retained earnings).
+    pub equity_accounts: SerializableAmount,
+    /// Income minus expenses from the fiscal year start up to `as_of`
+    /// (Jahresüberschuss, or Jahresfehlbetrag when negative).
+    pub current_year_result: SerializableAmount,
+    /// Assets minus liabilities minus equity. Zero when `balanced`.
+    pub difference: SerializableAmount,
+    /// Whether the sheet balances on its own: assets = liabilities + equity.
+    pub balanced: bool,
 }
 
 /// `reports.balance_sheet`: assets, liabilities and equity as of a date
@@ -1339,6 +1856,10 @@ impl Command for ReportsBalanceSheet {
             assets: SerializableAmount::from(sheet.assets),
             liabilities: SerializableAmount::from(sheet.liabilities),
             equity: SerializableAmount::from(sheet.equity),
+            equity_accounts: SerializableAmount::from(sheet.equity_accounts),
+            current_year_result: SerializableAmount::from(sheet.current_year_result),
+            difference: SerializableAmount::from(sheet.difference),
+            balanced: sheet.balanced,
         }))
     }
 }

@@ -37,5 +37,11 @@ cratefield-testing = { workspace = true, features = ["harness"] }
 # For blocking tests.
 pollster = { workspace = true, features = ["macro"] }
 
+# SHA-256 for document hashing in tests.
+sha2 = { workspace = true }
+
+# Futures utilities for stream handling in mock.
+futures-util = { workspace = true }
+
 [lints]
 workspace = true

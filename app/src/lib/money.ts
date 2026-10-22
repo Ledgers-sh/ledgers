@@ -21,9 +21,21 @@ export function currencyExponent(currency: string): number {
   return digits;
 }
 
+/**
+ * Arabic-Indic and Persian digits and the Arabic decimal and group separators
+ * become the ASCII forms, so a typed amount parses the same in any language.
+ */
+export function normaliseDigits(input: string): string {
+  return input
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\u066B/g, '.')
+    .replace(/\u066C/g, ',');
+}
+
 /** Parses a user-typed major amount ("1,234.50", "12.5") into BigInt minor units. Returns null when invalid. */
 export function parseMajorToMinor(input: string, currency: string): bigint | null {
-  const trimmed = input.trim().replace(/[\s  ]/g, '');
+  const trimmed = normaliseDigits(input).trim().replace(/[\s  ]/g, '');
   if (trimmed === '') return null;
   const exponent = currencyExponent(currency);
   // "." is the decimal separator; "," is grouping and is ignored.

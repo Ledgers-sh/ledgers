@@ -2,12 +2,22 @@ import { accountsList, reportsTrialBalance } from '../api/commands';
 import type { Account } from '../api/types';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
+import { accountName, formatPeriod, t, type MessageKey } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
 import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
 
-/** Turns a translation key such as "account.cash_at_bank" into a readable fallback label. */
-export function accountLabel(nameKey: string): string {
-  const bare = nameKey.replace(/^account\./, '').replace(/[._-]+/g, ' ').trim();
-  return bare.charAt(0).toUpperCase() + bare.slice(1);
+const TYPE_KEYS: Record<string, MessageKey> = {
+  asset: 'accountType.asset',
+  liability: 'accountType.liability',
+  equity: 'accountType.equity',
+  income: 'accountType.income',
+  expense: 'accountType.expense',
+};
+
+/** The account's type, translated when the app knows it; the server's own word otherwise. */
+function accountTypeLabel(accountType: string): string {
+  const key = TYPE_KEYS[accountType];
+  return key ? t(key) : accountType;
 }
 
 export function Accounts() {
@@ -20,7 +30,7 @@ export function Accounts() {
     [client.baseUrl, client.apiKey, period],
   );
 
-  if (state.loading && !state.data) return <Skeleton rows={8} label="Loading accounts" />;
+  if (state.loading && !state.data) return <Skeleton rows={8} label={t('accounts.loading')} />;
   if (state.error && !state.data) return <ErrorBanner error={state.error} onRetry={state.reload} />;
   if (!state.data) return null;
 
@@ -29,24 +39,22 @@ export function Accounts() {
 
   return (
     <>
-      <PageHead title="Accounts" actions={<span class="muted">Balances for {period}</span>}>
-        The chart of accounts with balances from the trial balance. Debit-positive; a credit balance shows as negative.
+      <PageHead title={t('accounts.title')} actions={<span class="muted">{t('accounts.balances_for', { period: formatPeriod(period) })}</span>}>
+        {t('accounts.intro')}
       </PageHead>
       {accounts.length === 0 ? (
-        <Empty title="No accounts yet">
-          Accounts are created with the CLI (<code>ledgers account create</code>) or the HTTP API. They appear here as soon as they exist.
-        </Empty>
+        <Empty title={t('accounts.empty_title')}>{t('accounts.empty_body')}</Empty>
       ) : (
-        <section class="panel" aria-label="Chart of accounts">
+        <section class="panel" aria-label={t('accounts.section')}>
           <div class="table-wrap">
             <table class="ledger cards">
               <thead>
                 <tr>
-                  <th scope="col">Code</th>
-                  <th scope="col">Account</th>
-                  <th scope="col">Type</th>
+                  <th scope="col">{t('term.code')}</th>
+                  <th scope="col">{t('term.account')}</th>
+                  <th scope="col">{t('term.type')}</th>
                   <th scope="col" class="num">
-                    Balance
+                    {t('term.balance')}
                   </th>
                 </tr>
               </thead>
@@ -55,18 +63,18 @@ export function Accounts() {
                   const balance = balances.get(account.number);
                   return (
                     <tr key={account.number}>
-                      <td class="code" data-label="Code">
-                        {account.number}
+                      <td class="code" data-label={t('term.code')}>
+                        <Ltr>{account.number}</Ltr>
                       </td>
-                      <td class="main desc" data-label="Account">
-                        {accountLabel(account.name_key)}
-                        {!account.is_postable && <span class="muted"> (header)</span>}
+                      <td class="main desc" data-label={t('term.account')}>
+                        {accountName(account.name_key)}
+                        {!account.is_postable && <span class="muted"> {t('accounts.header_suffix')}</span>}
                       </td>
-                      <td data-label="Type" class="muted">
-                        {account.account_type}
+                      <td data-label={t('term.type')} class="muted">
+                        {accountTypeLabel(account.account_type)}
                       </td>
-                      <td class="num" data-label="Balance">
-                        {balance ? <Money minor={balance.minor} currency={balance.currency} /> : <span class="muted">—</span>}
+                      <td class="num" data-label={t('term.balance')}>
+                        {balance ? <Money minor={balance.minor} currency={balance.currency} /> : <span class="muted">{t('common.empty_cell')}</span>}
                       </td>
                     </tr>
                   );

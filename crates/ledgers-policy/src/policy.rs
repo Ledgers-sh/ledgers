@@ -27,6 +27,15 @@ pub struct KeyPolicy {
 }
 
 impl KeyPolicy {
+    /// Adds one key to the engine, replacing any key with the same id. The
+    /// server uses this for the in-process seeding principal, which has no
+    /// `agent_key` row; a stored key is never replaced by a request.
+    #[must_use]
+    pub fn with_key(mut self, key: AgentKey) -> Self {
+        self.keys.insert(key.id.clone(), key);
+        self
+    }
+
     /// Creates a policy engine.
     #[must_use]
     pub fn new(
@@ -72,6 +81,7 @@ impl Policy for KeyPolicy {
                     accounts,
                     protected_accounts: self.protected_accounts.clone(),
                     reverses: None, // Not available from preview; would require audit lookup.
+                    risk_flags: Vec::new(), // Screening happens in intake, not here yet.
                 };
 
                 // Decide.
