@@ -2336,6 +2336,7 @@ dependencies = [
  "cratefield-testing",
  "hex",
  "ledgers-commands",
+ "ledgers-db",
  "pollster",
  "schemars 1.2.3",
  "sea-query",

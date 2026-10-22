@@ -81,6 +81,7 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "documents.get"
         | "documents.list"
         | "documents.download_url"
+        | "documents.anchors"
         | "bills.get"
         | "bills.list"
         | "fiscal_years.list"
@@ -116,6 +117,8 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "bills.discard"
         | "bills.post"
         | "documents.register"
+        | "documents.set_anchors"
+        | "documents.delete"
         | "accounts.create"
         | "accounts.update"
         | "accounts.archive"
@@ -233,6 +236,7 @@ mod tests {
         ("documents.get", Class::Read),
         ("documents.list", Class::Read),
         ("documents.download_url", Class::Read),
+        ("documents.anchors", Class::Read),
         ("bills.get", Class::Read),
         ("bills.list", Class::Read),
         ("fiscal_years.list", Class::Read),
@@ -263,6 +267,8 @@ mod tests {
         ("bills.discard", Class::Post),
         ("bills.post", Class::Post),
         ("documents.register", Class::Post),
+        ("documents.set_anchors", Class::Post),
+        ("documents.delete", Class::Post),
         ("accounts.create", Class::Post),
         ("accounts.update", Class::Post),
         ("accounts.archive", Class::Post),
