@@ -107,6 +107,10 @@ pub struct BillInput {
     pub reader: Option<String>,
     /// The caller, recorded on the bill (filled by the server).
     pub created_by: String,
+    /// The business unit the bill's expense lines belong to. Required to post
+    /// once the company has units; ignored while it has none.
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 impl BillInput {
@@ -224,6 +228,8 @@ pub struct BillView {
     pub source: String,
     /// Which reader produced the fields, when one did (see `BillInput::reader`).
     pub reader: Option<String>,
+    /// The business unit the bill's expense lines carry, when one is named.
+    pub unit: Option<String>,
     /// The posted journal entry, once posted.
     pub posted_entry_id: Option<String>,
     /// The entry the bill posts as, when every amount and account is known.

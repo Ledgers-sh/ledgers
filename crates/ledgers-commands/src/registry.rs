@@ -448,6 +448,27 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/reports/trends",
             "ledgers reports trends",
         ),
+        entry(
+            "reports.units_summary",
+            "read",
+            "GET",
+            "/v1/reports/units-summary",
+            "ledgers reports units-summary",
+        ),
+        entry(
+            "units.list",
+            "read",
+            "GET",
+            "/v1/units",
+            "ledgers units list",
+        ),
+        entry(
+            "entries.transfer",
+            "post-within-limits",
+            "POST",
+            "/v1/transfers",
+            "ledgers entries transfer",
+        ),
     ];
     commands.extend(human_only_commands());
     commands.extend(approval_commands());
@@ -500,6 +521,27 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "POST",
             "/v1/keys",
             "ledgers keys create",
+        ),
+        human_entry(
+            "units.create",
+            "draft",
+            "POST",
+            "/v1/units",
+            "ledgers units create",
+        ),
+        human_entry(
+            "units.rename",
+            "draft",
+            "POST",
+            "/v1/units/{code}/rename",
+            "ledgers units rename",
+        ),
+        human_entry(
+            "units.archive",
+            "draft",
+            "POST",
+            "/v1/units/{code}/archive",
+            "ledgers units archive",
         ),
         human_entry(
             "keys.revoke",
