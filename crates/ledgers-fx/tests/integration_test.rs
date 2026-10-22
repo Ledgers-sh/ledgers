@@ -70,6 +70,7 @@ async fn setup_fx_scenario(db: &dyn Database) -> String {
                 currency: None,
                 parent: None,
                 tags: Vec::new(),
+                display_name: None,
             },
             "2026-01-01T00:00:00Z".to_owned(),
             &person(),

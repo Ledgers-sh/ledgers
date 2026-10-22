@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 /// The maximum number of tags one account may carry.
 pub const MAX_TAGS: usize = 16;
 
+/// The maximum length of a custom account name, in characters.
+pub const MAX_DISPLAY_NAME_CHARS: usize = 120;
+
 /// The five classical account classes, stored as lowercase strings
 /// (`"asset"`, `"liability"`, `"equity"`, `"income"`, `"expense"`).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -134,6 +137,12 @@ pub struct Account {
     /// start with `"account."`. Translated per locale at read time —
     /// document text is data, never instructions (docs/PLAN.md §3 rule 8).
     pub name_key: String,
+    /// The name a person chose, when it differs from the i18n name: a
+    /// custom account's name, or a renamed template account's. When set
+    /// it wins over the translation in every language; `None` means
+    /// "show the translated `name_key`". Trimmed and length-checked by
+    /// [`Account::validate_display_name`].
+    pub display_name: Option<String>,
     /// The account class.
     pub account_type: AccountType,
     /// The balance side that increases this account — an own field, not a
@@ -175,11 +184,56 @@ impl Account {
         self.tags.iter().any(|candidate| candidate == tag)
     }
 
-    /// The display name for `locale`, looked up in the bundled i18n
+    /// The translated name for `locale`, looked up in the bundled i18n
     /// tables by [`Self::name_key`]; `None` when the key has no entry.
     #[must_use]
-    pub fn display_name(&self, locale: Locale) -> Option<&'static str> {
+    pub fn translated_name(&self, locale: Locale) -> Option<&'static str> {
         i18n::translate(&self.name_key, locale)
+    }
+
+    /// The name to show for `locale`: the custom [`Self::display_name`]
+    /// when one is set, else the translated name, else the raw key (a
+    /// key the bundle does not know still shows something stable).
+    #[must_use]
+    pub fn label(&self, locale: Locale) -> String {
+        match &self.display_name {
+            Some(name) => name.clone(),
+            None => self
+                .translated_name(locale)
+                .map_or_else(|| self.name_key.clone(), str::to_owned),
+        }
+    }
+
+    /// Validates and normalises a custom display name: trimmed, 1 to
+    /// [`MAX_DISPLAY_NAME_CHARS`] characters, no control characters.
+    ///
+    /// # Errors
+    /// [`AccountsError::InvalidDisplayName`] with the reason.
+    pub fn validate_display_name(name: &str) -> Result<String, AccountsError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AccountsError::InvalidDisplayName {
+                reason: "the account name is required",
+            });
+        }
+        if trimmed.chars().count() > MAX_DISPLAY_NAME_CHARS {
+            return Err(AccountsError::InvalidDisplayName {
+                reason: "account names are at most 120 characters",
+            });
+        }
+        if trimmed.chars().any(char::is_control) {
+            return Err(AccountsError::InvalidDisplayName {
+                reason: "account names cannot contain control characters",
+            });
+        }
+        Ok(trimmed.to_owned())
+    }
+
+    /// The translatable key a custom account (one created by a person,
+    /// not imported from a template) is stored under: `account.custom.<number>`.
+    #[must_use]
+    pub fn custom_name_key(number: &str) -> String {
+        format!("account.custom.{number}")
     }
 
     /// Validates an account number: 2..=10 ASCII digits and nothing else.
@@ -297,6 +351,9 @@ pub struct AccountDraft {
     pub parent: Option<String>,
     /// Kebab-case tags (validated by [`Account::validate_tags`]).
     pub tags: Vec<String>,
+    /// The custom display name, or `None` to show the i18n name of
+    /// `name_key` (validated by [`Account::validate_display_name`]).
+    pub display_name: Option<String>,
 }
 
 impl AccountDraft {
@@ -313,10 +370,16 @@ impl AccountDraft {
         if !Account::name_key_is_valid(&self.name_key) {
             return Err(AccountsError::InvalidNameKey { key: self.name_key });
         }
+        let display_name = self
+            .display_name
+            .as_deref()
+            .map(Account::validate_display_name)
+            .transpose()?;
         Ok(Account {
             company_id: company_id.to_owned(),
             number: self.number,
             name_key: self.name_key,
+            display_name,
             normal_balance: self
                 .normal_balance
                 .unwrap_or(self.account_type.default_normal_balance()),
@@ -463,6 +526,7 @@ mod tests {
             currency: None,
             parent: None,
             tags: Vec::new(),
+            display_name: None,
         };
         let account = draft
             .clone()
@@ -498,6 +562,7 @@ mod tests {
             currency: None,
             parent: None,
             tags: Vec::new(),
+            display_name: None,
         };
         assert!(
             base("5100", "account.generic_sme.rent")
@@ -526,12 +591,13 @@ mod tests {
             currency: None,
             parent: None,
             tags: vec!["bank".to_owned()],
+            display_name: None,
         }
         .into_account("co", "now")
         .expect("valid draft");
         assert!(account.has_tag("bank"));
         assert!(!account.has_tag("cash"));
-        assert_eq!(account.display_name(Locale::En), None);
-        assert_eq!(account.display_name(Locale::De), None);
+        assert_eq!(account.translated_name(Locale::En), None);
+        assert_eq!(account.translated_name(Locale::De), None);
     }
 }

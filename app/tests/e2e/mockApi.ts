@@ -197,7 +197,21 @@ function trialRows(entries: Entry[]) {
   }).filter((row) => BigInt(row.debit.minor) !== 0n || BigInt(row.credit.minor) !== 0n);
 }
 
+/** One account of the fake chart, as the server keeps it (the view adds the derived fields). */
+interface MockAccount {
+  number: string;
+  name_key: string;
+  display_name: string | null;
+  account_type: string;
+  normal_balance: string;
+  currency: string | null;
+  parent: string | null;
+  tags: string[];
+  archived: boolean;
+}
+
 export interface MockApi {
+  accounts: MockAccount[];
   entries: Entry[];
   posts: unknown[];
   reversals: unknown[];
@@ -233,7 +247,7 @@ function problem(status: number, title: string, detail?: string): Reply {
  */
 const OPENAPI = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/openapi.json', import.meta.url)), 'utf8')) as Record<string, unknown>;
 
-const state: MockApi = { entries: [], posts: [], reversals: [], person: false, approvals: [], decisions: [], bulk: [] };
+const state: MockApi = { accounts: [], entries: [], posts: [], reversals: [], person: false, approvals: [], decisions: [], bulk: [] };
 let nextNumber = 1;
 
 const HOUR = 3_600_000;
@@ -492,7 +506,10 @@ function handle(method: string, url: URL, bodyText: string): Reply {
   }
   if (method === 'GET' && path === '/v1/auth/session' && state.person) return { status: 200, body: PERSON };
 
-  if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
+  if (path.startsWith('/v1/accounts')) {
+    const accounts = handleAccounts(method, path, bodyText);
+    if (accounts) return accounts;
+  }
   if (method === 'GET' && path === '/v1/entries') {
     // Newest first, one page at a time, as the server pages it: `after` is the last entry_id of the previous page.
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50), 1), 200);
@@ -552,6 +569,11 @@ function handle(method: string, url: URL, bodyText: string): Reply {
     const debit = body.entry.lines.filter((l) => l.side === 'debit').reduce((a, l) => a + BigInt(l.base.minor), 0n);
     const credit = body.entry.lines.filter((l) => l.side === 'credit').reduce((a, l) => a + BigInt(l.base.minor), 0n);
     if (debit !== credit) return problem(422, 'Validation failed', 'entry does not balance');
+    for (const line of body.entry.lines) {
+      if (findAccount(line.account_number)?.archived) {
+        return problemBody(422, 'journal-entry-refused', 'Validation failed', `account ${line.account_number} is archived and takes no new postings`);
+      }
+    }
     state.posts.push(body);
     const existing = state.entries.find((e) => e.external_id === body.entry.external_id);
     if (existing) return { status: 200, body: { entry: summary(existing) } };
@@ -605,6 +627,150 @@ function handle(method: string, url: URL, bodyText: string): Reply {
   return problem(501, 'Not yet implemented');
 }
 
+/** The chart the fake starts with: the seed accounts, a heading with a child, and one archived account. */
+function seedAccounts(): MockAccount[] {
+  const base: MockAccount[] = ACCOUNTS.map((account) => ({
+    number: account.number,
+    name_key: account.name_key,
+    display_name: null,
+    account_type: account.account_type,
+    normal_balance: account.normal_balance,
+    currency: null,
+    parent: null,
+    tags: [],
+    archived: false,
+  }));
+  return [
+    ...base,
+    { number: '1500', name_key: 'account.fake.fixed_assets', display_name: 'Fixed assets', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], archived: false },
+    { number: '1510', name_key: 'account.fake.office_equipment', display_name: 'Office equipment', account_type: 'asset', normal_balance: 'debit', currency: null, parent: '1500', tags: ['equipment'], archived: false },
+    { number: '6900', name_key: 'account.fake.old_telephone', display_name: 'Old telephone', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], archived: true },
+  ];
+}
+
+const ACCOUNT_CLASSES = ['asset', 'liability', 'equity', 'income', 'expense'];
+const ACCOUNT_NUMBER = /^[0-9]{2,10}$/;
+const TAG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** The derived view the server returns: postable, and the balance of the account's own postings. */
+function accountView(account: MockAccount) {
+  const hasChildren = state.accounts.some((other) => other.parent === account.number);
+  const lines = state.entries.flatMap((entry) => entry.lines.filter((line) => line.account_number === account.number));
+  const minor = lines.reduce((total, line) => total + BigInt(line.side === 'debit' ? line.base.minor : `-${line.base.minor}`), 0n);
+  return {
+    ...account,
+    is_postable: !hasChildren,
+    balances: lines.length === 0 ? [] : [{ minor: minor.toString(), currency: 'EUR' }],
+  };
+}
+
+/** The balance of one account in EUR, debit-positive; zero when nothing is posted to it. */
+function accountBalance(number: string): bigint {
+  return state.entries
+    .flatMap((entry) => entry.lines.filter((line) => line.account_number === number))
+    .reduce((total, line) => total + BigInt(line.side === 'debit' ? line.base.minor : `-${line.base.minor}`), 0n);
+}
+
+function findAccount(number: string): MockAccount | undefined {
+  return state.accounts.find((account) => account.number === number);
+}
+
+/** The accounts routes (accounts.create, get, update, archive, restore). Null when the path is not one. */
+function handleAccounts(method: string, path: string, bodyText: string): Reply | null {
+  if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: state.accounts.map(accountView) } };
+  if (method === 'POST' && path === '/v1/accounts') {
+    const input = JSON.parse(bodyText || '{}') as { number?: string; name?: string; type?: string; parent?: string; tags?: string[]; currency?: string };
+    const number = (input.number ?? '').trim();
+    const name = (input.name ?? '').trim();
+    if (!ACCOUNT_NUMBER.test(number)) return problemBody(422, 'account-operation-failed', 'Account operation failed', 'account numbers are 2 to 10 ASCII digits');
+    if (findAccount(number)) return problemBody(409, 'account-exists', 'Account already exists', `account already exists: ${number}`);
+    if (name === '') return problemBody(422, 'account-operation-failed', 'Account operation failed', 'a name is required');
+    if (!ACCOUNT_CLASSES.includes(input.type ?? '')) return problemBody(422, 'account-operation-failed', 'Account operation failed', 'unknown account type');
+    if (input.parent) {
+      const parent = findAccount(input.parent);
+      if (!parent) return problemBody(422, 'account-operation-failed', 'Account operation failed', `parent account not found: ${input.parent}`);
+      if (parent.account_type !== input.type) return problemBody(422, 'account-operation-failed', 'Account operation failed', 'a child must be in the class of its parent');
+      if (accountBalance(parent.number) !== 0n || state.entries.some((e) => e.lines.some((l) => l.account_number === parent.number))) {
+        return problemBody(422, 'account-operation-failed', 'Account operation failed', 'the parent already has postings');
+      }
+    }
+    const tags = input.tags ?? [];
+    if (tags.some((tag) => !TAG.test(tag)) || new Set(tags).size !== tags.length) {
+      return problemBody(422, 'account-operation-failed', 'Account operation failed', 'invalid tags');
+    }
+    const account: MockAccount = {
+      number,
+      name_key: `account.custom.${number}`,
+      display_name: name,
+      account_type: input.type ?? 'asset',
+      normal_balance: ['expense', 'asset'].includes(input.type ?? '') ? 'debit' : 'credit',
+      currency: input.currency ? input.currency : null,
+      parent: input.parent ?? null,
+      tags,
+      archived: false,
+    };
+    state.accounts.push(account);
+    return { status: 200, body: { account: accountView(account) } };
+  }
+  const one = /^\/v1\/accounts\/([^/]+)(?:\/(update|archive|restore))?$/.exec(path);
+  if (!one) return null;
+  const number = decodeURIComponent(one[1]);
+  const action = one[2];
+  const account = findAccount(number);
+  if (method === 'GET' && !action) {
+    if (!account) return problemBody(404, 'account-not-found', 'Account not found', `no account ${number}`);
+    const activity = state.entries
+      .flatMap((entry) =>
+        entry.lines
+          .filter((line) => line.account_number === number)
+          .map((line) => ({
+            entry_id: entry.entry_id,
+            journal_id: entry.journal_id,
+            fiscal_year: entry.fiscal_year,
+            number: entry.number,
+            posting_date: entry.posting_date,
+            description: entry.description,
+            minor: (line.side === 'debit' ? BigInt(line.base.minor) : -BigInt(line.base.minor)).toString(),
+            currency: line.base.currency,
+          })),
+      )
+      .sort((a, b) => b.posting_date.localeCompare(a.posting_date) || b.number - a.number)
+      .slice(0, 20);
+    return { status: 200, body: { account: accountView(account), activity } };
+  }
+  if (method !== 'POST' || !action) return null;
+  if (!account) return problemBody(404, 'account-not-found', 'Account not found', `no account ${number}`);
+  if (action === 'update') {
+    const input = JSON.parse(bodyText || '{}') as { name?: string; type?: string; tags?: string[]; parent?: string; clear_parent?: boolean };
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (name === '') return problemBody(422, 'account-operation-failed', 'Account operation failed', 'a name is required');
+      account.display_name = name;
+    }
+    if (input.type !== undefined && input.type !== account.account_type) {
+      if (accountBalance(number) !== 0n) return problemBody(422, 'account-operation-failed', 'Account operation failed', 'the class cannot change once the account has postings');
+      account.account_type = input.type;
+    }
+    if (input.tags !== undefined) {
+      if (input.tags.some((tag) => !TAG.test(tag)) || new Set(input.tags).size !== input.tags.length) {
+        return problemBody(422, 'account-operation-failed', 'Account operation failed', 'invalid tags');
+      }
+      account.tags = input.tags;
+    }
+    if (input.clear_parent) account.parent = null;
+    return { status: 200, body: { account: accountView(account) } };
+  }
+  if (action === 'archive') {
+    if (!account.archived && accountBalance(number) !== 0n) {
+      return problemBody(422, 'account-operation-failed', 'Account operation failed', `account ${number} has a balance; archiving needs a zero balance`);
+    }
+    account.archived = true;
+    return { status: 200, body: { account: accountView(account) } };
+  }
+  account.archived = false;
+  return { status: 200, body: { account: accountView(account) } };
+}
+
 function netIncome(entries: Entry[]): bigint {
   const revenue = sum(entries, (n) => n.startsWith('4'), 'credit') - sum(entries, (n) => n.startsWith('4'), 'debit');
   const expenses = sum(entries, (n) => n.startsWith('6'), 'debit') - sum(entries, (n) => n.startsWith('6'), 'credit');
@@ -628,6 +794,7 @@ let server: http.Server | null = null;
  * Requests without the right bearer key get 401.
  */
 export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
+  state.accounts = seedAccounts();
   state.entries = options.seed ? seedEntries() : [];
   if (options.extraEntries) state.entries.push(...extraEntriesFor(options.extraEntries));
   state.posts = [];
@@ -673,6 +840,11 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
         }
         // Agent keys may not manage keys or review approvals (the server answers 403).
         if (path.startsWith('/v1/keys') && req.headers.authorization === `Bearer ${API_KEY}`) {
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
+          return;
+        }
+        if (!asPerson && req.method === 'POST' && path.startsWith('/v1/accounts')) {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
           return;

@@ -14,6 +14,7 @@ use common::{COMPANY_ID, FY, NOW, POSTED_AT};
 use cratefield_core::{Database, DbError, Rows, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_db::{DbModule, RetryPolicy};
+use ledgers_ledger::commands;
 use ledgers_ledger::journal::{self, JournalDraft, JournalKind};
 use ledgers_ledger::query;
 use ledgers_ledger::{Entry, EntryDraft, LedgerModule, Line, PostContext, Side, post_entry};
@@ -359,6 +360,7 @@ fn accounts_list_is_a_constant_number_of_queries_on_every_dialect() {
                         currency: None,
                         parent: None,
                         tags: vec![],
+                        display_name: None,
                     },
                     NOW.to_owned(),
                     &common::person(),
@@ -370,6 +372,52 @@ fn accounts_list_is_a_constant_number_of_queries_on_every_dialect() {
             assert_eq!(
                 small, large,
                 "reading a 24-account chart took {large} statements, a 4-account chart took {small}"
+            );
+        });
+    }
+}
+
+/// Statements the account page takes: the account with its child probe,
+/// its balances and its recent activity. None of them grows with the number
+/// of entries that touched the account (the activity page is capped).
+async fn count_account_detail(db: &dyn Database) -> usize {
+    let counting = Counting::new(db);
+    let entry = commands::show_account(&counting, COMPANY_ID, "1010")
+        .await
+        .expect("the account reads");
+    let balances = query::account_balances(&counting, COMPANY_ID)
+        .await
+        .expect("the balances read");
+    let activity = query::account_activity(&counting, COMPANY_ID, "1010", 20)
+        .await
+        .expect("the activity reads");
+    assert_eq!(entry.account.number, "1010");
+    assert!(!balances.is_empty() && !activity.is_empty());
+    counting.count()
+}
+
+#[test]
+fn account_detail_is_a_constant_number_of_queries_on_every_dialect() {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            let journal_id = fixtures(db).await;
+            post(db, &journal_id, 1, None).await;
+            let small = count_account_detail(db).await;
+
+            for n in 2..30 {
+                post(db, &journal_id, n, None).await;
+            }
+            let large = count_account_detail(db).await;
+            assert_eq!(
+                small, large,
+                "the account page with 29 entries took {large} statements, with 1 entry {small}"
             );
         });
     }

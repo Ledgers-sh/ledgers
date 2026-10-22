@@ -6,6 +6,8 @@
 import { request, type ClientConfig } from './client';
 import type {
   AccountBalanceByDimensionOutput,
+  AccountDetailOutput,
+  AccountWriteOutput,
   AccountsListOutput,
   BalanceSheetOutput,
   BillsMatchOutput,
@@ -70,9 +72,65 @@ export function entriesGet(config: Config, externalId: string): Promise<EntryRec
   });
 }
 
-/** GET /v1/accounts (accounts.list, being added server-side in parallel). */
+/** GET /v1/accounts (accounts.list): the whole chart, archived accounts included, with balances. */
 export function accountsList(config: Config): Promise<AccountsListOutput> {
   return request<AccountsListOutput>(config, { method: 'GET', path: '/v1/accounts' });
+}
+
+/** Input of accounts.create. `type` is one of the five classes. */
+export interface AccountCreateInput {
+  number: string;
+  name: string;
+  type: string;
+  parent?: string;
+  tags?: string[];
+  currency?: string;
+}
+
+/** Input of accounts.update: only the fields given change. `clear_parent` makes the account a root. */
+export interface AccountUpdateInput {
+  name?: string;
+  type?: string;
+  tags?: string[];
+  parent?: string;
+  clear_parent?: boolean;
+}
+
+/** POST /v1/accounts (accounts.create). */
+export function accountsCreate(config: Config, input: AccountCreateInput): Promise<AccountWriteOutput> {
+  return request<AccountWriteOutput>(config, { method: 'POST', path: '/v1/accounts', body: input });
+}
+
+/** GET /v1/accounts/{number} (accounts.get): the account, its balance and its recent entries. */
+export function accountsGet(config: Config, number: string): Promise<AccountDetailOutput> {
+  return request<AccountDetailOutput>(config, { method: 'GET', path: `/v1/accounts/${encodeURIComponent(number)}` });
+}
+
+/** POST /v1/accounts/{number}/update (accounts.update). */
+export function accountsUpdate(config: Config, number: string, input: AccountUpdateInput): Promise<AccountWriteOutput> {
+  return request<AccountWriteOutput>(config, {
+    method: 'POST',
+    path: `/v1/accounts/${encodeURIComponent(number)}/update`,
+    body: input,
+  });
+}
+
+/** POST /v1/accounts/{number}/archive (accounts.archive). Refused while the balance is not zero. */
+export function accountsArchive(config: Config, number: string): Promise<AccountWriteOutput> {
+  return request<AccountWriteOutput>(config, {
+    method: 'POST',
+    path: `/v1/accounts/${encodeURIComponent(number)}/archive`,
+    body: {},
+  });
+}
+
+/** POST /v1/accounts/{number}/restore (accounts.restore). */
+export function accountsRestore(config: Config, number: string): Promise<AccountWriteOutput> {
+  return request<AccountWriteOutput>(config, {
+    method: 'POST',
+    path: `/v1/accounts/${encodeURIComponent(number)}/restore`,
+    body: {},
+  });
 }
 
 /** GET /v1/reports/trial-balance?period=YYYY-MM (reports.trial_balance). */

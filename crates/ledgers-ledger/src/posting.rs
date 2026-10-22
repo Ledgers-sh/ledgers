@@ -1272,9 +1272,9 @@ async fn diagnose_refusal(
         )
         .await?;
         if present == 0 {
-            return Some(JournalError::UnknownAccount {
-                account: line.account_number.clone(),
-            });
+            return missing_or_archived(db, company, &line.account_number)
+                .await
+                .ok();
         }
     }
 
@@ -1302,6 +1302,34 @@ async fn diagnose_refusal(
     }
 
     None
+}
+
+/// Why a posting line's account refused: [`JournalError::AccountArchived`]
+/// when the account exists but is archived, else
+/// [`JournalError::UnknownAccount`]. The guard only says "not active", so
+/// this reads the chart to say which.
+///
+/// # Errors
+/// [`JournalError::Database`] when the lookup fails.
+async fn missing_or_archived(
+    db: &dyn Database,
+    company: &str,
+    account: &str,
+) -> Result<JournalError, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT archived FROM account WHERE company_id = ? AND number = ?".to_owned(),
+            vec![SeaValue::from(company), SeaValue::from(account)],
+        ))
+        .await?;
+    Ok(match rows.first() {
+        Some(_) => JournalError::AccountArchived {
+            account: account.to_owned(),
+        },
+        None => JournalError::UnknownAccount {
+            account: account.to_owned(),
+        },
+    })
 }
 
 /// The usage-meter day of a post: the UTC day it is made (`created_at`),
@@ -1487,9 +1515,7 @@ pub async fn dry_run_entry(
             .await?;
 
         if rows.is_empty() {
-            return Err(JournalError::UnknownAccount {
-                account: line.account_number.clone(),
-            });
+            return Err(missing_or_archived(db, company, &line.account_number).await?);
         }
     }
 

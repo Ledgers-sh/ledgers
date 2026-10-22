@@ -66,6 +66,7 @@ impl SerializableAccountDraft {
             currency,
             parent: self.parent,
             tags: self.tags,
+            display_name: None,
         })
     }
 }

@@ -15,6 +15,16 @@ use time::{OffsetDateTime, UtcOffset};
 
 /// The policy engine for agent keys: tier checks, per-currency limits,
 /// rolling-day accounting, and protected account protection.
+/// The commands that change the chart of accounts. An agent key may run
+/// them only when its policy sets `chart_changes`; a person always may
+/// (their role is checked at sign-in).
+pub const CHART_WRITE_COMMANDS: &[&str] = &[
+    "accounts.create",
+    "accounts.update",
+    "accounts.archive",
+    "accounts.restore",
+];
+
 pub struct KeyPolicy {
     /// Keys indexed by id.
     keys: BTreeMap<String, AgentKey>,
@@ -69,6 +79,17 @@ impl Policy for KeyPolicy {
                         reason: format!("unknown agent key: {key_id}"),
                     };
                 };
+
+                // Chart changes are a person's decision unless this key's
+                // policy says otherwise (docs/PLAN.md section 5).
+                if CHART_WRITE_COMMANDS.contains(&meta.name.as_str()) && !key.chart_changes {
+                    return Decision::Deny {
+                        reason: format!(
+                            "{} changes the chart of accounts; an agent key may do that only when its policy allows chart changes",
+                            meta.name
+                        ),
+                    };
+                }
 
                 // Build DecisionInput from the preview and key policy.
                 let (effect, accounts) = preview_to_effect_and_accounts(preview);
@@ -254,6 +275,7 @@ mod tests {
                 created_at: now,
                 last_used_at: None,
                 revoked_at: None,
+                chart_changes: false,
             },
         );
 
@@ -295,6 +317,7 @@ mod tests {
                 created_at: now,
                 last_used_at: None,
                 revoked_at: Some(now),
+                chart_changes: false,
             },
         );
 
