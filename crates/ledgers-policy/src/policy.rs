@@ -72,6 +72,7 @@ impl Policy for KeyPolicy {
                     accounts,
                     protected_accounts: self.protected_accounts.clone(),
                     reverses: None, // Not available from preview; would require audit lookup.
+                    risk_flags: Vec::new(), // Screening happens in intake, not here yet.
                 };
 
                 // Decide.

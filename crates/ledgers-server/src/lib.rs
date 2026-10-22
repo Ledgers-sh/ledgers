@@ -5,6 +5,7 @@ pub mod config;
 pub mod documents;
 pub mod mcp;
 pub mod openapi;
+pub mod rate_limiting;
 pub mod routes;
 
 /// Cloudflare Workers entry point (wasm32 only)
@@ -34,6 +35,7 @@ pub fn harness(
     registry: &Registry,
     cfg: &dyn Config,
     runtime: impl Runtime + 'static,
+    rate_limiter: Option<Arc<dyn cratefield_core::RateLimiter>>,
 ) -> Result<Harness, ConfigError> {
     // Create the venture
     let domain = cfg
@@ -54,8 +56,14 @@ pub fn harness(
         .cors_origins(cors_origins)
         .env(VentureEnv::Development);
 
-    // Create dispatch
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(routes::Unwired);
+    // Create dispatch with rate limiting wrapper
+    let unwired = Arc::new(routes::Unwired);
+    // Rate limiter is optional and must be passed by the caller (native/worker runtime).
+    // Rate limiter errors fail closed for agent keys: we deny the request.
+    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(rate_limiting::RateLimitingDispatch::new(
+        unwired,
+        rate_limiter,
+    ));
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {

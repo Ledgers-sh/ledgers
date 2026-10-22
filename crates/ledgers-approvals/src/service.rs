@@ -9,6 +9,7 @@ use cratefield_core::{Database, Statement};
 use ledgers_audit::{AuditContext, AuditRecord, Outcome, event::Actor};
 use ledgers_commands::{
     Approval, Authenticator, Command, CommandContext, Credential, Executor, Policy, Principal,
+    mcp::escape_document_text,
 };
 use ledgers_db::guard;
 use sea_query::Value as SeaValue;
@@ -116,7 +117,7 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
         };
 
         // Build card
-        let card = build_card(&request, counterparty);
+        let card = build_card(&request, counterparty, None, false);
 
         // Store request in database
         let effect_json = serde_json::to_string(&request.effect)?;
@@ -766,7 +767,12 @@ fn extract_effect(
 }
 
 /// Builds a human-readable card for the approval request.
-fn build_card(request: &ApprovalRequest, counterparty: Option<&str>) -> ApprovalCard {
+fn build_card(
+    request: &ApprovalRequest,
+    counterparty: Option<&str>,
+    payee_bank: Option<&str>,
+    bank_changed: bool,
+) -> ApprovalCard {
     let mut text = format!(
         "**Approval Request**\n\nCommand: `{}`\n\nReason: {}\n",
         request.command, request.reason
@@ -780,13 +786,22 @@ fn build_card(request: &ApprovalRequest, counterparty: Option<&str>) -> Approval
     }
 
     if let Some(counterparty) = counterparty {
-        // Escape markdown in counterparty
-        let escaped = counterparty
-            .replace('\\', "\\\\")
-            .replace('*', "\\*")
-            .replace('[', "\\[")
-            .replace(']', "\\]");
-        let _ = writeln!(text, "\nCounterparty: {escaped}");
+        let escaped = escape_document_text(counterparty);
+        let _ = writeln!(
+            text,
+            "\nCounterparty (from document, unverified): {escaped}"
+        );
+    }
+
+    if let Some(payee_bank) = payee_bank {
+        let escaped = escape_document_text(payee_bank);
+        let _ = writeln!(text, "\nPays to (from document, unverified): {escaped}");
+        if bank_changed {
+            let _ = writeln!(
+                text,
+                "\n⚠ Bank details differ from this vendor's known details — verify by phone before approving."
+            );
+        }
     }
 
     let _ = writeln!(
@@ -843,5 +858,41 @@ mod tests {
         let effect = extract_effect(&preview).unwrap();
         assert_eq!(effect.get("EUR").map(String::as_str), Some("10000"));
         assert_eq!(effect.get("USD").map(String::as_str), Some("11000"));
+    }
+
+    #[test]
+    fn approval_card_escapes_and_labels_document_data() {
+        // Test escaping: markdown, bidi overrides, truncation
+        assert!(escape_document_text("Acme**[evil](url)").contains("\\*\\*"));
+        assert!(escape_document_text("Vendor\u{202A}Name").len() < "Vendor\u{202A}Name".len());
+        assert!(escape_document_text(&"a".repeat(150)).len() <= 120);
+
+        // Test card labels and bank warning
+        let request = ApprovalRequest {
+            id: "appr1".to_string(),
+            company_id: "co1".to_string(),
+            command: "pay".to_string(),
+            input: "{}".to_string(),
+            preview: "{}".to_string(),
+            reads: "{}".to_string(),
+            request_hash: "hash1".to_string(),
+            effect: BTreeMap::new(),
+            requested_by: "agent1".to_string(),
+            reason: "Payout".to_string(),
+            status: Status::Pending,
+            created_at: "2026-01-15T00:00:00Z".to_string(),
+            expires_at: "2026-01-15T01:00:00Z".to_string(),
+            decided_by: None,
+            credential_id: None,
+        };
+        let card = build_card(
+            &request,
+            Some("Acme GmbH"),
+            Some("DE89370400440532013000"),
+            true,
+        );
+        assert!(card.card.contains("from document, unverified"));
+        assert!(card.card.contains("Pays to"));
+        assert!(card.card.contains("⚠ Bank details differ"));
     }
 }

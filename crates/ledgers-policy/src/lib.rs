@@ -20,17 +20,21 @@
 
 pub mod commands;
 pub mod decide;
+pub mod intake;
 pub mod key;
 pub mod limit;
 pub mod module;
 pub mod policy;
+pub mod screen;
 pub mod store;
 pub mod surface;
 
 pub use decide::{Actor, CommandClass, Decision, DecisionInput, Explanation, decide, explain};
+pub use intake::{ExtractedBill, IntakeError, extract_bill, extraction_prompt};
 pub use key::{AgentKey, CurrencyLimit};
 pub use module::PolicyModule;
 pub use policy::KeyPolicy;
+pub use screen::{BankDetails, BillCandidate, KnownBill, RiskFlag, ScreenContext, screen};
 
 /// The `agent_key` migration, in apply order: the portable set (SQLite dialect,
 /// referenced as the canonical version).

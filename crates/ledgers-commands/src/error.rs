@@ -59,6 +59,10 @@ pub enum CommandError {
     /// The problem is carried through unchanged.
     #[error(transparent)]
     Domain(#[from] cratefield_core::Problem),
+
+    /// The agent key exceeded its rate limit.
+    #[error("rate limited")]
+    RateLimited { retry_after_secs: Option<u64> },
 }
 
 impl From<ledgers_db::GuardError> for CommandError {
@@ -113,6 +117,16 @@ impl CommandError {
                 Problem::new(&DATABASE_ERROR).with_detail(err.to_string())
             }
             CommandError::Domain(problem) => problem.clone(),
+            CommandError::RateLimited { retry_after_secs } => {
+                let mut p =
+                    Problem::new(&RATE_LIMITED).with_detail("agent key exceeded its rate limit");
+                if let Some(secs) = retry_after_secs {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let secs_i64 = *secs as i64;
+                    p = p.with_extension("retryAfterSecs", secs_i64);
+                }
+                p
+            }
         }
     }
 }
@@ -189,6 +203,14 @@ pub const DATABASE_ERROR: cratefield_core::ProblemDef = cratefield_core::Problem
     description: "A database operation failed.",
 };
 
+/// Rate limited: 429
+pub const RATE_LIMITED: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "rate-limited",
+    status: cratefield_core::axum::http::StatusCode::TOO_MANY_REQUESTS,
+    title: "Rate limit exceeded",
+    description: "The agent key exceeded its rate limit.",
+};
+
 /// The base URI for this crate's problem types under RFC 9457.
 pub const PROBLEM_BASE: &str = "https://ledgers.sh/problems/";
 
@@ -209,6 +231,9 @@ mod tests {
             CommandError::DryRunUnsupported,
             CommandError::InvalidInput("test".to_string()),
             CommandError::Conflict { attempts: 1 },
+            CommandError::RateLimited {
+                retry_after_secs: Some(60),
+            },
         ];
 
         for err in test_cases {

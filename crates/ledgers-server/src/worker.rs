@@ -20,13 +20,19 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         // Create configuration from environment
         let cfg = WorkerConfig { env: env.clone() };
 
-        // Set up the Cloudflare runtime with D1 and R2 bindings
-        let runtime = Cloudflare::new().db("DB").blob("DOCUMENTS");
+        // Set up the Cloudflare runtime with D1, R2, and rate limiting bindings
+        // The rate limiter binding is named in wrangler.toml and resolved at request time in serve()
+        let runtime = Cloudflare::new()
+            .db("DB")
+            .blob("DOCUMENTS")
+            .rate_limiter("RATE_LIMITER");
 
         // Build the harness with the runtime (so it knows which ports are provided)
         let registry = Registry::new();
+        // The rate limiter is extracted via serve() when ports are resolved with the Env,
+        // so it is applied per-request rather than at harness build time for Workers
         let harness_instance =
-            harness(&registry, &cfg, runtime.clone()).expect("Failed to build harness");
+            harness(&registry, &cfg, runtime.clone(), None).expect("Failed to build harness");
 
         (harness_instance, runtime)
     });

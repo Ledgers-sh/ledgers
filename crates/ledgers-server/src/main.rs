@@ -29,7 +29,9 @@ mod native {
 
         // Build the harness with the runtime (so it knows which ports are provided)
         let registry = Registry::new();
-        let harness_inst = harness(&registry, &cfg, native.clone())?;
+        // Extract rate limiter from native runtime's ports
+        let rate_limiter = native.ports().rate_limiter.clone();
+        let harness_inst = harness(&registry, &cfg, native.clone(), rate_limiter)?;
 
         tracing::info!("Starting Ledgers server");
 
