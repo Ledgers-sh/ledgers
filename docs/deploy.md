@@ -239,3 +239,19 @@ npx wrangler@4.148.0 dev --env staging --local --port 8787
 `.dev.vars` is gitignored and must never be committed. Delete it when you are
 done. For the native server (SQLite), `LEDGERS_DEV=1 cargo run -p ledgers-server`
 creates the dev company and prints a dev key; that path has no bootstrap route.
+
+## Demo company (not yet on staging)
+
+The demo company Halden Works GmbH (`crates/ledgers-demo`, issue #51) is loaded
+automatically by the native development server (`LEDGERS_DEV=1`) when its company has no
+entries. It posts through the executor: agent entries with the bootstrap key's own bearer
+token, and the owner's entries under a person principal, so each entry records whether an
+agent or a person posted it. Dimension values are created with the store's domain function.
+Re-running is a no-op: an entry whose `external_id` exists is skipped, and a reversal whose
+target is already reversed is skipped.
+
+Staging is **not seeded yet**. The Worker has no seeding route, and `ledgers admin seed-demo`
+is not implemented: the CLI can post only through the HTTP registry, which cannot create
+dimension values or post as a person. Until that exists, `POST /admin/bootstrap` gives
+staging an empty company, and the demo book is only available locally. `LEDGERS_DEMO=0`
+keeps a development company empty.

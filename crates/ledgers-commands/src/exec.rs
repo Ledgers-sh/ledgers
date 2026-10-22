@@ -11,7 +11,7 @@
 //! 7. If needs approval: record a `NeedsApproval` event, return the approval request.
 //! 8. If allowed: execute (re-plan on chain-fork retry), append Allowed audit event.
 
-use crate::auth::{Authenticator, Credential};
+use crate::auth::{Authenticator, Credential, Principal};
 use crate::command::{Command, CommandContext};
 use crate::error::CommandError;
 use crate::journal_preview::JournalPreview;
@@ -30,12 +30,26 @@ use std::time::Duration;
 /// the executor controls when re-planning happens on retry.
 pub struct ExecToken {
     _private: (),
+    /// Whether the executor authenticated a person (not an agent key) for
+    /// this command. Planners read it through [`ExecToken::acts_as_person`]
+    /// so a posting or reversal records who posted it.
+    person: bool,
 }
 
 impl ExecToken {
     /// Creates a new token (crate-private: only the executor constructs it).
-    fn new() -> Self {
-        ExecToken { _private: () }
+    fn new(person: bool) -> Self {
+        ExecToken {
+            _private: (),
+            person,
+        }
+    }
+
+    /// Whether the command runs for a person (a session or an approving
+    /// owner) rather than an agent key.
+    #[must_use]
+    pub fn acts_as_person(&self) -> bool {
+        self.person
     }
 }
 
@@ -54,6 +68,30 @@ pub struct Approval {
     /// The object ids the approval service touched (e.g., nonce id, approval request id).
     pub objects: Vec<String>,
 }
+
+/// A command the policy sent to approval, as the approval request will freeze it.
+#[derive(Clone, Debug)]
+pub struct PendingApproval {
+    /// The command name (e.g. `entries.post`).
+    pub command: String,
+    /// The canonical JSON input the agent sent.
+    pub input: serde_json::Value,
+    /// The journal preview at request time.
+    pub preview: JournalPreview,
+    /// The object versions read at request time.
+    pub reads: std::collections::BTreeMap<String, String>,
+    /// The request hash binding the approval to exactly this request.
+    pub request_hash: String,
+    /// The policy reason approval is needed.
+    pub reason: String,
+    /// The requester: the agent key id, or the person id for a person request.
+    pub requested_by: String,
+}
+
+/// Builds the statements that store an approval request. The executor runs
+/// them in the same guarded batch as the needs-approval audit row.
+pub type ApprovalPersist<'a> =
+    &'a (dyn Fn(&PendingApproval) -> Result<Vec<Statement>, CommandError> + Sync);
 
 /// The execution mode: run the command, or do a dry-run.
 #[derive(Copy, Clone, Debug)]
@@ -137,7 +175,6 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
     /// Returns an error if authentication fails, tier is insufficient, the
     /// command is human-only but run by an agent, the preview fails, dry-run is
     /// unsupported, policy denies or needs approval, or execution fails.
-    #[allow(clippy::too_many_lines)]
     pub async fn run<C: Command + ?Sized>(
         &self,
         cmd: &C,
@@ -145,6 +182,38 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
         ctx: CommandContext,
         input: &C::Input,
         mode: Execute,
+    ) -> Result<Executed<C::Output>, CommandError> {
+        self.run_inner(cmd, credential, ctx, input, mode, None)
+            .await
+    }
+
+    /// Executes a command, and when policy says it needs approval, stores the
+    /// approval request that `persist` builds in the same guarded batch as the
+    /// needs-approval audit row. Either both are written or neither is.
+    ///
+    /// # Errors
+    /// The same errors as [`Executor::run`], plus any error `persist` returns.
+    pub async fn run_for_approval<C: Command + ?Sized>(
+        &self,
+        cmd: &C,
+        credential: Credential,
+        ctx: CommandContext,
+        input: &C::Input,
+        persist: ApprovalPersist<'_>,
+    ) -> Result<Executed<C::Output>, CommandError> {
+        self.run_inner(cmd, credential, ctx, input, Execute::Run, Some(persist))
+            .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn run_inner<C: Command + ?Sized>(
+        &self,
+        cmd: &C,
+        credential: Credential,
+        ctx: CommandContext,
+        input: &C::Input,
+        mode: Execute,
+        persist: Option<ApprovalPersist<'_>>,
     ) -> Result<Executed<C::Output>, CommandError> {
         // 1. Authenticate.
         let principal = self.authenticator.authenticate(&credential).await?;
@@ -224,10 +293,36 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
                     vec![],
                     Some(reason.clone()),
                 );
-                record_deny(self.db, &ctx.company_id, &audit_ctx, &record, &ctx.now).await?;
 
                 let reads = cmd.reads(self.db, &ctx, input).await?;
                 let request_hash = request_hash(C::NAME, &input_json, &preview, &reads)?;
+                match persist {
+                    Some(persist) => {
+                        let pending = PendingApproval {
+                            command: C::NAME.to_string(),
+                            input: input_json.clone(),
+                            preview: preview.clone(),
+                            reads: reads.clone(),
+                            request_hash: request_hash.clone(),
+                            reason: reason.clone(),
+                            requested_by: requester_id(&principal),
+                        };
+                        let change = persist(&pending)?;
+                        execute_with_retry(
+                            self.db,
+                            &ctx.company_id,
+                            &audit_ctx,
+                            &record,
+                            &ctx.now,
+                            change,
+                        )
+                        .await?;
+                    }
+                    None => {
+                        record_deny(self.db, &ctx.company_id, &audit_ctx, &record, &ctx.now)
+                            .await?;
+                    }
+                }
                 Ok(Executed::NeedsApproval {
                     request_hash,
                     preview,
@@ -245,7 +340,7 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
                     ctx.event_id.clone(),
                 );
 
-                let token = ExecToken::new();
+                let token = ExecToken::new(!principal.is_agent());
                 let plan = cmd.plan(&token, self.db, &ctx, input).await?;
 
                 // If the plan has no statements, don't write an audit event
@@ -351,7 +446,7 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
         )
         .with_approval(&approval.approval_id);
 
-        let token = ExecToken::new();
+        let token = ExecToken::new(!approver.is_agent());
         let plan = cmd.plan(&token, self.db, &ctx, input).await?;
 
         // Extend objects with approval.objects.
@@ -377,6 +472,14 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
         .await?;
 
         Ok(plan.output)
+    }
+}
+
+/// The requester id an approval request records: the agent key id, or the person id.
+fn requester_id(principal: &Principal) -> String {
+    match principal {
+        Principal::Agent { key_id, .. } => key_id.clone(),
+        Principal::Person { person_id } => person_id.clone(),
     }
 }
 
@@ -476,7 +579,7 @@ mod tests {
     #[test]
     fn exec_token_not_clone() {
         // Verify ExecToken cannot be cloned or copied.
-        let _token = ExecToken::new();
+        let _token = ExecToken::new(false);
         // This would fail to compile:
         // let _token2 = _token;
     }

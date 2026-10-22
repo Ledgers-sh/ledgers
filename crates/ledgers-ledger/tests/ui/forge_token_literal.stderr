@@ -1,5 +1,12 @@
-error[E0451]: field `_private` of struct `ExecToken` is private
- --> tests/ui/forge_token_literal.rs:7:48
+error: cannot construct `ExecToken` with struct literal syntax due to private fields
+ --> tests/ui/forge_token_literal.rs:7:18
   |
 7 |     let _token = ledgers_commands::ExecToken { _private: () };
-  |                                                ^^^^^^^^ private field
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^   ------------ private field
+  |
+  = note: ...and other private field `person` that was not provided
+help: you might have meant to use the `new` associated function
+  |
+7 -     let _token = ledgers_commands::ExecToken { _private: () };
+7 +     let _token = ledgers_commands::ExecToken::new(_);
+  |

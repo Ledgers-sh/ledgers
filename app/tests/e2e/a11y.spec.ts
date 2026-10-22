@@ -5,17 +5,19 @@
  */
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { mockApi, signIn, stopMockApi } from './mockApi';
+import { mockApi, signIn, signInPerson, stopMockApi } from './mockApi';
 
 const LOCALES = ['en', 'de', 'ar'] as const;
 
-const SCREENS = [
+const SCREENS: { name: string; hash: string; person?: boolean }[] = [
   { name: 'overview', hash: '#/overview' },
   { name: 'journal', hash: '#/journal' },
   { name: 'entry', hash: '#/journal/seed-2' },
   { name: 'new-entry', hash: '#/new' },
   { name: 'accounts', hash: '#/accounts' },
   { name: 'reports', hash: '#/reports' },
+  // The approvals inbox is a person's screen: an agent key sees a notice instead.
+  { name: 'approvals', hash: '#/approvals', person: true },
 ];
 
 async function blockingViolations(page: Page) {
@@ -43,7 +45,9 @@ for (const locale of LOCALES) {
 
     for (const screen of SCREENS) {
       test(`${screen.name} screen`, async ({ page }) => {
-        await signIn(page, 'dark', locale);
+        await mockApi({ seed: true, person: screen.person === true });
+        if (screen.person) await signInPerson(page, 'dark', locale);
+        else await signIn(page, 'dark', locale);
         await page.goto(`/${screen.hash}`);
         await expect(page.locator('h1').first()).toBeVisible();
         await page.waitForLoadState('networkidle');

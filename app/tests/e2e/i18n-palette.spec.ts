@@ -95,12 +95,18 @@ test.describe('command palette', () => {
 
     for (const { path, method, op } of operations) {
       const name = op['x-ledgers-command'];
-      const item = page.locator('.palette-item', { has: page.getByRole('heading', { name }) });
+      const item = page.locator('.palette-item', { has: page.getByRole('heading', { name, exact: true }) });
       await expect(item, name).toHaveCount(1);
-      await expect(item.locator('.palette-value').nth(0), name).toHaveText(op['x-ledgers-cli']);
-      await expect(item.locator('.palette-value').nth(1), name).toHaveText(op['x-ledgers-mcp']);
-      await expect(item.locator('.palette-value').nth(2), name).toHaveText(`${method} ${path}`);
-      await expect(item.getByRole('button', { name: /^Copy/ }), name).toHaveCount(3);
+      const rows = item.locator('.palette-form');
+      await expect(rows.nth(0).locator('.palette-value'), name).toHaveText(op['x-ledgers-cli']);
+      if (op['x-ledgers-mcp']) {
+        await expect(rows.nth(1).locator('.palette-value'), name).toHaveText(op['x-ledgers-mcp']);
+      } else {
+        // Human-only: the document publishes no MCP tool, and the palette says so.
+        await expect(rows.nth(1).getByText('No MCP tool: human only.'), name).toBeVisible();
+      }
+      await expect(rows.nth(2).locator('.palette-value'), name).toHaveText(`${method} ${path}`);
+      await expect(item.getByRole('button', { name: /^Copy/ }), name).toHaveCount(op['x-ledgers-mcp'] ? 3 : 2);
     }
   });
 

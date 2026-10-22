@@ -2,6 +2,7 @@
 //! Ledgers server composition: harness and modules.
 
 pub mod config;
+pub mod demo;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -83,9 +84,15 @@ pub fn harness(
     // wrapper. The limiter comes from the request's ports (`Deps`), so it is
     // resolved per request on Workers as well as natively; agent keys are
     // throttled, person principals pass through.
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(rate_limiting::RateLimitingDispatch::new(
-        Arc::new(dispatch::ServerDispatch::new(company_id).with_app_origins(cors_origins.clone())),
-    ));
+    let dispatch: Arc<dyn routes::Dispatch> =
+        Arc::new(rate_limiting::RateLimitingDispatch::new(Arc::new(
+            dispatch::ServerDispatch::new(company_id)
+                .with_app_origins(cors_origins.clone())
+                .with_app_url(
+                    cfg.get("LEDGERS_APP_URL")
+                        .unwrap_or_else(|| public_url.clone()),
+                ),
+        )));
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {
@@ -130,6 +137,8 @@ pub fn harness(
     // Last, so its migration follows every existing module's: the D1 files
     // are numbered in this order and staging has already applied them.
     let builder = builder.module(people::PeopleModule::new(people_config));
+    // The approval inbox columns come after every other module's migrations.
+    let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
 
     builder.build()
 }

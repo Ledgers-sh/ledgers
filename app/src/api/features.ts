@@ -4,7 +4,6 @@
  * page only when the server lists the operation behind it, so no control is
  * ever a dead button. Any failure reads as "nothing offered".
  */
-import { fetchOpenApiDocument } from './openapi';
 
 /** The operationId of bills.match (dots become underscores in the document). */
 export const BILLS_MATCH_OPERATION = 'bills_match';
@@ -22,9 +21,4 @@ export function operationIds(document: unknown): Set<string> {
     }
   }
   return ids;
-}
-
-/** The operationIds the server at `baseUrl` offers. The document is public; no key is sent. */
-export async function fetchOperationIds(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<Set<string>> {
-  return operationIds(await fetchOpenApiDocument(baseUrl, fetchImpl));
 }

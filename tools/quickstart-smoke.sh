@@ -53,6 +53,7 @@ BASE="http://127.0.0.1:$PORT"
 echo "smoke: starting the server on 127.0.0.1:$PORT (LEDGERS_DEV=1)"
 env -u HARNESS_SECRET \
   LEDGERS_DEV=1 \
+  LEDGERS_DEMO=0 \
   LISTEN_ADDR="127.0.0.1:$PORT" \
   DATABASE_PATH="$WORK/ledgers.db" \
   BLOB_DIR="$WORK/blobs" \

@@ -1,6 +1,6 @@
 //! Approval service: raise requests, issue nonces, approve and reject.
 
-use crate::approval::{ApprovalRequest, Status};
+use crate::approval::{ApprovalRequest, Risk, Status};
 use crate::config::ApprovalConfig;
 use crate::error::ApprovalError;
 use crate::rules::{ApprovalRules, StepUp};
@@ -8,13 +8,14 @@ use crate::stepup::{AssertionVerifier, CredentialKeys, PasskeyProof};
 use cratefield_core::{Database, Statement};
 use ledgers_audit::{AuditContext, AuditRecord, Outcome, event::Actor};
 use ledgers_commands::{
-    Approval, Authenticator, Command, CommandContext, Credential, Executor, Policy, Principal,
-    mcp::escape_document_text,
+    Approval, Authenticator, Command, CommandContext, CommandError, Credential, Executor, Policy,
+    Principal, mcp::escape_document_text,
 };
 use ledgers_db::guard;
+use ledgers_money::{Amount, Currency};
 use sea_query::Value as SeaValue;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 /// A card summarizing an approval request for chat display.
@@ -88,70 +89,272 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
         counterparty: Option<&str>,
         now: &str,
     ) -> Result<RaisedApproval, ApprovalError> {
-        // Compute effect (money movement) from preview totals
-        let effect = extract_effect(preview_json)?;
-
-        // Create the request
-        let request = ApprovalRequest {
-            id: approval_id.clone(),
-            company_id: company_id.to_owned(),
-            command: command.to_owned(),
-            input: serde_json::to_string(input_json)?,
-            preview: serde_json::to_string(preview_json)?,
-            reads: serde_json::to_string(reads)?,
-            request_hash,
-            effect,
-            requested_by,
-            reason: reason.clone(),
-            status: Status::Pending,
-            created_at: now.to_owned(),
-            expires_at: {
-                let created = parse_rfc3339(now)?;
-                #[allow(clippy::cast_possible_wrap)]
-                let ttl_secs = self.config.ttl.as_secs() as i64;
-                let expires_ts = created + ttl_secs;
-                format_rfc3339(expires_ts)?
-            },
-            decided_by: None,
-            credential_id: None,
-        };
-
-        // Build card
+        let (statement, request) = request_statement(&NewRequest {
+            id: &approval_id,
+            company_id,
+            command,
+            input: input_json,
+            preview: preview_json,
+            reads,
+            request_hash: &request_hash,
+            reason: &reason,
+            requested_by: &requested_by,
+            counterparty,
+            now,
+            ttl: self.config.ttl,
+            low_risk_limits: &BTreeMap::new(),
+        })?;
         let card = build_card(&request, counterparty, None, false);
-
-        // Store request in database
-        let effect_json = serde_json::to_string(&request.effect)?;
-        let insert_stmt = Statement::with_values(
-            "INSERT INTO approval_request \
-             (id, company_id, command, input, preview, reads, request_hash, effect, \
-              requested_by, reason, status, created_at, expires_at, decided_by, credential_id) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                .to_owned(),
-            vec![
-                SeaValue::from(request.id.as_str()),
-                SeaValue::from(company_id),
-                SeaValue::from(command),
-                SeaValue::from(request.input.as_str()),
-                SeaValue::from(request.preview.as_str()),
-                SeaValue::from(request.reads.as_str()),
-                SeaValue::from(request.request_hash.as_str()),
-                SeaValue::from(effect_json.as_str()),
-                SeaValue::from(request.requested_by.as_str()),
-                SeaValue::from(request.reason.as_str()),
-                SeaValue::from(Status::Pending.as_str()),
-                SeaValue::from(request.created_at.as_str()),
-                SeaValue::from(request.expires_at.as_str()),
-                SeaValue::from(None::<String>),
-                SeaValue::from(None::<String>),
-            ],
-        );
-
         self.db
-            .batch_atomic(&[insert_stmt])
+            .batch_atomic(&[statement])
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
-
         Ok(RaisedApproval { request, card })
+    }
+
+    /// Approves a request by a fresh sign-in: the person signed in within
+    /// [`FRESH_SIGN_IN_SECS`] (`signed_in_at`, epoch seconds), or the request is
+    /// low risk. The command runs once: the status guard and the command's
+    /// writes share one batch, so a second approval of the same request fails
+    /// its guard and posts nothing. The result is recorded on the request.
+    ///
+    /// # Errors
+    /// `ReauthRequired` for a high-risk request without a fresh sign-in,
+    /// `NotPending`, `Expired`, `Forbidden` for a non-person approver, or the
+    /// command's own error.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn approve_signed_in<C: Command + ?Sized, A: Authenticator>(
+        &self,
+        executor: &Executor<'_, A, impl Policy>,
+        authenticator: &A,
+        cmd: &C,
+        approver_credential: Credential,
+        ctx: CommandContext,
+        approval_id: &str,
+        signed_in_at: Option<i64>,
+    ) -> Result<C::Output, ApprovalError> {
+        let request = load_approval_request(self.db, approval_id).await?;
+        if request.command != C::NAME {
+            return Err(ApprovalError::Other(format!(
+                "approval command mismatch: expected {}, got {}",
+                C::NAME,
+                request.command
+            )));
+        }
+        if request.status != Status::Pending {
+            return Err(ApprovalError::NotPending {
+                status: request.status.as_str().to_string(),
+            });
+        }
+        let now_ts = parse_rfc3339(&ctx.now)?;
+        if now_ts > parse_rfc3339(&request.expires_at)? {
+            self.mark_expired(approval_id).await;
+            return Err(ApprovalError::Expired);
+        }
+        let approver = authenticator.authenticate(&approver_credential).await?;
+        let Principal::Person { person_id } = &approver else {
+            return Err(ApprovalError::Forbidden);
+        };
+        if !self.rules.may_approve(&approver, &request) {
+            return Err(ApprovalError::Forbidden);
+        }
+        if request.risk == Risk::High && !signed_in_recently(signed_in_at, now_ts) {
+            return Err(ApprovalError::ReauthRequired);
+        }
+
+        let input: C::Input = serde_json::from_str(&request.input).map_err(|e| {
+            ApprovalError::Other(format!("failed to deserialize frozen input: {e}"))
+        })?;
+        let approval = Approval {
+            approval_id: approval_id.to_string(),
+            request_hash: request.request_hash.clone(),
+            requested_by: request.requested_by.clone(),
+            statements: Self::decision_statements(
+                approval_id,
+                &request.request_hash,
+                Status::Approved,
+                Some(person_id),
+                &ctx.now,
+                None,
+                &ctx.event_id,
+            ),
+            objects: vec![format!("approval:{approval_id}")],
+        };
+        let output = match executor
+            .run_approved(cmd, approver_credential, ctx.clone(), &input, approval)
+            .await
+        {
+            Ok(output) => output,
+            Err(err) => return Err(self.classify_failure(approval_id, err).await),
+        };
+
+        // The entry reference is known only after the command has run, so it
+        // is recorded in a second, guarded statement once the decision is in.
+        let result_json = serde_json::to_string(&output)?;
+        let record_result = Statement::with_values(
+            "UPDATE approval_request SET result = ? WHERE id = ? AND status = 'approved'"
+                .to_owned(),
+            vec![
+                SeaValue::from(result_json.as_str()),
+                SeaValue::from(approval_id),
+            ],
+        );
+        self.db
+            .batch_atomic(&[record_result])
+            .await
+            .map_err(|e| ApprovalError::Database(e.to_string()))?;
+        Ok(output)
+    }
+
+    /// Rejects a pending request with an optional reason. Rejection needs no
+    /// fresh sign-in. The status change and its audit event share one batch.
+    ///
+    /// # Errors
+    /// `NotPending`, `Expired`, `Forbidden` for a non-person, or a database error.
+    pub async fn reject_signed_in<A: Authenticator>(
+        &self,
+        executor: &Executor<'_, A, impl Policy>,
+        authenticator: &A,
+        approver_credential: Credential,
+        approval_id: &str,
+        ctx: &CommandContext,
+        reason: Option<&str>,
+    ) -> Result<(), ApprovalError> {
+        let request = load_approval_request(self.db, approval_id).await?;
+        if request.status != Status::Pending {
+            return Err(ApprovalError::NotPending {
+                status: request.status.as_str().to_string(),
+            });
+        }
+        if parse_rfc3339(&ctx.now)? > parse_rfc3339(&request.expires_at)? {
+            self.mark_expired(approval_id).await;
+            return Err(ApprovalError::Expired);
+        }
+        let approver = authenticator.authenticate(&approver_credential).await?;
+        let Principal::Person { person_id } = &approver else {
+            return Err(ApprovalError::Forbidden);
+        };
+        if !self.rules.may_approve(&approver, &request) {
+            return Err(ApprovalError::Forbidden);
+        }
+
+        let audit_ctx = AuditContext::new(
+            approver.to_actor(),
+            ctx.request_id.clone(),
+            ctx.event_id.clone(),
+        )
+        .with_approval(approval_id);
+        let record = AuditRecord::from_input(
+            "approval.reject",
+            &serde_json::json!({}),
+            Outcome::Allowed,
+            vec![format!("approval:{approval_id}")],
+            reason.map(str::to_owned),
+        );
+        let mut statements = Self::decision_statements(
+            approval_id,
+            &request.request_hash,
+            Status::Rejected,
+            Some(person_id),
+            &ctx.now,
+            reason,
+            &ctx.event_id,
+        );
+        statements.extend(
+            executor
+                .audit_statements(&request.company_id, &audit_ctx, &record, &ctx.now)
+                .await?,
+        );
+        if self.db.batch_atomic(&statements).await.is_err() {
+            let current = load_approval_request(self.db, approval_id).await?;
+            if current.status != Status::Pending {
+                return Err(ApprovalError::NotPending {
+                    status: current.status.as_str().to_string(),
+                });
+            }
+            return Err(ApprovalError::Database(
+                "the decision batch was refused".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The status guard, the status update and the guard release for a decision.
+    fn decision_statements(
+        id: &str,
+        request_hash: &str,
+        to_status: Status,
+        decided_by: Option<&str>,
+        decided_at: &str,
+        decision_reason: Option<&str>,
+        audit_ref: &str,
+    ) -> Vec<Statement> {
+        let status_guard_key = guard::guard_key(&["status-pending", id]);
+        let status_assert = guard::assert_statement(
+            &status_guard_key,
+            "EXISTS (SELECT 1 FROM approval_request \
+             WHERE id = ? AND status = 'pending' AND request_hash = ? AND expires_at > ?)",
+            vec![
+                SeaValue::from(id),
+                SeaValue::from(request_hash),
+                SeaValue::from(decided_at),
+            ],
+        );
+        let update = Statement::with_values(
+            "UPDATE approval_request SET status = ?, decided_by = ?, decided_at = ?, \
+             decision_reason = ?, audit_ref = ? WHERE id = ?"
+                .to_owned(),
+            vec![
+                SeaValue::from(to_status.as_str()),
+                SeaValue::from(decided_by.map(str::to_owned)),
+                SeaValue::from(decided_at),
+                SeaValue::from(decision_reason.map(str::to_owned)),
+                SeaValue::from(audit_ref),
+                SeaValue::from(id),
+            ],
+        );
+        vec![
+            status_assert,
+            update,
+            guard::release_statement(&status_guard_key),
+        ]
+    }
+
+    async fn mark_expired(&self, approval_id: &str) {
+        let stmt = Statement::with_values(
+            "UPDATE approval_request SET status = ? WHERE id = ? AND status = 'pending'".to_owned(),
+            vec![
+                SeaValue::from(Status::Expired.as_str()),
+                SeaValue::from(approval_id),
+            ],
+        );
+        let _ = self.db.batch_atomic(&[stmt]).await;
+    }
+
+    /// Classifies a failed approval: a superseded request is marked so, and a
+    /// request that is no longer pending (a concurrent decision won) reports
+    /// its status instead of the guard's generic refusal.
+    async fn classify_failure(&self, approval_id: &str, err: CommandError) -> ApprovalError {
+        if matches!(err, CommandError::Superseded) {
+            let stmt = Statement::with_values(
+                "UPDATE approval_request SET status = ? WHERE id = ? AND status = 'pending'"
+                    .to_owned(),
+                vec![
+                    SeaValue::from(Status::Superseded.as_str()),
+                    SeaValue::from(approval_id),
+                ],
+            );
+            let _ = self.db.batch_atomic(&[stmt]).await;
+            return ApprovalError::Superseded;
+        }
+        if let Ok(current) = load_approval_request(self.db, approval_id).await
+            && current.status != Status::Pending
+        {
+            return ApprovalError::NotPending {
+                status: current.status.as_str().to_string(),
+            };
+        }
+        ApprovalError::Command(err)
     }
 
     /// Issues a nonce for passkey step-up on this approval.
@@ -610,6 +813,245 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
     }
 }
 
+/// How long a sign-in counts as fresh enough to approve a high-risk request.
+pub const FRESH_SIGN_IN_SECS: i64 = 300;
+
+/// What a new approval request is raised from: the frozen command and its context.
+pub struct NewRequest<'a> {
+    /// The approval request id.
+    pub id: &'a str,
+    /// The company id.
+    pub company_id: &'a str,
+    /// The command name.
+    pub command: &'a str,
+    /// The command input as the agent sent it.
+    pub input: &'a serde_json::Value,
+    /// The journal preview at request time.
+    pub preview: &'a serde_json::Value,
+    /// The object versions read at request time.
+    pub reads: &'a BTreeMap<String, String>,
+    /// The request hash binding the approval to this request.
+    pub request_hash: &'a str,
+    /// The policy reason approval is needed.
+    pub reason: &'a str,
+    /// The requester (agent key id).
+    pub requested_by: &'a str,
+    /// The counterparty named by the command, if any.
+    pub counterparty: Option<&'a str>,
+    /// When the request is created (RFC 3339 UTC).
+    pub now: &'a str,
+    /// How long the request stays pending.
+    pub ttl: std::time::Duration,
+    /// Per-currency low-risk limits as canonical amount strings.
+    pub low_risk_limits: &'a BTreeMap<String, String>,
+}
+
+/// Builds the insert for a new pending approval request, and the request it stores.
+///
+/// # Errors
+/// Returns an error if the preview or reads cannot be serialized or the times are invalid.
+pub fn request_statement(
+    req: &NewRequest<'_>,
+) -> Result<(Statement, ApprovalRequest), ApprovalError> {
+    let effect = extract_effect(req.preview)?;
+    let risk = risk_for_effect(&effect, req.low_risk_limits);
+    let created = parse_rfc3339(req.now)?;
+    #[allow(clippy::cast_possible_wrap)]
+    let ttl_secs = req.ttl.as_secs() as i64;
+    let request = ApprovalRequest {
+        id: req.id.to_owned(),
+        company_id: req.company_id.to_owned(),
+        command: req.command.to_owned(),
+        input: serde_json::to_string(req.input)?,
+        preview: serde_json::to_string(req.preview)?,
+        reads: serde_json::to_string(req.reads)?,
+        request_hash: req.request_hash.to_owned(),
+        effect,
+        requested_by: req.requested_by.to_owned(),
+        reason: req.reason.to_owned(),
+        status: Status::Pending,
+        created_at: req.now.to_owned(),
+        expires_at: format_rfc3339(created + ttl_secs)?,
+        decided_by: None,
+        credential_id: None,
+        risk,
+        counterparty: req.counterparty.map(str::to_owned),
+        decided_at: None,
+        decision_reason: None,
+        result: None,
+        audit_ref: None,
+    };
+    let effect_json = serde_json::to_string(&request.effect)?;
+    let statement = Statement::with_values(
+        "INSERT INTO approval_request \
+         (id, company_id, command, input, preview, reads, request_hash, effect, \
+          requested_by, reason, status, created_at, expires_at, risk, counterparty) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            .to_owned(),
+        vec![
+            SeaValue::from(request.id.as_str()),
+            SeaValue::from(request.company_id.as_str()),
+            SeaValue::from(request.command.as_str()),
+            SeaValue::from(request.input.as_str()),
+            SeaValue::from(request.preview.as_str()),
+            SeaValue::from(request.reads.as_str()),
+            SeaValue::from(request.request_hash.as_str()),
+            SeaValue::from(effect_json.as_str()),
+            SeaValue::from(request.requested_by.as_str()),
+            SeaValue::from(request.reason.as_str()),
+            SeaValue::from(Status::Pending.as_str()),
+            SeaValue::from(request.created_at.as_str()),
+            SeaValue::from(request.expires_at.as_str()),
+            SeaValue::from(request.risk.as_str()),
+            SeaValue::from(request.counterparty.clone()),
+        ],
+    );
+    Ok((statement, request))
+}
+
+/// The risk of a money effect. Low only for a single currency whose amount is
+/// within that currency's low-risk limit; everything else is high (no money
+/// movement, several currencies, no limit for the currency, or above the limit).
+#[must_use]
+pub fn risk_for_effect(
+    effect: &BTreeMap<String, String>,
+    low_risk_limits: &BTreeMap<String, String>,
+) -> Risk {
+    let mut amounts = effect.iter();
+    let (Some((code, amount)), None) = (amounts.next(), amounts.next()) else {
+        return Risk::High;
+    };
+    let Some(limit) = low_risk_limits.get(code) else {
+        return Risk::High;
+    };
+    let Ok(currency) = Currency::from_code(code) else {
+        return Risk::High;
+    };
+    match (
+        Amount::parse_canonical(amount, currency),
+        Amount::parse_canonical(limit, currency),
+    ) {
+        (Ok(amount), Ok(limit)) if amount <= limit => Risk::Low,
+        _ => Risk::High,
+    }
+}
+
+/// Checks a bulk approval selection: every request low risk and in one currency.
+///
+/// # Errors
+/// `BulkRefused` when the selection is empty, holds a high-risk request, or mixes currencies.
+pub fn check_bulk(requests: &[ApprovalRequest]) -> Result<(), ApprovalError> {
+    if requests.is_empty() {
+        return Err(ApprovalError::BulkRefused(
+            "no requests selected".to_owned(),
+        ));
+    }
+    if requests.iter().any(|r| r.risk != Risk::Low) {
+        return Err(ApprovalError::BulkRefused(
+            "high-risk requests are approved one at a time".to_owned(),
+        ));
+    }
+    let currencies: BTreeSet<&str> = requests
+        .iter()
+        .flat_map(|r| r.effect.keys().map(String::as_str))
+        .collect();
+    if currencies.len() != 1 {
+        return Err(ApprovalError::BulkRefused(
+            "bulk approval needs requests in one currency".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Which approval requests an inbox listing returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listing {
+    /// Requests awaiting a decision that have not expired.
+    Pending,
+    /// Requests already decided: approved, rejected, expired or superseded.
+    Decided,
+    /// Every request.
+    All,
+}
+
+/// Lists a company's approval requests, newest first, and the number pending now.
+///
+/// # Errors
+/// A database or row error.
+pub async fn list_requests(
+    db: &dyn Database,
+    company_id: &str,
+    listing: Listing,
+    now: &str,
+    limit: u32,
+) -> Result<(Vec<ApprovalRequest>, i64), ApprovalError> {
+    let filter = match listing {
+        Listing::Pending => "AND status = 'pending' AND expires_at > ?",
+        Listing::Decided => "AND status <> 'pending'",
+        Listing::All => "",
+    };
+    let mut values = vec![SeaValue::from(company_id)];
+    if listing == Listing::Pending {
+        values.push(SeaValue::from(now));
+    }
+    values.push(SeaValue::from(i64::from(limit)));
+    let rows = db
+        .query(&Statement::with_values(
+            format!(
+                "SELECT id FROM approval_request WHERE company_id = ? {filter} \
+                 ORDER BY created_at DESC, id DESC LIMIT ?"
+            ),
+            values,
+        ))
+        .await
+        .map_err(|e| ApprovalError::Database(e.to_string()))?;
+    let mut requests = Vec::new();
+    for row in &rows.rows {
+        let id = row
+            .get::<String>("id")
+            .ok_or_else(|| ApprovalError::Database("missing id column".to_string()))?;
+        requests.push(load_approval_request(db, &id).await?);
+    }
+
+    let count_rows = db
+        .query(&Statement::with_values(
+            "SELECT COUNT(*) AS n FROM approval_request \
+             WHERE company_id = ? AND status = 'pending' AND expires_at > ?"
+                .to_owned(),
+            vec![SeaValue::from(company_id), SeaValue::from(now)],
+        ))
+        .await
+        .map_err(|e| ApprovalError::Database(e.to_string()))?;
+    let pending = count_rows
+        .first()
+        .and_then(|row| row.get::<i64>("n"))
+        .unwrap_or(0);
+    Ok((requests, pending))
+}
+
+/// One approval request of a company.
+///
+/// # Errors
+/// `NotFound` when the id names no request of this company.
+pub async fn get_request(
+    db: &dyn Database,
+    company_id: &str,
+    approval_id: &str,
+) -> Result<ApprovalRequest, ApprovalError> {
+    let request = load_approval_request(db, approval_id)
+        .await
+        .map_err(|_| ApprovalError::NotFound)?;
+    if request.company_id != company_id {
+        return Err(ApprovalError::NotFound);
+    }
+    Ok(request)
+}
+
+/// Whether a sign-in at `signed_in_at` (epoch seconds) is fresh at `now`.
+fn signed_in_recently(signed_in_at: Option<i64>, now: i64) -> bool {
+    signed_in_at.is_some_and(|at| now - at <= FRESH_SIGN_IN_SECS && at <= now + 60)
+}
+
 /// A nonce row loaded from the database.
 struct NonceRow {
     nonce_hex: String,
@@ -624,7 +1066,8 @@ async fn load_approval_request(
     let rows = db
         .query(&Statement::with_values(
             "SELECT id, company_id, command, input, preview, reads, request_hash, effect, \
-             requested_by, reason, status, created_at, expires_at, decided_by, credential_id \
+             requested_by, reason, status, created_at, expires_at, decided_by, credential_id, \
+             risk, counterparty, decided_at, decision_reason, result, audit_ref \
              FROM approval_request WHERE id = ?"
                 .to_owned(),
             vec![SeaValue::from(approval_id)],
@@ -677,6 +1120,15 @@ async fn load_approval_request(
         .ok_or_else(|| ApprovalError::Database("missing expires_at column".to_string()))?;
     let decided_by = row.get::<String>("decided_by");
     let credential_id = row.get::<String>("credential_id");
+    let risk_str = row
+        .get::<String>("risk")
+        .unwrap_or_else(|| "high".to_owned());
+    let risk = Risk::parse(&risk_str).map_err(ApprovalError::Other)?;
+    let counterparty = row.get::<String>("counterparty");
+    let decided_at = row.get::<String>("decided_at");
+    let decision_reason = row.get::<String>("decision_reason");
+    let result = row.get::<String>("result");
+    let audit_ref = row.get::<String>("audit_ref");
 
     let status = Status::parse(&status_str).map_err(ApprovalError::Other)?;
     let effect: BTreeMap<String, String> = serde_json::from_str(&effect_json)
@@ -698,6 +1150,12 @@ async fn load_approval_request(
         expires_at,
         decided_by,
         credential_id,
+        risk,
+        counterparty,
+        decided_at,
+        decision_reason,
+        result,
+        audit_ref,
     })
 }
 
@@ -885,6 +1343,12 @@ mod tests {
             expires_at: "2026-01-15T01:00:00Z".to_string(),
             decided_by: None,
             credential_id: None,
+            risk: Risk::High,
+            counterparty: None,
+            decided_at: None,
+            decision_reason: None,
+            result: None,
+            audit_ref: None,
         };
         let card = build_card(
             &request,

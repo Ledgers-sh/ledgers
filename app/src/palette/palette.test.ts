@@ -40,7 +40,8 @@ describe('command palette list, generated from the OpenAPI document', () => {
       expect(command.cli).toBe(op['x-ledgers-cli']);
       expect(command.cli).toMatch(/^ledgers [a-z0-9-]+( [a-z0-9-]+)*$/);
       expect(command.mcp).toBe(op['x-ledgers-mcp']);
-      expect(command.mcp).toBe(name.replace(/\./g, '_'));
+      // Human-only commands publish no MCP tool; every other one publishes its name.
+      expect(command.mcp).toBe(op['x-ledgers-human-only'] === true ? null : name.replace(/\./g, '_'));
       expect(command.method).toBe(method.toUpperCase());
       expect(command.path).toBe(path);
       expect(command.curl).toBe(op['x-ledgers-curl']);
@@ -87,6 +88,14 @@ describe('what a session may do with a command', () => {
     expect(accessFor(byName('reports.trial_balance'), viewer)).toMatchObject({ runnable: true, hash: '#/reports' });
     expect(accessFor(byName('entries.post'), viewer)).toEqual({ runnable: false, reason: 'role' });
     expect(accessFor(byName('entries.reverse'), viewer)).toEqual({ runnable: false, reason: 'role' });
+  });
+
+  it('the approval commands are human-only: a person opens their inbox, an agent key is refused', () => {
+    for (const name of ['approvals.list', 'approvals.decide', 'approvals.decide_bulk']) {
+      expect(byName(name).humanOnly, name).toBe(true);
+      expect(accessFor(byName(name), { kind: 'person', roles: ['owner'] })).toMatchObject({ runnable: true, hash: '#/approvals' });
+      expect(accessFor(byName(name), { kind: 'key' }), name).toEqual({ runnable: false, reason: 'human-only' });
+    }
   });
 
   it('an agent key runs the commands its tier allows; the server decides the rest', () => {

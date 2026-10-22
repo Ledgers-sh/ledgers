@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
-import { useHash, useOnline } from './hooks';
+import { useHash, useOnline, usePendingCount } from './hooks';
 import { BILLS_MATCH_OPERATION, operationIds } from './api/features';
 import { fetchOpenApiDocument } from './api/openapi';
 import { ApiError } from './api/client';
@@ -31,6 +31,8 @@ import { Journal, EntryDetail } from './ui/Journal';
 import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
 import { Bills } from './ui/Bills';
+import { ApprovalDetail, Approvals } from './ui/Approvals';
+import { badgeText } from './lib/approvals';
 import { t, useLocale, type MessageKey } from './i18n';
 import { LanguagePicker } from './i18n/LanguagePicker';
 import { Ltr } from './i18n/Ltr';
@@ -43,6 +45,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' },
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' },
+  { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
 
 /**
@@ -204,6 +207,8 @@ function Shell({
   // The OpenAPI document: undefined while loading, null when the server did not return one.
   const [openApi, setOpenApi] = useState<unknown | null | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Approvals are for a signed-in person; an agent key gets 403 there, so the nav and badge stay off.
+  const approvals = usePendingCount({ baseUrl }, !apiKey);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -230,7 +235,8 @@ function Shell({
     return { status: 'ready', commands: paletteCommands(openApi) };
   }, [openApi]);
 
-  const nav = NAV.filter((item) => item.hash !== 'bills' || billsState === 'offered');
+  const nav = NAV.filter((item) => (item.hash !== 'bills' || billsState === 'offered') && (item.hash !== 'approvals' || !apiKey));
+  const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
 
   const setPeriod = useCallback((next: string) => {
     savePeriod(next);
@@ -250,6 +256,8 @@ function Shell({
     online,
     toast: (message: string, kind: ToastKind = 'ok') => push(message, kind),
     signOut: onSignOut,
+    approvalCount: approvals.count,
+    refreshApprovals: approvals.refresh,
   };
 
   // The session the palette judges access by: a person's roles, or an agent key (the server applies its tier).
@@ -308,6 +316,7 @@ function Shell({
               <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
                 <Icon name={item.icon} />
                 {t(item.label)}
+                {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
               </a>
             ))}
           </nav>
@@ -397,6 +406,7 @@ function Shell({
           <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
             <Icon name={item.icon} />
             {t(item.label)}
+            {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
           </a>
         ))}
       </nav>
@@ -421,6 +431,8 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
   if (route === 'accounts') return <Accounts />;
   if (route === 'reports') return <Reports />;
+  if (route === 'approvals') return <Approvals />;
+  if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
   if (route === 'bills' && billsState === 'offered') return <Bills />;
   if (route === 'bills' && billsState === 'checking') return <p class="muted">{t('shell.checking_bills')}</p>;
   if (route === 'new') return <NewEntry />;

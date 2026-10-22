@@ -105,6 +105,7 @@ export function ConfirmDialog({
   error,
   danger,
   disabled,
+  tone,
 }: {
   open: boolean;
   onClose: () => void;
@@ -116,6 +117,8 @@ export function ConfirmDialog({
   error?: unknown;
   danger?: boolean;
   disabled?: boolean;
+  /** "human" gives the confirm button the human-action gold (approvals). */
+  tone?: 'human';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -145,7 +148,7 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            class={`btn ${danger ? 'btn-danger' : 'btn-primary'}`}
+            class={`btn ${danger ? 'btn-danger' : tone === 'human' ? 'btn-human' : 'btn-primary'}`}
             onClick={onConfirm}
             disabled={busy || disabled}
             aria-busy={busy ? 'true' : undefined}

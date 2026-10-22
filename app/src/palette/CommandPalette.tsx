@@ -46,10 +46,15 @@ export function CommandPalette({
       dialog.showModal();
       setQuery('');
       setStatus('');
-      window.setTimeout(() => searchRef.current?.focus(), 0);
     }
     if (!open && dialog.open) dialog.close();
   }, [open]);
+
+  // The search field is disabled until the command list has loaded; focus it once it can take input.
+  const ready = data.status === 'ready';
+  useEffect(() => {
+    if (open && ready) searchRef.current?.focus();
+  }, [open, ready]);
 
   const commands = data.status === 'ready' ? data.commands : [];
   const matches = useMemo(() => filterCommands(commands, query), [commands, query]);

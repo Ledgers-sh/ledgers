@@ -46,6 +46,11 @@ export const SCREEN_FOR: Record<string, { hash: string; label: MessageKey }> = {
   'reports.balance_sheet': { hash: '#/reports', label: 'nav.reports' },
   'reports.account_balance_by_dimension': { hash: '#/reports', label: 'nav.reports' },
   'bills.match': { hash: '#/bills', label: 'nav.bills' },
+  // Approvals are human-only: a person works them from the inbox, agent keys cannot.
+  'approvals.list': { hash: '#/approvals', label: 'nav.approvals' },
+  'approvals.get': { hash: '#/approvals', label: 'nav.approvals' },
+  'approvals.decide': { hash: '#/approvals', label: 'nav.approvals' },
+  'approvals.decide_bulk': { hash: '#/approvals', label: 'nav.approvals' },
 };
 
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'];

@@ -8,7 +8,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { mockApi, signIn, stopMockApi } from './mockApi';
+import { mockApi, signIn, signInPerson, stopMockApi } from './mockApi';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(here, '../../screenshots');
@@ -27,14 +27,16 @@ const viewports = [
   { label: 'phone', width: 390, height: 844 },
 ] as const;
 
-const screens = [
+const screens: { name: string; hash: string; person?: boolean }[] = [
   { name: 'overview', hash: '#/overview' },
   { name: 'journal', hash: '#/journal' },
   { name: 'entry', hash: '#/journal/seed-2' },
   { name: 'new-entry', hash: '#/new' },
   { name: 'accounts', hash: '#/accounts' },
   { name: 'reports', hash: '#/reports' },
-] as const;
+  // The approvals inbox is a person's screen: an agent key sees a notice instead.
+  { name: 'approvals', hash: '#/approvals', person: true },
+];
 
 /** A fixed bottom bar would sit mid-page in a full-page capture; lay it out in flow for the picture. */
 async function shoot(page: Page, file: string) {
@@ -65,8 +67,9 @@ for (const viewport of viewports) {
 
       for (const screen of screens) {
         test(screen.name, async ({ page }) => {
-          await mockApi({ seed: true });
-          await signIn(page, theme, locale);
+          await mockApi({ seed: true, person: screen.person === true });
+          if (screen.person) await signInPerson(page, theme, locale);
+          else await signIn(page, theme, locale);
           await page.goto(`/${screen.hash}`);
           await expect(page.locator('h1').first()).toBeVisible();
           await shoot(page, `${prefix}-${screen.name}.png`);
@@ -93,8 +96,9 @@ test.describe('no horizontal scroll at 360px', () => {
   for (const locale of ['en', 'ar'] as const) {
     for (const screen of screens) {
       test(`${locale} ${screen.name}`, async ({ page }) => {
-        await mockApi({ seed: true });
-        await signIn(page, 'dark', locale);
+        await mockApi({ seed: true, person: screen.person === true });
+        if (screen.person) await signInPerson(page, 'dark', locale);
+        else await signIn(page, 'dark', locale);
         await page.goto(`/${screen.hash}`);
         await expect(page.locator('h1').first()).toBeVisible();
         await page.waitForLoadState('networkidle');

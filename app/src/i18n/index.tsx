@@ -167,3 +167,12 @@ export function restoreLocale(): void {
   current = initialLocale();
   applyDocumentLocale();
 }
+
+/**
+ * A message with a count. The form is picked by the language's plural rules;
+ * a language with one form (Indonesian) uses the "other" entry.
+ */
+export function tn(base: string, count: number, vars?: Record<string, string | number>): string {
+  const form = new Intl.PluralRules(intlLocale()).select(count) === 'one' ? 'one' : 'other';
+  return t(`${base}.${form}` as MessageKey, { count, ...vars });
+}

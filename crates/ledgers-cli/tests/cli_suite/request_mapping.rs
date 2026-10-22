@@ -128,7 +128,10 @@ fn every_registry_command_maps_to_its_descriptor_method_and_path() {
         assert_eq!(req.method, d.http_method, "{}", d.name);
         assert_eq!(
             req.path,
-            d.http_path.replace("{external_id}", "ID-1"),
+            ledgers_cli::request::path_param_names(&d.http_path)
+                .iter()
+                .fold(d.http_path.clone(), |path, name| path
+                    .replace(&format!("{{{name}}}"), "ID-1")),
             "{}",
             d.name
         );
