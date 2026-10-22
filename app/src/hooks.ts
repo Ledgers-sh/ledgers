@@ -1,4 +1,43 @@
 import { useEffect, useState } from 'preact/hooks';
+import { approvalsList } from './api/approvals';
+import type { ClientConfig } from './api/client';
+
+/** How often the nav badge re-reads the pending count while the app is open. */
+const PENDING_POLL_MS = 60_000;
+
+/**
+ * The number of approvals waiting for the person. Read on mount, every minute,
+ * on window focus, and on `refresh()`. Off (null, no requests) when `enabled` is false.
+ */
+export function usePendingCount(config: ClientConfig, enabled: boolean): { count: number | null; refresh: () => void } {
+  const [count, setCount] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    approvalsList(config, 'pending', 1).then(
+      (list) => live && setCount(list.pending_count),
+      () => live && setCount(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [config.baseUrl, config.apiKey, enabled, tick]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const bump = () => setTick((t) => t + 1);
+    const timer = window.setInterval(bump, PENDING_POLL_MS);
+    window.addEventListener('focus', bump);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', bump);
+    };
+  }, [enabled]);
+
+  return { count: enabled ? count : null, refresh: () => setTick((t) => t + 1) };
+}
 
 export interface AsyncState<T> {
   data: T | undefined;

@@ -18,13 +18,22 @@ export class ApiError extends Error {
   readonly kind: ApiErrorKind;
   readonly status: number | null;
   readonly detail: string | null;
+  /** The problem slug the server named, e.g. "reauth-required" or "approval-not-pending"; null when absent. */
+  readonly slug: string | null;
 
-  constructor(kind: ApiErrorKind, message: string, status: number | null, detail: string | null = null) {
+  constructor(
+    kind: ApiErrorKind,
+    message: string,
+    status: number | null,
+    detail: string | null = null,
+    slug: string | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
     this.detail = detail;
+    this.slug = slug;
   }
 }
 
@@ -75,19 +84,38 @@ const MESSAGES: Record<ApiErrorKind, string> = {
   network: 'Could not reach the server. Check the URL and your connection.',
 };
 
-/** The `detail` of a problem+json body, if the server sent one. */
-async function readProblem(response: Response): Promise<string | null> {
+export interface Problem {
+  detail: string | null;
+  slug: string | null;
+}
+
+/**
+ * The problem slug of a problem+json body: an explicit `slug` member, else the
+ * last segment of a `type` URI or URN (`.../reauth-required`, `urn:...:reauth-required`).
+ */
+export function problemSlug(parsed: Record<string, unknown>): string | null {
+  if (typeof parsed.slug === 'string' && parsed.slug.trim() !== '') return parsed.slug.trim();
+  if (typeof parsed.type === 'string' && parsed.type !== 'about:blank') {
+    const last = parsed.type.split(/[/:#]/).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return null;
+}
+
+/** The `detail` and slug of a problem+json body, if the server sent them. */
+async function readProblem(response: Response): Promise<Problem> {
   try {
     const text = await response.text();
-    if (!text) return null;
+    if (!text) return { detail: null, slug: null };
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object') {
-      const p = parsed as { detail?: unknown };
-      if (typeof p.detail === 'string' && p.detail.trim() !== '') return p.detail;
+      const p = parsed as Record<string, unknown>;
+      const detail = typeof p.detail === 'string' && p.detail.trim() !== '' ? p.detail : null;
+      return { detail, slug: problemSlug(p) };
     }
-    return null;
+    return { detail: null, slug: null };
   } catch {
-    return null;
+    return { detail: null, slug: null };
   }
 }
 
@@ -118,10 +146,10 @@ export async function request<T>(config: ClientConfig, spec: RequestSpec): Promi
 
   if (!response.ok) {
     const kind = kindForStatus(response.status);
-    const detail = await readProblem(response);
+    const problem = await readProblem(response);
     // Validation errors speak for themselves in the server's own words; other kinds use our wording.
-    const message = kind === 'validation' && detail ? detail : MESSAGES[kind];
-    throw new ApiError(kind, message, response.status, detail);
+    const message = kind === 'validation' && problem.detail ? problem.detail : MESSAGES[kind];
+    throw new ApiError(kind, message, response.status, problem.detail, problem.slug);
   }
   return (await response.json()) as T;
 }

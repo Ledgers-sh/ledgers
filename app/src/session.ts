@@ -104,6 +104,10 @@ export interface Session {
   online: boolean;
   toast: (message: string, kind?: ToastKind) => void;
   signOut: () => void;
+  /** Approvals waiting for the person; null when unknown or not offered (agent key). */
+  approvalCount: number | null;
+  /** Re-reads the approvals count (after a decision). */
+  refreshApprovals: () => void;
 }
 
 export const SessionContext = createContext<Session | null>(null);

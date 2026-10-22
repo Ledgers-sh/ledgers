@@ -294,7 +294,7 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
   .content { padding: 18px 14px 110px; gap: 18px; }
   .two-col { grid-template-columns: minmax(0, 1fr); }
   .bottom-nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(5, 1fr);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     background: color-mix(in srgb, var(--sunk) 96%, transparent); border-top: 1px solid var(--line);
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
   }
@@ -377,3 +377,71 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
   cursor: pointer;
 }
 .link-button:focus-visible, .explainer summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Approvals inbox (issue #33). Human actions are gold; what an agent asked for is agent blue. */
+.nav a .nav-count { margin-left: auto; }
+.bottom-nav a { position: relative; }
+.bottom-nav .nav-count { position: absolute; top: 2px; left: calc(50% + 8px); min-width: 18px; height: 18px; padding: 0 4px; font-size: 11px; }
+.nav-count {
+  min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-grid; place-items: center;
+  background: var(--human-bg); color: var(--human-text); border: 1px solid var(--human-line); font: 600 12px var(--mono);
+}
+.btn-human { background: var(--human); border-color: var(--human); color: var(--on-human); }
+.btn-human:hover:not(:disabled) { background: var(--human-text); border-color: var(--human-text); color: var(--on-human); }
+.btn-human:disabled { opacity: .5; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab {
+  min-height: 44px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none;
+  color: var(--muted); font: 600 15px var(--sans); cursor: pointer; white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--human); }
+.chip {
+  display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; line-height: 1.4; padding: 1px 9px;
+  border-radius: 999px; border: 1px solid var(--rule); color: var(--text-2); white-space: nowrap;
+}
+.chip.risk-low { color: var(--agent); background: var(--agent-bg); }
+.chip.risk-high { color: var(--danger); border-color: var(--danger-line); background: var(--danger-bg); }
+.chip.status-approved { color: var(--human-text); border-color: var(--human-line); background: var(--human-bg); }
+.chip.status-rejected { color: var(--danger); border-color: var(--danger-line); }
+.chip.status-expired, .chip.status-superseded { color: var(--muted); }
+.agent-key { display: inline-flex; align-items: center; gap: 6px; font: 500 13px var(--mono); color: var(--agent); overflow-wrap: anywhere; }
+.agent-key::before { content: ''; width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 2px; transform: rotate(45deg); flex: none; }
+.side { font-size: 14px; font-weight: 600; }
+.side.debit { color: var(--text); }
+.side.credit { color: var(--text-2); }
+.bulk-bar {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 16px;
+  background: var(--human-bg); border-bottom: 1px solid var(--human-line); color: var(--text); font-size: 15px;
+}
+.bulk-bar .grow { flex: 1; }
+.bulk-message { color: var(--danger); font-size: 14px; }
+.check-cell input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--human); cursor: pointer; }
+.check-cell input[type='checkbox']:disabled { cursor: not-allowed; opacity: .35; }
+.notice { margin: 12px 16px 0; }
+.panel > .banner { margin: 12px 16px 0; }
+.back-link { font-size: 14px; color: var(--muted); }
+.detail-meta dd { font-family: var(--sans); font-size: 16px; }
+.detail-meta dd.mono-value { font-family: var(--mono); font-size: 14px; }
+.detail-meta dd.amount-value { font-family: var(--mono); font-size: 20px; font-weight: 500; }
+.detail-sub { display: block; font-size: 13px; margin-top: 2px; }
+.decision-form { display: flex; flex-direction: column; gap: 14px; }
+.decision-form textarea.input { min-height: 88px; resize: vertical; font-family: var(--sans); }
+.decision-form .hint { font-size: 13px; color: var(--muted); font-weight: 400; }
+.result-json { font-size: 13px; }
+.waiting-list { list-style: none; margin: 0; padding: 0; }
+.waiting-list li { border-top: 1px solid var(--rule-soft); }
+.waiting-list li:first-child { border-top: 0; }
+.waiting-list a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; padding: 12px 16px; align-items: center; }
+.waiting-list a:hover { background: var(--raised); }
+.waiting-main { display: flex; flex-direction: column; min-width: 0; }
+.waiting-main strong, .waiting-main .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-time { grid-column: 2; font-size: 13px; text-align: right; }
+.waiting-more { font-size: 14px; }
+.waiting .panel-head { border-bottom: 1px solid var(--line); }
+/* Approval tables: the first cell leads each phone card. ("main" is the layout column, not a cell style.) */
+.ledger td.lead { font-weight: 500; }
+@media (max-width: 640px) {
+  .ledger.cards td.lead { justify-content: flex-start; text-align: left; font-weight: 500; }
+}
+

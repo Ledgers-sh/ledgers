@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import { useHash, useOnline } from './hooks';
+import { useHash, useOnline, usePendingCount } from './hooks';
 import { BILLS_MATCH_OPERATION, fetchOperationIds } from './api/features';
 import { ApiError } from './api/client';
 import { fetchSession, initialOf, signOut, type Person } from './api/auth';
@@ -30,6 +30,8 @@ import { Journal, EntryDetail } from './ui/Journal';
 import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
 import { Bills } from './ui/Bills';
+import { ApprovalDetail, Approvals } from './ui/Approvals';
+import { badgeText } from './lib/approvals';
 
 const NAV: { hash: string; label: string; icon: IconName; match: (route: string) => boolean }[] = [
   { hash: 'overview', label: 'Overview', icon: 'overview', match: (r) => r === '' || r === 'overview' },
@@ -37,6 +39,7 @@ const NAV: { hash: string; label: string; icon: IconName; match: (route: string)
   { hash: 'accounts', label: 'Accounts', icon: 'accounts', match: (r) => r === 'accounts' },
   { hash: 'reports', label: 'Reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'Bills', icon: 'bills', match: (r) => r === 'bills' },
+  { hash: 'approvals', label: 'Approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
 
 /**
@@ -187,6 +190,8 @@ function Shell({
   const [currency, setCurrencyState] = useState<string>(() => loadCurrency());
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [billsState, setBillsState] = useState<BillsState>('checking');
+  // Approvals are for a signed-in person; an agent key gets 403 there, so the nav and badge stay off.
+  const approvals = usePendingCount({ baseUrl }, !apiKey);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -204,7 +209,10 @@ function Shell({
     };
   }, [baseUrl]);
 
-  const nav = NAV.filter((item) => item.hash !== 'bills' || billsState === 'offered');
+  const nav = NAV.filter(
+    (item) => (item.hash !== 'bills' || billsState === 'offered') && (item.hash !== 'approvals' || !apiKey),
+  );
+  const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
 
   const setPeriod = useCallback((next: string) => {
     savePeriod(next);
@@ -224,6 +232,8 @@ function Shell({
     online,
     toast: (message: string, kind: ToastKind = 'ok') => push(message, kind),
     signOut: onSignOut,
+    approvalCount: approvals.count,
+    refreshApprovals: approvals.refresh,
   };
 
   // Keyboard shortcuts: N opens New entry, / jumps to the journal search. Ignored while typing.
@@ -266,6 +276,7 @@ function Shell({
               <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
                 <Icon name={item.icon} />
                 {item.label}
+                {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
               </a>
             ))}
           </nav>
@@ -343,6 +354,7 @@ function Shell({
           <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
             <Icon name={item.icon} />
             {item.label}
+            {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
           </a>
         ))}
       </nav>
@@ -357,6 +369,8 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
   if (route === 'accounts') return <Accounts />;
   if (route === 'reports') return <Reports />;
+  if (route === 'approvals') return <Approvals />;
+  if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
   if (route === 'bills' && billsState === 'offered') return <Bills />;
   if (route === 'bills' && billsState === 'checking') return <p class="muted">Checking what this server offers…</p>;
   if (route === 'new') return <NewEntry />;
