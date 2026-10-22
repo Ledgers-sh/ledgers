@@ -1554,6 +1554,9 @@ impl From<EntryRecord> for EntryRecordView {
 pub struct EntriesListInput {
     /// Only entries of this VAT period (`YYYY-MM`); all periods when absent.
     pub period: Option<String>,
+    /// The id of the last entry of the previous page: the page starts after
+    /// it. The first page when absent. An id the company does not hold is a 404.
+    pub after: Option<String>,
     /// At most this many entries, newest first (default 50, cap 200).
     #[serde(default, deserialize_with = "de_opt_u32")]
     #[schemars(with = "Option<u32>")]
@@ -1602,9 +1605,16 @@ impl Command for EntriesList {
             .limit
             .unwrap_or(DEFAULT_LIST_LIMIT)
             .clamp(1, MAX_LIST_LIMIT);
-        let records = query::list_entries(db, &ctx.company_id, input.period.as_deref(), limit)
-            .await
-            .map_err(|err| domain(&err))?;
+        let records = query::list_entries(
+            db,
+            &ctx.company_id,
+            input.period.as_deref(),
+            input.after.as_deref(),
+            limit,
+        )
+        .await
+        .map_err(|err| domain(&err))?
+        .ok_or_else(|| CommandError::Domain(cratefield_core::Problem::not_found()))?;
         Ok(Plan::with_output(EntriesListOutput {
             entries: records.into_iter().map(EntryRecordView::from).collect(),
         }))

@@ -235,6 +235,8 @@ export const de: Messages = {
   'journal.count': '{shown} von {total}',
   'journal.no_match': 'Keine Buchungen passen zu „{query}“.',
   'journal.reversed': 'storniert',
+  'journal.load_more': 'Weitere Buchungen laden',
+  'journal.loading_more': 'Buchungen werden geladen',
   'entry.loading': 'Buchung wird geladen',
   'entry.title': 'Buchung {ref}',
   'entry.not_found_title': 'Buchung nicht gefunden',

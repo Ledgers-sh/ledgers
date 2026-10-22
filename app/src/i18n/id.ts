@@ -235,6 +235,8 @@ export const id: Messages = {
   'journal.count': '{shown} dari {total}',
   'journal.no_match': 'Tidak ada entri yang cocok dengan “{query}”.',
   'journal.reversed': 'dibalik',
+  'journal.load_more': 'Muat entri lainnya',
+  'journal.loading_more': 'Memuat entri',
   'entry.loading': 'Memuat entri',
   'entry.title': 'Entri {ref}',
   'entry.not_found_title': 'Entri tidak ditemukan',

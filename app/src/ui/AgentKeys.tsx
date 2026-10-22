@@ -7,7 +7,6 @@ import { useSession } from '../session';
 import { intlLocale, t, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { ConfirmDialog, Empty, ErrorBanner, Skeleton } from './common';
-import { Icon } from './icons';
 import { AgentKeyCreate, ShowOnceDialog } from './AgentKeyCreate';
 import { UsageSnippets } from './UsageSnippets';
 
@@ -36,12 +35,12 @@ function tierText(tier: string): string {
 /**
  * Settings → Agent keys. Person sessions list, create and revoke keys. An
  * agent key cannot manage keys, so this screen says so instead of calling the API.
+ * The create button is in the page head (Settings), which owns `creating`.
  */
-export function AgentKeys() {
+export function AgentKeys({ creating, onCreatingChange }: { creating: boolean; onCreatingChange: (open: boolean) => void }) {
   const { client, toast } = useSession();
   const personal = !client.apiKey;
   const state = useAsync(() => keysList(client), [client.baseUrl, client.apiKey]);
-  const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<KeysCreateOutput | null>(null);
   const [revoking, setRevoking] = useState<AgentKeyView | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
@@ -49,9 +48,13 @@ export function AgentKeys() {
 
   if (!personal) {
     return (
-      <section class="settings-section" aria-labelledby="agent-keys-title">
-        <h2 id="agent-keys-title">{t('agentKeys.title')}</h2>
-        <Empty title={t('agentKeys.person_title')}>{t('agentKeys.person_body')}</Empty>
+      <section class="panel" aria-labelledby="agent-keys-title">
+        <div class="panel-head">
+          <h2 id="agent-keys-title">{t('agentKeys.title')}</h2>
+        </div>
+        <div class="panel-body">
+          <Empty title={t('agentKeys.person_title')}>{t('agentKeys.person_body')}</Empty>
+        </div>
       </section>
     );
   }
@@ -73,25 +76,20 @@ export function AgentKeys() {
   };
 
   return (
-    <section class="settings-section" aria-labelledby="agent-keys-title">
-      <div class="section-head">
-        <div>
+    <>
+      <section class="panel" aria-labelledby="agent-keys-title">
+        <div class="panel-head">
           <h2 id="agent-keys-title">{t('agentKeys.title')}</h2>
-          <p class="muted">{t('agentKeys.intro')}</p>
         </div>
-        <button type="button" class="btn btn-primary" onClick={() => setCreating(true)}>
-          <Icon name="plus" />
-          {t('agentKeys.create')}
-        </button>
-      </div>
-
-      {state.loading && !state.data && <Skeleton rows={3} label={t('agentKeys.loading')} />}
-      {state.error && !state.data && <ErrorBanner error={state.error} onRetry={state.reload} />}
-      {state.data &&
-        (state.data.keys.length === 0 ? (
-          <Empty title={t('agentKeys.empty_title')}>{t('agentKeys.empty_body')}</Empty>
-        ) : (
-          <div class="panel">
+        <p class="panel-body muted">{t('agentKeys.intro')}</p>
+        {state.loading && !state.data && <Skeleton rows={3} label={t('agentKeys.loading')} />}
+        {state.error && !state.data && <ErrorBanner error={state.error} onRetry={state.reload} />}
+        {state.data &&
+          (state.data.keys.length === 0 ? (
+            <div class="panel-body">
+              <Empty title={t('agentKeys.empty_title')}>{t('agentKeys.empty_body')}</Empty>
+            </div>
+          ) : (
             <div class="table-wrap">
               <table class="ledger cards">
                 <thead>
@@ -114,11 +112,11 @@ export function AgentKeys() {
                         {key.name}
                         <div class="muted small">{t('agentKeys.created_at', { when: formatWhen(key.created_at) })}</div>
                       </td>
-                      <td class="mono" data-label={t('agentKeys.col_key')}>
+                      <td class="code" data-label={t('agentKeys.col_key')}>
                         {key.prefix ?? t('common.empty_cell')}
                       </td>
                       <td data-label={t('agentKeys.col_tier')}>{tierText(key.tier)}</td>
-                      <td class="num" data-label={t('agentKeys.col_limits')}>
+                      <td class="num limits" data-label={t('agentKeys.col_limits')}>
                         {limitsSummary(key).map((line) => (
                           <div key={line}>
                             <Ltr>{line}</Ltr>
@@ -130,9 +128,9 @@ export function AgentKeys() {
                       </td>
                       <td data-label={t('agentKeys.col_status')}>
                         {key.revoked_at ? (
-                          <span class="status revoked">{t('agentKeys.revoked_at', { when: formatWhen(key.revoked_at) })}</span>
+                          <span class="badge revoked">{t('agentKeys.revoked_at', { when: formatWhen(key.revoked_at) })}</span>
                         ) : (
-                          <span class="status active">{t('agentKeys.active')}</span>
+                          <span class="badge active">{t('agentKeys.active')}</span>
                         )}
                       </td>
                       <td class="actions">
@@ -155,24 +153,24 @@ export function AgentKeys() {
                 </tbody>
               </table>
             </div>
-          </div>
-        ))}
+          ))}
+      </section>
 
-      <div class="panel usage">
-        <div class="panel-body">
-          <h3>{t('agentKeys.use_title')}</h3>
-          <p class="muted">
-            {tRich('agentKeys.use_body', { token: <code>{TOKEN_PLACEHOLDER}</code> })}
-          </p>
+      <section class="panel" aria-labelledby="usage-title">
+        <div class="panel-head">
+          <h2 id="usage-title">{t('agentKeys.use_title')}</h2>
+        </div>
+        <div class="panel-body stack">
+          <p class="muted">{tRich('agentKeys.use_body', { token: <code>{TOKEN_PLACEHOLDER}</code> })}</p>
           <UsageSnippets baseUrl={client.baseUrl} token={TOKEN_PLACEHOLDER} />
         </div>
-      </div>
+      </section>
 
       <AgentKeyCreate
         open={creating}
-        onClose={() => setCreating(false)}
+        onClose={() => onCreatingChange(false)}
         onCreated={(output) => {
-          setCreating(false);
+          onCreatingChange(false);
           setCreated(output);
           state.reload();
         }}
@@ -190,6 +188,6 @@ export function AgentKeys() {
       >
         <p>{tRich('agentKeys.revoke_body', { prefix: <span class="mono">{revoking?.prefix}</span> })}</p>
       </ConfirmDialog>
-    </section>
+    </>
   );
 }

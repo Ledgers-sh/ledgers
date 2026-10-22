@@ -13,7 +13,6 @@ import { accountName, t, useLocale, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { accountLabel, buildChart, filterChart, nonZeroBalances, type StatusFilter, type TreeRow } from '../lib/accounts';
 import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
-import './accounts.css';
 
 const CLASS_KEYS: Record<string, MessageKey> = {
   asset: 'accounts.group.asset',
@@ -77,8 +76,8 @@ export function Accounts() {
         </Empty>
       ) : (
         <>
-          <div class="accounts-toolbar">
-            <label class="field accounts-search">
+          <div class="panel-head">
+            <label class="field grow">
               <span class="sr-only">{t('accounts.search_label')}</span>
               <input
                 class="input"
@@ -89,7 +88,7 @@ export function Accounts() {
                 onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
               />
             </label>
-            <div class="tabs accounts-filter" role="tablist" aria-label={t('accounts.filter_label')}>
+            <div class="tabs" role="tablist" aria-label={t('accounts.filter_label')}>
               {FILTERS.map((filter) => (
                 <button
                   key={filter.value}
@@ -111,10 +110,10 @@ export function Accounts() {
               <Empty title={t('accounts.no_matches_title')}>{t('accounts.no_matches_body')}</Empty>
             ) : (
               groups.map((group) => (
-                <section class="account-group" key={group.type} aria-labelledby={`group-${group.type}`}>
+                <section key={group.type} aria-labelledby={`group-${group.type}`}>
                   <h2 id={`group-${group.type}`}>{t(CLASS_KEYS[group.type])}</h2>
                   <div class="table-wrap">
-                    <table class="ledger cards accounts-table">
+                    <table class="ledger cards">
                       <thead>
                         <tr>
                           <th scope="col">{t('term.code')}</th>
@@ -146,24 +145,18 @@ function AccountRow({ row }: { row: TreeRow }) {
   const { account, depth, hasChildren } = row;
   const balances = nonZeroBalances(account);
   return (
-    <tr class={account.archived ? 'is-archived' : undefined}>
+    <tr>
       <td class="code" data-label={t('term.code')}>
         <Ltr>{account.number}</Ltr>
       </td>
       <td class="main desc" data-label={t('term.account')}>
-        <div class="account-name" style={{ '--depth': depth } as Record<string, string | number>}>
-          {depth > 0 && <span class="tree-mark" aria-hidden="true">└</span>}
+        <div style={{ paddingInlineStart: `${depth * 1.5}rem` }}>
+          {depth > 0 && <span class="muted" aria-hidden="true">└ </span>}
           <a class="row-link" href={`#/accounts/${encodeURIComponent(account.number)}`}>
             {labelOf(account)}
-          </a>
-          <span class="account-flags">
-            {hasChildren && <span class="muted"> {t('accounts.heading_tag')}</span>}
-            {account.archived && (
-              <span class="chip status-archived">
-                {t('accounts.status.archived')}
-              </span>
-            )}
-          </span>
+          </a>{' '}
+          {hasChildren && <span class="badge">{t('accounts.heading_tag')}</span>}{' '}
+          {account.archived && <span class="badge">{t('accounts.status.archived')}</span>}
         </div>
       </td>
       <td data-label={t('term.type')} class="muted">

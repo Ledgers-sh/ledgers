@@ -44,12 +44,27 @@ export function entriesReverse(
   });
 }
 
-/** GET /v1/entries (entries.list). */
-export function entriesList(config: Config): Promise<EntriesListOutput> {
-  return request<EntriesListOutput>(config, { method: 'GET', path: '/v1/entries' });
+/** One page of entries.list: `after` is the entry_id of the last entry of the previous page. */
+export interface EntriesListParams {
+  after?: string;
+  limit?: number;
+  period?: string;
 }
 
-/** GET /v1/entries/{external_id} (entries.get, being added server-side in parallel). */
+/** GET /v1/entries (entries.list), newest first, one page at a time. */
+export function entriesList(config: Config, params: EntriesListParams = {}): Promise<EntriesListOutput> {
+  return request<EntriesListOutput>(config, {
+    method: 'GET',
+    path: '/v1/entries',
+    query: {
+      after: params.after,
+      limit: params.limit === undefined ? undefined : String(params.limit),
+      period: params.period,
+    },
+  });
+}
+
+/** GET /v1/entries/{external_id} (entries.get). */
 export function entriesGet(config: Config, externalId: string): Promise<EntryRecord> {
   return request<EntryRecord>(config, {
     method: 'GET',

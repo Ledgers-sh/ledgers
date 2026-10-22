@@ -258,6 +258,8 @@ export const en = {
   'journal.count': '{shown} of {total}',
   'journal.no_match': 'No entries match “{query}”.',
   'journal.reversed': 'reversed',
+  'journal.load_more': 'Load more entries',
+  'journal.loading_more': 'Loading entries',
   'entry.loading': 'Loading entry',
   'entry.title': 'Entry {ref}',
   'entry.not_found_title': 'Entry not found',

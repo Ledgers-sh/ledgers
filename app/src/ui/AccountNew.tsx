@@ -10,9 +10,8 @@ import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { t, useLocale, type MessageKey } from '../i18n';
 import { ACCOUNT_TYPES, hasErrors, parentOptions, parseTags, validateDraft, type DraftErrors, type DraftInput } from '../lib/accounts';
-import { ErrorBanner, Skeleton } from './common';
+import { ErrorBanner, PageHead, Skeleton } from './common';
 import { labelOf } from './Accounts';
-import './accounts.css';
 
 type Field = keyof DraftInput;
 
@@ -103,18 +102,11 @@ export function AccountNew() {
   return (
     <>
       <a class="back-link" href="#/accounts">
-        <span class="flip" aria-hidden="true">
-          ←
-        </span>{' '}
         {t('accounts.back')}
       </a>
-      <header class="page-head">
-        <div>
-          <h1>{t('accounts.new_title')}</h1>
-          <p>{t('accounts.new_intro')}</p>
-        </div>
-      </header>
-      <form class="panel account-form" onSubmit={submit} noValidate aria-busy={busy ? 'true' : undefined}>
+      <PageHead title={t('accounts.new_title')}>{t('accounts.new_intro')}</PageHead>
+      <form class="panel" onSubmit={submit} noValidate aria-busy={busy ? 'true' : undefined}>
+        <div class="panel-body stack">
         <label class="field">
           <span>{t('accounts.form.number')}</span>
           <input
@@ -216,7 +208,7 @@ export function AccountNew() {
           )}
         </label>
 
-        <label class="field wide">
+        <label class="field">
           <span>{t('accounts.form.tags')}</span>
           <input
             id="acct-tags"
@@ -266,18 +258,17 @@ export function AccountNew() {
         </label>
 
         {serverError !== null && (
-          <div class="wide">
-            <ErrorBanner error={serverError} />
-          </div>
+          <ErrorBanner error={serverError} />
         )}
 
-        <div class="form-actions wide">
+        <div class="form-actions">
           <a class="btn" href="#/accounts">
             {t('common.cancel')}
           </a>
           <button type="submit" class="btn btn-primary" disabled={busy} aria-busy={busy ? 'true' : undefined}>
             {busy ? t('common.working') : t('accounts.form.submit')}
           </button>
+        </div>
         </div>
       </form>
     </>

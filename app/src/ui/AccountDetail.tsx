@@ -15,7 +15,6 @@ import { hasPostings, MAX_NAME_LENGTH, nonZeroBalances, parseTags, tagErrors } f
 import { formatMinor } from '../lib/money';
 import { ConfirmDialog, Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
 import { labelOf } from './Accounts';
-import './accounts.css';
 
 const TYPE_KEYS: Record<string, MessageKey> = {
   asset: 'accountType.asset',
@@ -119,8 +118,8 @@ export function AccountDetail({ number }: { number: string }) {
         title={label}
         actions={
           <span class="row-actions">
-            <span class="chip">{t(TYPE_KEYS[account.account_type] ?? 'accountType.asset')}</span>
-            <span class={`chip ${account.archived ? 'status-archived' : 'status-active'}`}>
+            <span class="badge">{t(TYPE_KEYS[account.account_type] ?? 'accountType.asset')}</span>
+            <span class={`badge ${account.archived ? '' : 'active'}`}>
               {account.archived ? t('accounts.status.archived') : t('accounts.status.active')}
             </span>
           </span>
@@ -135,8 +134,7 @@ export function AccountDetail({ number }: { number: string }) {
         </div>
       )}
 
-      <div class="account-layout">
-        <section class="panel account-summary" aria-label={t('accounts.detail.balance')}>
+      <section class="panel" aria-label={t('accounts.detail.balance')}>
           <dl class="entry-meta detail-meta">
             <div>
               <dt>{t('accounts.detail.balance')}</dt>
@@ -177,12 +175,13 @@ export function AccountDetail({ number }: { number: string }) {
               <dd>{account.currency ? <Ltr>{account.currency}</Ltr> : t('common.empty_cell')}</dd>
             </div>
           </dl>
-        </section>
+      </section>
 
-        <div class="account-edit">
-          <section class="panel account-section" aria-labelledby="account-rename-title">
-            <h2 id="account-rename-title">{t('accounts.rename_title')}</h2>
-            <form class="account-inline-form" onSubmit={saveName} noValidate>
+      <section class="panel" aria-labelledby="account-rename-title">
+        <div class="panel-head">
+          <h2 id="account-rename-title">{t('accounts.rename_title')}</h2>
+        </div>
+        <form class="panel-body stack" onSubmit={saveName} noValidate>
               <label class="field">
                 <span class="sr-only">{t('accounts.rename_title')}</span>
                 <input
@@ -201,15 +200,19 @@ export function AccountDetail({ number }: { number: string }) {
                   </span>
                 )}
               </label>
-              <button type="submit" class="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'name' ? 'true' : undefined}>
-                {busy === 'name' ? t('common.working') : t('accounts.rename_save')}
-              </button>
-            </form>
-          </section>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'name' ? 'true' : undefined}>
+                  {busy === 'name' ? t('common.working') : t('accounts.rename_save')}
+                </button>
+              </div>
+        </form>
+      </section>
 
-          <section class="panel account-section" aria-labelledby="account-tags-title">
-            <h2 id="account-tags-title">{t('accounts.tags_title')}</h2>
-            <form class="account-inline-form" onSubmit={saveTags} noValidate>
+      <section class="panel" aria-labelledby="account-tags-title">
+        <div class="panel-head">
+          <h2 id="account-tags-title">{t('accounts.tags_title')}</h2>
+        </div>
+        <form class="panel-body stack" onSubmit={saveTags} noValidate>
               <label class="field">
                 <span class="sr-only">{t('accounts.tags_title')}</span>
                 <input
@@ -231,24 +234,28 @@ export function AccountDetail({ number }: { number: string }) {
                   </span>
                 )}
               </label>
-              <button type="submit" class="btn btn-primary" disabled={busy !== null || tagError !== null} aria-busy={busy === 'tags' ? 'true' : undefined}>
-                {busy === 'tags' ? t('common.working') : t('accounts.tags_save')}
-              </button>
-            </form>
-          </section>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" disabled={busy !== null || tagError !== null} aria-busy={busy === 'tags' ? 'true' : undefined}>
+                  {busy === 'tags' ? t('common.working') : t('accounts.tags_save')}
+                </button>
+              </div>
+        </form>
+      </section>
 
-          <section class="panel account-section" aria-labelledby="account-status-title">
-            <h2 id="account-status-title">{account.archived ? t('accounts.restore') : t('accounts.archive')}</h2>
-            <p class="muted">{account.archived ? t('accounts.restore_body') : t('accounts.archive_body')}</p>
-            {error !== null && <ErrorBanner error={error} />}
-            <div class="row-actions">
-              <button type="button" class={`btn ${account.archived ? '' : 'btn-danger'}`} onClick={() => setConfirming(true)} disabled={busy !== null}>
-                {account.archived ? t('accounts.restore') : t('accounts.archive')}
-              </button>
-            </div>
-          </section>
+      <section class="panel" aria-labelledby="account-status-title">
+        <div class="panel-head">
+          <h2 id="account-status-title">{account.archived ? t('accounts.restore') : t('accounts.archive')}</h2>
         </div>
-      </div>
+        <div class="panel-body stack">
+          <p class="muted">{account.archived ? t('accounts.restore_body') : t('accounts.archive_body')}</p>
+          {error !== null && <ErrorBanner error={error} />}
+          <div class="form-actions">
+            <button type="button" class={`btn ${account.archived ? '' : 'btn-danger'}`} onClick={() => setConfirming(true)} disabled={busy !== null}>
+              {account.archived ? t('accounts.restore') : t('accounts.archive')}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section class="panel" aria-labelledby="account-activity-title">
         <div class="panel-head">
@@ -312,7 +319,7 @@ export function AccountDetail({ number }: { number: string }) {
         ) : (
           <>
             <p>{t('accounts.archive_body')}</p>
-            {hasPostings(account) && <p class="balance-blocked">{blockedText(account)}</p>}
+            {hasPostings(account) && <p class="field-error">{blockedText(account)}</p>}
           </>
         )}
       </ConfirmDialog>
@@ -330,9 +337,6 @@ function blockedText(account: Account): string {
 function BackLink() {
   return (
     <a class="back-link" href="#/accounts">
-      <span class="flip" aria-hidden="true">
-        ←
-      </span>{' '}
       {t('accounts.back')}
     </a>
   );
