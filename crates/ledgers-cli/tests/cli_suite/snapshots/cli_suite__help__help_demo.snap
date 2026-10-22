@@ -1,0 +1,14 @@
+---
+source: crates/ledgers-cli/tests/cli_suite/help.rs
+expression: help_for(path)
+---
+Demo company operations
+
+Usage: demo <COMMAND>
+
+Commands:
+  init  Initialize the demo company with the Halden Works fixture
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

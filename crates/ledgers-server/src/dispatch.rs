@@ -770,10 +770,13 @@ pub(crate) async fn mint_key(
 /// chart, opens the general journal (`general`, code `GN`) and the current
 /// calendar year. Idempotent: a company that already has accounts is left
 /// as it is.
+/// Creates the company's chart (from the generic SME template), general journal,
+/// and opens the fiscal year for the current year. If the company already has a
+/// chart, nothing is done (idempotent by chart existence, not by company id).
 ///
 /// # Errors
 /// A message naming the failed step.
-async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
+pub async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();

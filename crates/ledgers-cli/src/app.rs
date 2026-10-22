@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// Top-level commands that are not generated from the registry.
-pub const BUILTIN_COMMANDS: [&str; 3] = ["serve", "completions", "mcp"];
+pub const BUILTIN_COMMANDS: [&str; 4] = ["serve", "completions", "mcp", "demo"];
 
 /// Long flag names a registry field may not use (they belong to the CLI itself).
 const RESERVED_LONG: [&str; 8] = [
@@ -173,7 +173,8 @@ pub fn build_root(registry: &Registry) -> Command {
         )
         .subcommand(build_serve())
         .subcommand(build_completions())
-        .subcommand(build_mcp());
+        .subcommand(build_mcp())
+        .subcommand(build_demo());
 
     let tree = group_tree(registry);
     for (name, node) in &tree.children {
@@ -360,6 +361,33 @@ fn build_mcp() -> Command {
                 .long("read-only")
                 .help("Read-only mode: only list and allow read tools")
                 .action(ArgAction::SetTrue),
+        )
+}
+
+fn build_demo() -> Command {
+    Command::new("demo")
+        .about("Demo company operations")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(
+            Command::new("init")
+                .about("Initialize the demo company with the Halden Works fixture")
+                .long_about(
+                    "Initializes the local demo company with Halden Works GmbH fixture.\n\n\
+                     Creates the company (chart of accounts, journal, fiscal year), seeds the \
+                     fixture entries, and verifies all invariants.\n\n\
+                     Idempotent: running twice posts nothing new and still passes all checks.\n\n\
+                     Environment variables (optional):\n  \
+                     DATABASE_PATH — SQLite database path (default: ledgers.db)\n  \
+                     LEDGERS_COMPANY_ID — company id (default: 01DEVCOMPANY0000000000000A)",
+                )
+                .arg(
+                    Arg::new("year")
+                        .long("year")
+                        .value_name("YEAR")
+                        .help("Fiscal year for the fixture (default: 2026, the fixture year)")
+                        .value_parser(clap::value_parser!(i32)),
+                ),
         )
 }
 

@@ -2050,6 +2050,7 @@ dependencies = [
  "insta",
  "keyring",
  "ledgers-commands",
+ "ledgers-demo",
  "ledgers-server",
  "mockito",
  "reqwest",

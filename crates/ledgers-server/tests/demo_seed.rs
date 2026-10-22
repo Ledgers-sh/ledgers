@@ -446,3 +446,53 @@ fn the_internal_agent_posts_agent_entries_and_person_entries() {
     assert!(posted_by.contains(&"agent"), "{posted_by:?}");
     assert!(posted_by.contains(&"person"), "{posted_by:?}");
 }
+
+#[test]
+fn check_passes_after_seeding_the_book() {
+    let f = fixture();
+    let book = halden::book(YEAR);
+    pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book)).expect("seeds");
+    let report = pollster::block_on(demo::check(&f.deps, COMPANY, &book)).expect("check passes");
+    // The fixture has 153 post entries and 2 reversal entries (155 total)
+    assert_eq!(report.fixture_entries_found, 153, "{report:?}");
+    assert_eq!(report.fixture_reversals_found, 2, "{report:?}");
+    assert_eq!(report.entries_verified, 153, "{report:?}");
+    assert_eq!(report.reversals_verified, 2, "{report:?}");
+}
+
+#[test]
+fn check_detects_a_broken_entry_balance() {
+    let f = fixture();
+    let book = halden::book(YEAR);
+    pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book)).expect("seeds");
+
+    // Drop the append-only triggers to allow tampering with journal_line
+    let db = f.deps.db.as_ref();
+    pollster::block_on(db.execute(&cratefield_core::Statement::new(
+        "DROP TRIGGER journal_line_no_update",
+    )))
+    .expect("drop update trigger");
+    pollster::block_on(db.execute(&cratefield_core::Statement::new(
+        "DROP TRIGGER journal_line_no_delete",
+    )))
+    .expect("drop delete trigger");
+
+    // Corrupt the first entry's first line: change its base_minor so it no longer balances
+    pollster::block_on(
+        db.execute(&cratefield_core::Statement::with_values(
+            "UPDATE journal_line SET base_minor = 999999 WHERE entry_id = (SELECT id FROM journal_entry WHERE company_id = ? LIMIT 1)"
+                .to_owned(),
+            vec![sea_query::Value::from(COMPANY)],
+        )),
+    )
+    .expect("corrupt entry");
+
+    // check should now fail with a message about entry balance
+    let result = pollster::block_on(demo::check(&f.deps, COMPANY, &book));
+    assert!(result.is_err(), "check should detect the imbalance");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("entry does not balance"),
+        "error message should name the broken invariant: {err}"
+    );
+}

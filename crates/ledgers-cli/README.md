@@ -49,6 +49,19 @@ Respects environment variables:
 - `BLOB_DIR` — document storage (default: `./blobs`)
 - `LISTEN_ADDR` — server address (default: `127.0.0.1:3000`)
 
+### Initialize the demo company
+
+```bash
+ledgers demo init
+```
+
+Creates the Halden Works GmbH demo company (an invented German small manufacturer) seeded with a full fiscal year of entries that pass every invariant check. Idempotent: running twice posts nothing new and still passes all checks.
+
+Respects environment variables:
+- `DATABASE_PATH` — SQLite database (default: `ledgers.db`)
+- `LEDGERS_COMPANY_ID` — company id (default: `01DEVCOMPANY0000000000000A`)
+- `--year <YEAR>` — fiscal year for the fixture (default: 2026)
+
 ### Generate shell completions
 
 ```bash

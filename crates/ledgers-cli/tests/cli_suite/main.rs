@@ -2,6 +2,7 @@
 //! against a mock server, profiles, help snapshots, and pure helpers.
 
 mod common;
+mod demo;
 mod exit_codes;
 mod help;
 mod profiles;
