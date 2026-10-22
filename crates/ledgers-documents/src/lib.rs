@@ -10,30 +10,44 @@
 //! - [`commands`] holds `documents.register`, `documents.list`, `documents.get`
 //!   and `documents.download_url`.
 
+pub mod anchor;
 pub mod commands;
 pub mod module;
 pub mod sign;
 pub mod sniff;
 pub mod store;
 
+pub use anchor::{Anchor, BoundingBox, Location};
 pub use module::DocumentsStoreModule;
 pub use store::{Document, RetentionClass};
 
 /// The schema migrations of the document store, in apply order.
-pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "documents",
         include_str!("../migrations/sqlite/0001_documents.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "anchors",
+        include_str!("../migrations/sqlite/0002_anchors.sql"),
+    ),
+];
 
 /// The Postgres set: the same portable DDL as SQLite.
-pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "documents",
         include_str!("../migrations/postgres/0001_documents.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "anchors",
+        include_str!("../migrations/postgres/0002_anchors.sql"),
+    ),
+];
 
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);

@@ -5,8 +5,9 @@
 //! server-computed fields (the hash, the sniffed MIME type, the text layer),
 //! so a caller cannot register a document whose bytes the server did not see.
 
+use crate::anchor::Anchor;
 use crate::store::{self, Document, RetentionClass};
-use cratefield_core::{Database, Statement};
+use cratefield_core::{Database, Problem, Statement};
 use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
 use schemars::JsonSchema;
@@ -20,6 +21,57 @@ pub const MAX_TEXT_LAYER_BYTES: usize = 512 * 1024;
 const MAX_NAME_CHARS: usize = 255;
 /// The most documents one list call returns.
 pub const MAX_LIST: u32 = 200;
+/// The most anchors one set call accepts.
+const MAX_ANCHORS: u32 = 200;
+
+/// Problem: document is linked to a posted entry or bill.
+fn document_linked_problem() -> Problem {
+    Problem::new(&cratefield_core::ProblemDef {
+        slug: "document-linked",
+        status: cratefield_core::axum::http::StatusCode::CONFLICT,
+        title: "Document linked",
+        description: "The document is linked to a posted entry, bill, or bank statement and cannot be deleted.",
+    })
+}
+
+/// Escapes a string for safe use in a LIKE pattern with ESCAPE '\'.
+/// _ is a LIKE wildcard, so we escape it (document IDs are ULIDs and never contain it, but this is defensive).
+fn escape_like(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '%' => result.push_str("\\%"),
+            '_' => result.push_str("\\_"),
+            c => result.push(c),
+        }
+    }
+    result
+}
+
+/// Returns a SQL condition (and its bind values) asserting that a document is NOT linked
+/// to any posted journal entry, bill, or bank statement.
+///
+/// The condition is used both for the pre-flight read (to pick the error message) and
+/// for the guard statement (which is the actual enforcement; see ADR 0004).
+fn linked_condition(company_id: &str, document_id: &str) -> (&'static str, Vec<Value>) {
+    let escaped_id = escape_like(document_id);
+    let like_pattern = format!("%\"{escaped_id}\"%");
+    let condition = "NOT EXISTS (SELECT 1 FROM journal_entry WHERE company_id = ? AND source_documents LIKE ? ESCAPE '\\') \
+                     AND NOT EXISTS (SELECT 1 FROM bill WHERE company_id = ? AND document_id = ?) \
+                     AND NOT EXISTS (SELECT 1 FROM bank_statement WHERE company_id = ? AND document_id = ?)";
+    (
+        condition,
+        vec![
+            Value::from(company_id),
+            Value::from(like_pattern),
+            Value::from(company_id),
+            Value::from(document_id),
+            Value::from(company_id),
+            Value::from(document_id),
+        ],
+    )
+}
 
 /// Input of `documents.register` (internal; see the module docs).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -40,6 +92,8 @@ pub struct RegisterInput {
     pub text_layer: Option<String>,
     /// The retention class; defaults to ten years.
     pub retention_class: Option<RetentionClass>,
+    /// The source of the upload: 'upload', 'email', 'folder', 'api'; defaults to 'upload'.
+    pub source: Option<String>,
 }
 
 /// Output of `documents.register`.
@@ -127,12 +181,14 @@ impl Command for DocumentsRegister {
                 (document, false)
             }
         };
+        let source = input.source.as_deref().unwrap_or("upload");
         statements.push(upload_event(
             &event_id,
             ctx,
             &document.id,
             &input.uploaded_by,
             &name,
+            source,
         ));
         let mut plan = Plan::with_output(RegisterOutput {
             document: document.clone(),
@@ -150,10 +206,11 @@ fn upload_event(
     document_id: &str,
     by: &str,
     name: &str,
+    source: &str,
 ) -> Statement {
     Statement::with_values(
-        "INSERT INTO document_upload_event (id, company_id, document_id, uploaded_by, original_name, uploaded_at) \
-         VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO document_upload_event (id, company_id, document_id, uploaded_by, original_name, uploaded_at, source) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)"
             .to_owned(),
         vec![
             Value::from(event_id),
@@ -162,6 +219,7 @@ fn upload_event(
             Value::from(by),
             Value::from(name),
             Value::from(ctx.now.as_str()),
+            Value::from(source),
         ],
     )
 }
@@ -196,6 +254,14 @@ fn validate(input: &RegisterInput) -> Result<(), CommandError> {
         return Err(CommandError::InvalidInput(
             "size_bytes is outside the upload limit".into(),
         ));
+    }
+    if let Some(source) = &input.source {
+        #[allow(clippy::collapsible_if)]
+        if !matches!(source.as_str(), "upload" | "email" | "folder" | "api") {
+            return Err(CommandError::InvalidInput(
+                "source must be 'upload', 'email', 'folder' or 'api'".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -322,6 +388,323 @@ impl Command for DocumentsGet {
             .await?
             .ok_or_else(|| CommandError::Domain(cratefield_core::Problem::not_found()))?;
         Ok(Plan::with_output(GetOutput { document }))
+    }
+}
+
+/// Input of `documents.set_anchors`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetAnchorsInput {
+    /// The document id.
+    pub id: String,
+    /// The anchors to set (replaces existing ones).
+    pub anchors: Vec<Anchor>,
+}
+
+/// Output of `documents.set_anchors`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetAnchorsOutput {
+    /// The number of anchors set.
+    pub count: u32,
+}
+
+/// `documents.set_anchors`: replaces all anchors for a document.
+pub struct DocumentsSetAnchors;
+
+#[async_trait::async_trait]
+impl Command for DocumentsSetAnchors {
+    const NAME: &'static str = "documents.set_anchors";
+    const TIER: Tier = Tier::Draft;
+    const IDEMPOTENT: bool = false;
+    const TARGET: Option<&'static str> = Some("id");
+
+    type Input = SetAnchorsInput;
+    type Output = SetAnchorsOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        if input.anchors.len() > MAX_ANCHORS as usize {
+            return Err(CommandError::InvalidInput(format!(
+                "anchors count exceeds limit {MAX_ANCHORS}"
+            )));
+        }
+        for anchor in &input.anchors {
+            anchor.validate().map_err(CommandError::InvalidInput)?;
+        }
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        if input.anchors.len() > MAX_ANCHORS as usize {
+            return Err(CommandError::InvalidInput(format!(
+                "anchors count exceeds limit {MAX_ANCHORS}"
+            )));
+        }
+        for anchor in &input.anchors {
+            anchor.validate().map_err(CommandError::InvalidInput)?;
+        }
+        // Check document exists in company.
+        let _document = store::get(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(|| CommandError::Domain(Problem::not_found()))?;
+
+        let mut statements = Vec::new();
+        // Delete existing anchors for this document.
+        statements.push(Statement::with_values(
+            "DELETE FROM document_anchor WHERE company_id = ? AND document_id = ?".to_owned(),
+            vec![
+                Value::from(ctx.company_id.as_str()),
+                Value::from(input.id.as_str()),
+            ],
+        ));
+        // Insert new anchors.
+        for (idx, anchor) in input.anchors.iter().enumerate() {
+            let anchor_id = format!("anc_{}_{}", ctx.event_id, idx);
+            let (page, x, y, w, h, xml_path) = match &anchor.location {
+                crate::Location::Page { page, bbox } => (
+                    Some(*page),
+                    Some(bbox.x),
+                    Some(bbox.y),
+                    Some(bbox.w),
+                    Some(bbox.h),
+                    None,
+                ),
+                crate::Location::Xml { path } => (None, None, None, None, None, Some(path.clone())),
+            };
+            statements.push(Statement::with_values(
+                "INSERT INTO document_anchor (id, company_id, document_id, field, page, x, y, w, h, xml_path, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    .to_owned(),
+                vec![
+                    Value::from(anchor_id),
+                    Value::from(ctx.company_id.as_str()),
+                    Value::from(input.id.as_str()),
+                    Value::from(anchor.field.as_str()),
+                    Value::from(page.map(i64::from)),
+                    Value::from(x.map(i64::from)),
+                    Value::from(y.map(i64::from)),
+                    Value::from(w.map(i64::from)),
+                    Value::from(h.map(i64::from)),
+                    Value::from(xml_path),
+                    Value::from(ctx.now.as_str()),
+                ],
+            ));
+        }
+        // Safe: len() is guaranteed ≤ MAX_ANCHORS (u32) by earlier check
+        #[allow(clippy::cast_possible_truncation)]
+        let count = input.anchors.len() as u32;
+        let mut plan = Plan::with_output(SetAnchorsOutput { count });
+        plan.statements = statements;
+        Ok(plan)
+    }
+}
+
+/// Input of `documents.anchors`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AnchorsInput {
+    /// The document id.
+    pub id: String,
+}
+
+/// Output of `documents.anchors`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AnchorsOutput {
+    /// The anchors.
+    pub anchors: Vec<Anchor>,
+}
+
+/// `documents.anchors`: reads anchors for a document.
+pub struct DocumentsAnchors;
+
+#[async_trait::async_trait]
+impl Command for DocumentsAnchors {
+    const NAME: &'static str = "documents.anchors";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+    const TARGET: Option<&'static str> = Some("id");
+
+    type Input = AnchorsInput;
+    type Output = AnchorsOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        // Verify document exists.
+        store::get(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(|| CommandError::Domain(Problem::not_found()))?;
+
+        let stmt = Statement::with_values(
+            "SELECT field, page, x, y, w, h, xml_path FROM document_anchor \
+             WHERE company_id = ? AND document_id = ? ORDER BY field"
+                .to_owned(),
+            vec![
+                Value::from(ctx.company_id.as_str()),
+                Value::from(input.id.as_str()),
+            ],
+        );
+        let rows = db.query(&stmt).await?;
+        let mut anchors = Vec::new();
+        for row in rows.rows {
+            let field: Option<String> = row.get("field");
+            let page: Option<i64> = row.get("page");
+            let x: Option<i64> = row.get("x");
+            let y: Option<i64> = row.get("y");
+            let w: Option<i64> = row.get("w");
+            let h: Option<i64> = row.get("h");
+            let xml_path: Option<String> = row.get("xml_path");
+
+            if let Some(field) = field {
+                let location =
+                    if let (Some(p), Some(x), Some(y), Some(w), Some(h)) = (page, x, y, w, h) {
+                        crate::Location::Page {
+                            page: u32::try_from(p).unwrap_or(0),
+                            bbox: crate::BoundingBox {
+                                x: u32::try_from(x).unwrap_or(0),
+                                y: u32::try_from(y).unwrap_or(0),
+                                w: u32::try_from(w).unwrap_or(0),
+                                h: u32::try_from(h).unwrap_or(0),
+                            },
+                        }
+                    } else if let Some(path) = xml_path {
+                        crate::Location::Xml { path }
+                    } else {
+                        continue; // Skip malformed rows
+                    };
+                anchors.push(Anchor { field, location });
+            }
+        }
+        Ok(Plan::with_output(AnchorsOutput { anchors }))
+    }
+}
+
+/// Output of `documents.delete`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteOutput {
+    /// The SHA-256 of the deleted document's blob (for garbage collection).
+    pub sha256: String,
+    /// The MIME type of the deleted document (for re-storing the blob if concurrent upload sees it missing).
+    pub mime: String,
+}
+
+/// `documents.delete`: human-only deletion, preventing deletion of linked documents.
+pub struct DocumentsDelete;
+
+#[async_trait::async_trait]
+impl Command for DocumentsDelete {
+    const NAME: &'static str = "documents.delete";
+    const TIER: Tier = Tier::Draft;
+    const IDEMPOTENT: bool = false;
+    const TARGET: Option<&'static str> = Some("id");
+    const HUMAN_ONLY: bool = true;
+
+    type Input = GetInput; // Reuse id input.
+    type Output = DeleteOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let document = store::get(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(|| CommandError::Domain(Problem::not_found()))?;
+        let document_sha = document.sha256.clone();
+        let document_mime = document.mime.clone();
+
+        // Pre-flight check: if document is linked, fail early with the specific problem.
+        // The guard statement below is the actual enforcement (ADR 0004).
+        let (condition, values) = linked_condition(&ctx.company_id, &input.id);
+        let is_unlinked = db
+            .query(&Statement::with_values(
+                format!("SELECT CASE WHEN {condition} THEN 1 ELSE 0 END AS ok"),
+                values,
+            ))
+            .await?
+            .first()
+            .and_then(|row| row.get::<i64>("ok"))
+            .unwrap_or(0)
+            > 0;
+
+        if !is_unlinked {
+            return Err(CommandError::Domain(document_linked_problem()));
+        }
+
+        let sha256 = document_sha;
+        let guard_key = ledgers_db::guard::guard_key(&["document-unlinked", &input.id]);
+        let mut statements = Vec::new();
+
+        // Guard: fail if document is now linked (concurrent attachment).
+        let (condition, values) = linked_condition(&ctx.company_id, &input.id);
+        statements.push(ledgers_db::guard::assert_statement(
+            &guard_key, condition, values,
+        ));
+
+        // Delete anchors, upload events, and the document.
+        statements.push(Statement::with_values(
+            "DELETE FROM document_anchor WHERE company_id = ? AND document_id = ?".to_owned(),
+            vec![
+                Value::from(ctx.company_id.as_str()),
+                Value::from(input.id.as_str()),
+            ],
+        ));
+        statements.push(Statement::with_values(
+            "DELETE FROM document_upload_event WHERE company_id = ? AND document_id = ?".to_owned(),
+            vec![
+                Value::from(ctx.company_id.as_str()),
+                Value::from(input.id.as_str()),
+            ],
+        ));
+        statements.push(Statement::with_values(
+            "DELETE FROM document WHERE company_id = ? AND id = ?".to_owned(),
+            vec![
+                Value::from(ctx.company_id.as_str()),
+                Value::from(input.id.as_str()),
+            ],
+        ));
+
+        // Release guard.
+        statements.push(ledgers_db::guard::release_statement(&guard_key));
+
+        let mut plan = Plan::with_output(DeleteOutput {
+            sha256,
+            mime: document_mime,
+        });
+        plan.statements = statements;
+        Ok(plan)
     }
 }
 

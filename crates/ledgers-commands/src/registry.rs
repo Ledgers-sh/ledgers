@@ -385,6 +385,32 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/documents/{id}/url",
             "ledgers documents url",
         ),
+        CommandDescriptor {
+            human_only: true,
+            idempotent: false,
+            mcp: None,
+            ..entry(
+                "documents.delete",
+                "draft",
+                "POST",
+                "/v1/documents/{id}/delete",
+                "ledgers documents delete",
+            )
+        },
+        entry(
+            "documents.set_anchors",
+            "draft",
+            "POST",
+            "/v1/documents/{id}/set-anchors",
+            "ledgers documents set-anchors",
+        ),
+        entry(
+            "documents.anchors",
+            "read",
+            "GET",
+            "/v1/documents/{id}/anchors",
+            "ledgers documents anchors",
+        ),
         entry(
             "bills.extract",
             "draft",
