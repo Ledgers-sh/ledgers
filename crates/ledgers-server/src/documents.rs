@@ -178,7 +178,13 @@ async fn upload(
             .instance(&request_id)
             .into_response();
     }
-    if let Err(limited) = admit(state.dispatch.as_ref(), &state.deps, presented.as_ref()).await {
+    // The upload is registered in the company the request names (its
+    // `X-Ledgers-Company` header), or the deployment's company when it names none.
+    let dispatch = match crate::routes::company_dispatch(&state.dispatch, &headers) {
+        Ok(scoped) => scoped,
+        Err(problem) => return problem.instance(&request_id).into_response(),
+    };
+    if let Err(limited) = admit(dispatch.as_ref(), &state.deps, presented.as_ref()).await {
         return limited.into_response();
     }
     let bytes = match read_body(stream).await {
@@ -239,8 +245,7 @@ async fn upload(
         "uploaded_by": "",
         "text_layer": text,
     });
-    let result = state
-        .dispatch
+    let result = dispatch
         .dispatch(
             &state.deps,
             "documents.register",
@@ -406,6 +411,10 @@ mod tests {
         struct NoDispatch;
         #[async_trait::async_trait]
         impl Dispatch for NoDispatch {
+            fn scoped(self: Arc<Self>, _company_id: &str) -> Arc<dyn Dispatch> {
+                self
+            }
+
             async fn dispatch(
                 &self,
                 _deps: &Deps,

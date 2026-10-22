@@ -701,6 +701,7 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     app_origins: self.app_origins.clone(),
+                    bootstrap: self.is_home(),
                     company_id: self.company_id.clone(),
                     presented: session,
                 }

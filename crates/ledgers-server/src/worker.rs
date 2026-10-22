@@ -284,7 +284,18 @@ async fn seed_demo_route(
     let year = deps.clock.now().year();
     let result = if factory_zero {
         let book = ledgers_demo::factory_zero::book(year);
-        demo::seed_company_book(&deps, &company_id, &book).await
+        // The deployment's own company names the bootstrap owner, who is then
+        // made an owner of the demo company too (docs/permissions.md).
+        let home = env
+            .var("LEDGERS_COMPANY_ID")
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        match demo::seed_company_book(&deps, &company_id, &book).await {
+            Ok(report) => demo::grant_bootstrap_owner(&deps, &home, &company_id)
+                .await
+                .map(|()| report),
+            Err(err) => Err(err),
+        }
     } else {
         let book = ledgers_demo::halden::book(year);
         demo::seed_internal(&deps, &company_id, &book).await

@@ -74,7 +74,47 @@ pub trait Dispatch: Send + Sync {
             Principal::Person { .. } => None,
         }
     }
+
+    /// This dispatch serving `company_id` instead. A request names its company
+    /// with the `X-Ledgers-Company` header (docs/permissions.md, "Companies"); the membership
+    /// or agent key check then runs against that company, so a person or key
+    /// of another company is refused there.
+    fn scoped(self: Arc<Self>, company_id: &str) -> Arc<dyn Dispatch>;
 }
+
+/// The header that names the company a request acts for.
+pub const COMPANY_HEADER: &str = "x-ledgers-company";
+
+/// The dispatch a request runs on: the company its `X-Ledgers-Company` header
+/// names, or `base` (the deployment's company) when the header is absent.
+///
+/// # Errors
+/// A 400 problem when the header is not a company id (ASCII letters and digits,
+/// at most 64 characters), so an unusable value never reaches a query.
+pub fn company_dispatch(
+    base: &Arc<dyn Dispatch>,
+    headers: &axum::http::HeaderMap,
+) -> Result<Arc<dyn Dispatch>, Problem> {
+    let Some(value) = headers.get(COMPANY_HEADER) else {
+        return Ok(Arc::clone(base));
+    };
+    let company = value
+        .to_str()
+        .ok()
+        .filter(|id| {
+            !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+        .ok_or_else(|| Problem::new(&INVALID_COMPANY))?;
+    Ok(Arc::clone(base).scoped(company))
+}
+
+/// 400: the `X-Ledgers-Company` header is not a company id.
+static INVALID_COMPANY: ProblemDef = ProblemDef {
+    slug: "invalid-company",
+    status: axum::http::StatusCode::BAD_REQUEST,
+    title: "Invalid company",
+    description: "The X-Ledgers-Company header must be a company id: letters and digits, at most 64 characters.",
+};
 
 /// One command route of a domain: the HTTP method, the path relative to the
 /// domain, the command, and the command's input schema (which types the
@@ -119,6 +159,7 @@ impl DomainModule {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn mount(&self, deps: &Arc<Deps>, timing: Option<&Arc<DbTiming>>) -> axum::Router {
         let mut router = axum::Router::new();
 
@@ -147,6 +188,10 @@ impl DomainModule {
                                 async move {
                                     let request_id = scope.request_id.clone();
                                     let presented = presented_from(&headers, false);
+                                    let dispatch = match company_dispatch(&dispatch, &headers) {
+                                        Ok(scoped) => scoped,
+                                        Err(problem) => return problem.into_response(),
+                                    };
 
                                     if let (Value::Object(obj), Some(Path(params))) =
                                         (&mut input, params)
@@ -189,6 +234,10 @@ impl DomainModule {
                                 async move {
                                     let request_id = scope.request_id.clone();
                                     let presented = presented_from(&headers, true);
+                                    let dispatch = match company_dispatch(&dispatch, &headers) {
+                                        Ok(scoped) => scoped,
+                                        Err(problem) => return problem.into_response(),
+                                    };
 
                                     if let Err(limited) =
                                         admit(dispatch.as_ref(), &deps, presented.as_ref()).await

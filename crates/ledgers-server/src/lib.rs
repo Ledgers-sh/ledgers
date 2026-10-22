@@ -2,6 +2,7 @@
 //! Ledgers server composition: harness and modules.
 
 pub mod agent_keys;
+pub mod companies;
 pub mod config;
 pub mod demo;
 pub mod demo_bank;
@@ -188,6 +189,9 @@ pub fn compose(
     // The company's organization: members, roles and invitations. Mounted after
     // the bills module so its migrations are the last in the D1 set.
     let builder = builder.module(members::MembersModule::new(cors_origins.clone()));
+    // The companies a person belongs to, and creating one. After the members
+    // module: its migrations are none, and its tables are the organization's.
+    let builder = builder.module(companies::CompaniesModule::new(cors_origins.clone()));
 
     // The status read: which optional features are off and why. Mounted last;
     // it has no migrations, so it does not renumber the D1 files.

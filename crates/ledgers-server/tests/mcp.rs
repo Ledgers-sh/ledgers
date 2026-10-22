@@ -52,6 +52,10 @@ struct TestDispatch;
 
 #[async_trait::async_trait]
 impl Dispatch for TestDispatch {
+    fn scoped(self: Arc<Self>, _company_id: &str) -> Arc<dyn Dispatch> {
+        self
+    }
+
     async fn dispatch(
         &self,
         _: &Deps,
