@@ -4,9 +4,10 @@ import { useAsync } from '../hooks';
 import { periodEnd } from '../lib/period';
 import { formatMinor } from '../lib/money';
 import { Empty, ErrorBanner, LOCALE, Money, PageHead, Skeleton } from './common';
+import { WaitingForYou } from './Approvals';
 
 export function Overview() {
-  const { client, period } = useSession();
+  const { client, period, approvalCount } = useSession();
   const state = useAsync(
     async () => {
       const [trial, pl, bs] = await Promise.all([
@@ -40,6 +41,8 @@ export function Overview() {
       <PageHead title="Overview">
         Trial balance, profit and loss and balance sheet for the selected period.
       </PageHead>
+
+      {approvalCount !== null && approvalCount > 0 && <WaitingForYou count={approvalCount} />}
 
       {!hasActivity ? (
         <Empty

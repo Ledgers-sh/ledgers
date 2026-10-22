@@ -1957,6 +1957,7 @@ dependencies = [
  "base64 0.22.1",
  "cratefield-core",
  "cratefield-testing",
+ "futures-util",
  "hex",
  "ledgers-audit",
  "ledgers-commands",
@@ -2068,6 +2069,16 @@ dependencies = [
  "pollster",
  "sea-query",
  "thiserror",
+ "time",
+]
+
+[[package]]
+name = "ledgers-demo"
+version = "0.1.0"
+dependencies = [
+ "ledgers-ledger",
+ "ledgers-money",
+ "ledgers-tax",
  "time",
 ]
 
@@ -2195,6 +2206,7 @@ dependencies = [
  "ledgers-auth",
  "ledgers-commands",
  "ledgers-db",
+ "ledgers-demo",
  "ledgers-ext",
  "ledgers-fx",
  "ledgers-ledger",

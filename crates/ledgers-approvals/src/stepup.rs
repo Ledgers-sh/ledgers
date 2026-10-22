@@ -439,3 +439,15 @@ mod tests {
         );
     }
 }
+
+/// Credential keys for a deployment that registers no passkeys: no
+/// credential resolves, so the passkey step-up path refuses every assertion.
+/// The server approves high-risk requests by a fresh sign-in instead.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoCredentialKeys;
+
+impl CredentialKeys for NoCredentialKeys {
+    fn public_key(&self, _person_id: &str, _credential_id: &str) -> Option<Vec<u8>> {
+        None
+    }
+}

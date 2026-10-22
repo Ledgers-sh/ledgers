@@ -40,44 +40,46 @@ export interface MockOptions {
   /** Seed entries so screens are populated (screenshots). */
   seed?: boolean;
   /**
-   * A signed-in person: the session cookie is simulated by accepting
-   * credential-less calls, and `/v1/auth/session` answers with the owner.
+   * Serve a person session instead of the agent key: calls with no bearer key
+   * are the signed-in owner's, and the approvals fixtures are loaded.
    */
   person?: boolean;
 }
 
-/** An agent key as the fake keeps it. The token is held here only, like the server's hash. */
-interface MockKey {
-  id: string;
-  name: string;
-  prefix: string;
-  tier: string;
-  limits: Record<string, { per_entry: string; per_day: string }>;
-  created_at: string;
-  created_by: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  token: string;
-}
-
-const OWNER = {
-  personId: 'person-owner',
-  email: 'owner@halden.test',
+export const PERSON = {
+  personId: 'person_01',
+  email: 'owner@example.test',
   roles: ['owner'],
-  csrfToken: 'csrf-mock',
+  csrfToken: 'csrf_test',
   expiresAt: null,
 };
 
-let keyCounter = 0;
-const keyState: { keys: MockKey[] } = { keys: [] };
+type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'superseded';
 
-function keyView(key: MockKey) {
-  const { token: _token, ...view } = key;
-  return view;
+export interface MockApproval {
+  id: string;
+  status: ApprovalStatus;
+  command: string;
+  risk: 'low' | 'high';
+  amount: Record<string, string>;
+  counterparty: string | null;
+  reason: string;
+  requested_by: string;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  result: Record<string, unknown> | null;
+  audit_ref: string | null;
+  request_hash: string;
+  preview: { lines: { account: string; side: Side; amount: string; currency: string }[]; totals: Record<string, string> } | null;
 }
 
-function hex(length: number, seed: number): string {
-  return Array.from({ length }, (_, i) => ((seed * 31 + i * 7) % 16).toString(16)).join('');
+export interface ApprovalDecisionRecord {
+  id: string;
+  decision: 'approve' | 'reject';
+  reason?: string;
 }
 
 const ACCOUNTS = [
@@ -160,6 +162,10 @@ export interface MockApi {
   entries: Entry[];
   posts: unknown[];
   reversals: unknown[];
+  person: boolean;
+  approvals: MockApproval[];
+  decisions: ApprovalDecisionRecord[];
+  bulk: string[][];
 }
 
 /** The real server allows the app origin via CORS; the fake does the same. */
@@ -192,31 +198,238 @@ const OPENAPI = {
   },
 };
 
-const state: MockApi = { entries: [], posts: [], reversals: [] };
-let personMode = false;
+const state: MockApi = { entries: [], posts: [], reversals: [], person: false, approvals: [], decisions: [], bulk: [] };
 let nextNumber = 1;
 
-/** Routes one request against the in-memory ledger. */
-function handle(method: string, url: URL, bodyText: string): Reply {
-  const path = url.pathname;
+const HOUR = 3_600_000;
 
+/** Fixtures for the approvals inbox: pending rows of each kind, an expired one, and two decided ones. */
+function approvalSeed(now = Date.now()): MockApproval[] {
+  const at = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+  const preview = (account: string, amount: string, currency: string): MockApproval['preview'] => ({
+    lines: [
+      { account, side: 'debit', amount, currency },
+      { account: '2000', side: 'credit', amount, currency },
+    ],
+    totals: { [currency]: amount },
+  });
+  const base = (overrides: Partial<MockApproval> & Pick<MockApproval, 'id'>): MockApproval => ({
+    status: 'pending',
+    command: 'entries.post',
+    risk: 'low',
+    amount: { EUR: '12500' },
+    counterparty: null,
+    reason: 'exceeds per-entry limit',
+    requested_by: 'key_agent_ledger_01',
+    created_at: at(-2 * HOUR),
+    expires_at: at(20 * HOUR),
+    decided_at: null,
+    decided_by: null,
+    decision_reason: null,
+    result: null,
+    audit_ref: null,
+    request_hash: `sha256:${overrides.id.replace(/[^a-z0-9]/gi, '').padEnd(24, '0').slice(0, 24)}`,
+    preview: null,
+    ...overrides,
+  });
+  return [
+    base({
+      id: 'apr-low-1',
+      counterparty: 'Halden Works GmbH',
+      amount: { EUR: '12500' },
+      reason: 'exceeds per-entry limit',
+      preview: preview('6000', '12500', 'EUR'),
+    }),
+    base({
+      id: 'apr-low-2',
+      counterparty: 'Nordvik Office AS',
+      amount: { EUR: '8000' },
+      reason: 'supplier not on the approved list',
+      preview: preview('6100', '8000', 'EUR'),
+    }),
+    base({
+      id: 'apr-low-3',
+      counterparty: 'Bayview Supplies',
+      amount: { USD: '4000' },
+      reason: 'new supplier',
+      preview: preview('6100', '4000', 'USD'),
+    }),
+    base({
+      id: 'apr-high-1',
+      counterparty: 'Kestrel Logistics',
+      risk: 'high',
+      amount: { EUR: '500000' },
+      reason: "exceeds the agent's daily limit",
+      preview: preview('6000', '500000', 'EUR'),
+    }),
+    base({
+      id: 'apr-expired-1',
+      counterparty: 'Old Quay Ltd',
+      amount: { EUR: '1000' },
+      created_at: at(-30 * HOUR),
+      expires_at: at(-1 * HOUR),
+      preview: preview('6000', '1000', 'EUR'),
+    }),
+    base({
+      id: 'apr-hist-1',
+      status: 'approved',
+      counterparty: 'Lindqvist Print',
+      amount: { EUR: '45000' },
+      created_at: at(-26 * HOUR),
+      decided_at: at(-25 * HOUR),
+      decided_by: 'person_01',
+      audit_ref: 'audit_01HZKQ7M',
+      result: { entry: { entry_id: 'entry-apr-hist-1', journal_id: 'general', fiscal_year: 2026, number: 1 } },
+    }),
+    base({
+      id: 'apr-hist-2',
+      status: 'rejected',
+      counterparty: 'Pell & Ross',
+      amount: { EUR: '900' },
+      created_at: at(-50 * HOUR),
+      decided_at: at(-49 * HOUR),
+      decided_by: 'person_01',
+      decision_reason: 'Duplicate of invoice 2026-101',
+      audit_ref: 'audit_01HZKQ2P',
+    }),
+  ];
+}
+
+function approvalView(item: MockApproval, withPreview: boolean) {
+  const { preview, ...rest } = item;
+  return withPreview ? { ...rest, preview } : rest;
+}
+
+function problemBody(status: number, slug: string, title: string, detail: string): Reply {
+  return {
+    status,
+    problem: true,
+    body: { type: `https://ledgers.sh/problems/${slug}`, title, status, detail },
+  };
+}
+
+function findApproval(id: string): MockApproval | undefined {
+  return state.approvals.find((a) => a.id === id);
+}
+
+/** A decision as the server makes it: expiry is checked first, then the decision is written. */
+function decideOne(item: MockApproval, decision: 'approve' | 'reject', reason: string | undefined): Reply | null {
+  if (item.status !== 'pending') return problemBody(409, 'approval-not-pending', 'Conflict', 'This request is no longer pending.');
+  if (Date.parse(item.expires_at) <= Date.now()) {
+    item.status = 'expired';
+    return problemBody(409, 'approval-expired', 'Conflict', 'This request expired before it was decided.');
+  }
+  if (decision === 'approve' && item.risk === 'high') {
+    return problemBody(401, 'reauth-required', 'Sign in again', 'Approving a high-risk request needs a fresh sign-in.');
+  }
+  item.decided_at = new Date().toISOString();
+  item.decided_by = PERSON.personId;
+  item.audit_ref = `audit_mock_${item.id}`;
+  if (decision === 'approve') {
+    item.status = 'approved';
+    item.result = { entry: { entry_id: `entry-${item.id}`, journal_id: 'general', fiscal_year: 2026, number: 100 + state.approvals.indexOf(item) } };
+  } else {
+    item.status = 'rejected';
+    item.decision_reason = reason ?? null;
+  }
+  state.decisions.push({ id: item.id, decision, ...(reason !== undefined ? { reason } : {}) });
+  return null;
+}
+
+/** The approvals routes, for the signed-in person. Returns null when the path is not an approvals route. */
+function handleApprovals(method: string, url: URL, bodyText: string): Reply | null {
+  const path = url.pathname;
+  if (method === 'GET' && path === '/v1/auth/session') return { status: 200, body: PERSON };
+  if (method === 'GET' && path === '/v1/approval-requests') {
+    const status = url.searchParams.get('status') ?? 'pending';
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const pendingCount = state.approvals.filter((a) => a.status === 'pending').length;
+    const wanted = status === 'decided' ? (a: MockApproval) => a.status !== 'pending' : (a: MockApproval) => a.status === 'pending';
+    const items = state.approvals
+      .filter(wanted)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((a) => approvalView(a, false));
+    return { status: 200, body: { pending_count: pendingCount, items } };
+  }
+  const one = /^\/v1\/approval-requests\/([^/]+)$/.exec(path);
+  if (method === 'GET' && one) {
+    const item = findApproval(decodeURIComponent(one[1]));
+    return item ? { status: 200, body: approvalView(item, true) } : problemBody(404, 'not-found', 'Not found', 'No such approval request.');
+  }
+  const decision = /^\/v1\/approval-requests\/([^/]+)\/decision$/.exec(path);
+  if (method === 'POST' && decision) {
+    const item = findApproval(decodeURIComponent(decision[1]));
+    if (!item) return problemBody(404, 'not-found', 'Not found', 'No such approval request.');
+    const body = JSON.parse(bodyText || '{}') as { decision: 'approve' | 'reject'; reason?: string };
+    const failed = decideOne(item, body.decision, body.reason);
+    if (failed) return failed;
+    return { status: 200, body: { approval: approvalView(item, false), result: item.result } };
+  }
+  if (method === 'POST' && path === '/v1/approval-requests/bulk-decision') {
+    const body = JSON.parse(bodyText) as { ids: string[]; decision: 'approve' };
+    const items = body.ids.map(findApproval);
+    if (items.some((item) => item === undefined)) return problemBody(404, 'not-found', 'Not found', 'An id is unknown.');
+    const picked = items as MockApproval[];
+    const currencies = new Set(picked.flatMap((item) => Object.keys(item.amount)));
+    if (picked.some((item) => item.risk === 'high') || currencies.size > 1) {
+      return problemBody(422, 'bulk-selection-refused', 'Selection refused', 'Select low-risk requests in one currency only. Nothing was approved.');
+    }
+    state.bulk.push(body.ids);
+    const results = picked.map((item) => {
+      decideOne(item, 'approve', undefined);
+      return { id: item.id, approval: approvalView(item, false), result: item.result };
+    });
+    return { status: 200, body: { results } };
+  }
+  return null;
+}
+
+/** Routes one request against the in-memory ledger. */
+/** An agent key as the fake keeps it. The token is held here only, like the server's hash. */
+interface MockKey {
+  id: string;
+  name: string;
+  prefix: string;
+  tier: string;
+  limits: Record<string, { per_entry: string; per_day: string }>;
+  created_at: string;
+  created_by: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token: string;
+}
+
+let keyCounter = 0;
+const keyState: { keys: MockKey[] } = { keys: [] };
+
+function keyView(key: MockKey) {
+  const { token: _token, ...view } = key;
+  return view;
+}
+
+function hex(length: number, seed: number): string {
+  return Array.from({ length }, (_, i) => ((seed * 31 + i * 7) % 16).toString(16)).join('');
+}
+
+/** Key commands, for the signed-in person (keys.list, keys.create, keys.revoke). */
+function handleKeys(method: string, path: string, bodyText: string): Reply | null {
   if (method === 'GET' && path === '/v1/keys') return { status: 200, body: { keys: keyState.keys.map(keyView) } };
   if (method === 'POST' && path === '/v1/keys') {
     const input = JSON.parse(bodyText || '{}') as { name?: string; tier?: string; limits?: MockKey['limits'] };
     const name = (input.name ?? '').trim();
     if (name === '') return problem(400, 'Invalid input', 'name is required');
     keyCounter += 1;
-    const id = `01KEY${String(keyCounter).padStart(20, '0')}`;
     const prefix = `lk_live_${hex(16, keyCounter)}`;
     const token = `${prefix}_${hex(64, keyCounter + 3)}`;
     const key: MockKey = {
-      id,
+      id: `01KEY${String(keyCounter).padStart(20, '0')}`,
       name,
       prefix,
       tier: input.tier ?? 'read',
       limits: input.limits ?? {},
       created_at: '2026-10-22T10:00:00Z',
-      created_by: OWNER.personId,
+      created_by: PERSON.personId,
       last_used_at: null,
       revoked_at: null,
       token,
@@ -231,6 +444,18 @@ function handle(method: string, url: URL, bodyText: string): Reply {
     key.revoked_at ??= '2026-10-22T11:00:00Z';
     return { status: 200, body: { key: keyView(key) } };
   }
+  return null;
+}
+
+function handle(method: string, url: URL, bodyText: string): Reply {
+  const path = url.pathname;
+  const approvals = handleApprovals(method, url, bodyText);
+  if (approvals) return approvals;
+  if (path.startsWith('/v1/keys')) {
+    const keys = handleKeys(method, path, bodyText);
+    if (keys) return keys;
+  }
+  if (method === 'GET' && path === '/v1/auth/session' && state.person) return { status: 200, body: PERSON };
 
   if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
   if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
@@ -353,10 +578,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.entries = options.seed ? seedEntries() : [];
   state.posts = [];
   state.reversals = [];
-  nextNumber = state.entries.length + 1;
+  state.person = options.person ?? false;
+  state.approvals = options.person ? approvalSeed() : [];
+  state.decisions = [];
+  state.bulk = [];
   keyState.keys = [];
   keyCounter = 0;
-  personMode = options.person === true;
+  nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
       let text = '';
@@ -374,36 +602,30 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end(JSON.stringify(OPENAPI));
           return;
         }
-        const pathname = new URL(req.url ?? '/', API_ORIGIN).pathname;
-        const authorization = req.headers.authorization;
-        if (personMode && !authorization) {
-          // A signed-in person: the cookie is what the real server would check.
-          if (pathname === '/v1/auth/session') {
-            res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(OWNER));
-            return;
-          }
-          const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
-          res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });
-          res.end(JSON.stringify(reply.body));
-          return;
-        }
+        // A person session: calls without a bearer key are the signed-in owner's.
+        const asPerson = state.person && !req.headers.authorization;
+        const path = new URL(req.url ?? '/', API_ORIGIN).pathname;
         // Signed out: no key and no session. The people sign-in answers 401 here,
         // which the app shows as the sign-in screen. Specs mock signed-in sessions.
-        if (pathname === '/v1/auth/session' && authorization !== `Bearer ${API_KEY}`) {
+        if (!asPerson && path === '/v1/auth/session' && req.headers.authorization !== `Bearer ${API_KEY}`) {
           res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(401, 'Sign-in required').body));
           return;
         }
-        if (pathname.startsWith('/v1/keys') && authorization === `Bearer ${API_KEY}`) {
-          // The server refuses an agent key on every key command.
+        if (!asPerson && req.headers.authorization !== `Bearer ${API_KEY}`) {
+          res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(401, 'Unauthorized').body));
+          return;
+        }
+        // Agent keys may not manage keys or review approvals (the server answers 403).
+        if (path.startsWith('/v1/keys') && req.headers.authorization === `Bearer ${API_KEY}`) {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
           return;
         }
-        if (authorization !== `Bearer ${API_KEY}`) {
-          res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
-          res.end(JSON.stringify(problem(401, 'Unauthorized').body));
+        if (!asPerson && path.startsWith('/v1/approval-requests')) {
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
         }
         const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);

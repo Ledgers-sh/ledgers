@@ -101,7 +101,8 @@ crates.io versions ([ADR 0001](docs/adr/0001-harness-by-pinned-crates.md)).
 | `ledgers-auth` | Authentication for people and agent keys |
 | `ledgers-approvals` | Approval requests with journal preview and step-up |
 | `ledgers-ext` | Extension traits, each with an open default |
-| `ledgers-server` | Harness composition: HTTP routes, MCP endpoint, native and Worker runtimes (`ledgers-server` binary) |
+| `ledgers-demo` | The invented demo company Halden Works GmbH: one fiscal year of entries, dimension values and golden totals (data only) |
+| `ledgers-server` | Harness composition: HTTP routes, MCP endpoint, native and Worker runtimes (`ledgers-server` binary); loads the demo company in dev mode |
 | `ledgers-cli` | The `ledgers` binary: CLI flags, MCP stdio relay, shell completions |
 
 Templates for country charts and mappings live in [`templates/`](templates/) (for example
@@ -132,7 +133,13 @@ cargo run -p ledgers-server
 With `LEDGERS_DEV=1` the server is for local use only. On start it creates a demo
 company with the generic small-business chart and the general journal `GN`, opens the
 current year, generates a throwaway `HARNESS_SECRET` if you did not set one (with a
-warning), and prints one full-tier API key once:
+warning), and prints one full-tier API key once. If the company has no entries yet, it
+also loads the demo company Halden Works GmbH (invented; `crates/ledgers-demo`): a German
+small manufacturer's year of sales invoices, vendor bills, payroll, VAT returns, a few
+reversals and dimension values, posted by an agent key and by the owner through the same
+executor path as real commands. Set `LEDGERS_DEMO=0` to start with an empty company. The
+walk-through below then starts from zero, and the demo year is part of the trial balance
+and P&L it reads otherwise:
 
 ```sh
 LEDGERS_DEV=1 LISTEN_ADDR=127.0.0.1:3000 cargo run -p ledgers-server

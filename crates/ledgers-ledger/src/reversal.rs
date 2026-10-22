@@ -22,6 +22,7 @@ struct EntryHeader {
 }
 
 /// Context for reversing an entry.
+#[derive(Clone)]
 pub struct ReverseContext {
     /// Company ID for the reversal.
     pub company_id: String,
@@ -67,6 +68,12 @@ pub async fn plan_reverse_entry(
     now: &str,
     request_id: &str,
 ) -> Result<(Vec<cratefield_core::Statement>, PostedEntry), JournalError> {
+    // The executor decides who reverses: a person's reversal follows the
+    // soft-closed period rules and is recorded as `human`.
+    let reverse_ctx = &ReverseContext {
+        human: token.acts_as_person(),
+        ..reverse_ctx.clone()
+    };
     let entry = reversal_entry(db, reverse_ctx).await?;
     let fiscal_year = i64::from(entry.posting_date.year());
     crate::posting::plan_post_entry(

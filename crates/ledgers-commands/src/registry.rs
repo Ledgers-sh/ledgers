@@ -272,7 +272,7 @@ fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> Command
     }
 }
 
-/// The commands every surface shares, with their default surface descriptors.
+/// The command registry's built-in descriptors.
 #[must_use]
 pub fn default_commands() -> Vec<CommandDescriptor> {
     let mut commands = vec![
@@ -341,6 +341,7 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
         ),
     ];
     commands.extend(human_only_commands());
+    commands.extend(approval_commands());
     commands
 }
 
@@ -379,6 +380,46 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "ledgers keys revoke",
         ),
     ]
+}
+
+/// The approval inbox commands: person only, so agent keys are refused them.
+fn approval_commands() -> Vec<CommandDescriptor> {
+    vec![
+        human_only(entry(
+            "approvals.list",
+            "read",
+            "GET",
+            "/v1/approval-requests",
+            "ledgers approvals list",
+        )),
+        human_only(entry(
+            "approvals.get",
+            "read",
+            "GET",
+            "/v1/approval-requests/{id}",
+            "ledgers approvals get",
+        )),
+        human_only(entry(
+            "approvals.decide",
+            "read",
+            "POST",
+            "/v1/approval-requests/{id}/decision",
+            "ledgers approvals decide",
+        )),
+        human_only(entry(
+            "approvals.decide_bulk",
+            "read",
+            "POST",
+            "/v1/approval-requests/bulk-decision",
+            "ledgers approvals decide-bulk",
+        )),
+    ]
+}
+
+/// Marks a descriptor human-only: agent keys are refused it.
+fn human_only(mut descriptor: CommandDescriptor) -> CommandDescriptor {
+    descriptor.human_only = true;
+    descriptor
 }
 
 #[cfg(test)]

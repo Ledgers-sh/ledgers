@@ -3,6 +3,7 @@
 //! applies every module's migrations, runs the development bootstrap when
 //! `LEDGERS_DEV=1`, and serves until shutdown.
 
+use crate::demo;
 use crate::dispatch::{self, Deps};
 use crate::rate_limiting;
 use crate::{harness, is_dev};
@@ -67,6 +68,19 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
             .await
             .map_err(|err| format!("dev bootstrap failed: {err}"))?;
         println!("dev key: {token}");
+        // LEDGERS_DEMO=0 keeps the development company empty.
+        if env::var("LEDGERS_DEMO").as_deref() != Ok("0")
+            && let Some(report) = demo::seed_if_empty(&deps, &cfg.company_id(), &token)
+                .await
+                .map_err(|err| format!("dev demo company failed to load: {err}"))?
+        {
+            tracing::info!(
+                "loaded the demo company: {} entries posted, {} reversed, {} already present",
+                report.posted,
+                report.reversed,
+                report.skipped
+            );
+        }
     }
 
     tracing::info!("Starting Ledgers server");

@@ -56,11 +56,18 @@ pub const CALLBACK_PATH: &str = "/v1/auth/callback";
 pub const PEOPLE_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen, Port::HttpClient];
 
 /// Migrations of the people session table, shipped with the server.
-pub const PEOPLE_MIGRATIONS: &[SqlMigration] = &[SqlMigration::new(
-    "0001",
-    "people_session",
-    include_str!("../migrations/sqlite/0001_people_session.sql"),
-)];
+pub const PEOPLE_MIGRATIONS: &[SqlMigration] = &[
+    SqlMigration::new(
+        "0001",
+        "people_session",
+        include_str!("../migrations/sqlite/0001_people_session.sql"),
+    ),
+    SqlMigration::new(
+        "0002",
+        "people_session_auth_time",
+        include_str!("../migrations/sqlite/0002_people_session_auth_time.sql"),
+    ),
+];
 
 /// Sign-in is off: `LEDGERS_AUTH_ISSUER` is not set, or the instance is not
 /// fully configured. 503, so a caller can tell "not set up" from "failed".
@@ -337,6 +344,8 @@ pub struct SessionRow {
     pub csrf_token: String,
     pub idle_expires_at: i64,
     pub absolute_expires_at: i64,
+    /// When the person last authenticated at the issuer (epoch seconds).
+    pub auth_time: Option<i64>,
 }
 
 impl SessionRow {
@@ -369,9 +378,10 @@ pub async fn store_session(
         csrf_token: random_token(32),
         idle_expires_at: now + IDLE_TTL_SECONDS,
         absolute_expires_at: now + i64::try_from(SESSION_TTL_SECONDS).unwrap_or(i64::MAX),
+        auth_time: person.auth_time,
     };
     db.execute(&Statement::with_values(
-        "INSERT INTO people_session (id_hash, person_id, email, roles, csrf_token, created_at, idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO people_session (id_hash, person_id, email, roles, csrf_token, created_at, idle_expires_at, absolute_expires_at, auth_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         vec![
             sea_query::Value::from(session_key_hash(session_id)),
             sea_query::Value::from(row.person_id.clone()),
@@ -381,6 +391,7 @@ pub async fn store_session(
             sea_query::Value::from(now),
             sea_query::Value::from(row.idle_expires_at),
             sea_query::Value::from(row.absolute_expires_at),
+            sea_query::Value::BigInt(row.auth_time),
         ],
     ))
     .await?;
@@ -397,7 +408,7 @@ pub async fn load_session(
 ) -> Result<Option<SessionRow>, cratefield_core::DbError> {
     let rows = db
         .query(&Statement::with_values(
-            "SELECT person_id, email, roles, csrf_token, idle_expires_at, absolute_expires_at FROM people_session WHERE id_hash = ?",
+            "SELECT person_id, email, roles, csrf_token, idle_expires_at, absolute_expires_at, auth_time FROM people_session WHERE id_hash = ?",
             vec![sea_query::Value::from(session_key_hash(session_id))],
         ))
         .await?;
@@ -415,6 +426,7 @@ pub async fn load_session(
         csrf_token: row.get::<String>("csrf_token").unwrap_or_default(),
         idle_expires_at: row.get::<i64>("idle_expires_at").unwrap_or(0),
         absolute_expires_at: row.get::<i64>("absolute_expires_at").unwrap_or(0),
+        auth_time: row.get::<i64>("auth_time"),
     }))
 }
 
@@ -469,6 +481,19 @@ pub struct PersonClaims {
     pub person_id: String,
     pub email: Option<String>,
     pub roles: Vec<String>,
+    /// When the person authenticated at the issuer (the ID token's `auth_time`).
+    pub auth_time: Option<i64>,
+}
+
+/// Whether a `return_to` value is a path inside the app: a single leading
+/// slash, no protocol-relative or backslash form, no control characters.
+#[must_use]
+pub fn safe_return_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.starts_with("/\\")
+        && path.len() <= 512
+        && path.chars().all(|c| !c.is_control())
 }
 
 /// The session authenticator behind a cookie-presented command: resolves the
@@ -614,7 +639,10 @@ async fn exchange_code(
 }
 
 /// `GET /v1/auth/login`: starts the authorization-code flow.
-async fn login(State(state): State<Arc<PeopleState>>) -> Response {
+async fn login(
+    State(state): State<Arc<PeopleState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
     let (Some(config), Some(http)) = (state.config.as_ref(), state.http.as_ref()) else {
         return problem_response(Problem::new(&SIGN_IN_NOT_CONFIGURED));
     };
@@ -626,21 +654,27 @@ async fn login(State(state): State<Arc<PeopleState>>) -> Response {
         }
     };
     let verifier = random_token(48);
+    let reauthenticate = query.get("prompt").map(String::as_str) == Some("login");
     let login = LoginState {
         state: random_token(32),
         nonce: random_token(32),
         verifier: verifier.clone(),
         exp: unix_now(&state) + LOGIN_TTL_SECONDS,
+        return_to: query
+            .get("return_to")
+            .filter(|path| safe_return_path(path))
+            .cloned(),
     };
     let payload = serde_json::to_vec(&login).expect("the login state serializes");
     let sealed = oidc::seal(&config.seal_key, &payload);
-    let location = oidc::authorize_url(
+    let location = oidc::authorize_url_with(
         &discovery,
         &config.client_id,
         &config.redirect_uri(),
         &login.state,
         &login.nonce,
         &pkce_challenge(&verifier),
+        reauthenticate,
     );
     let mut response = (StatusCode::FOUND, "").into_response();
     no_store(&mut response);
@@ -718,6 +752,7 @@ async fn callback(
         person_id: claims.sub,
         email: claims.email.filter(|_| claims.email_verified == Some(true)),
         roles: claims.roles,
+        auth_time: claims.auth_time,
     };
     let session_id = random_token(32);
     if let Err(err) = store_session(state.deps.db.as_ref(), &session_id, &person, now).await {
@@ -726,7 +761,15 @@ async fn callback(
     }
     let mut response = (StatusCode::SEE_OTHER, "").into_response();
     no_store(&mut response);
-    append_header(&mut response, header::LOCATION, &config.app_url);
+    let target = login
+        .return_to
+        .as_deref()
+        .filter(|path| safe_return_path(path))
+        .map_or_else(
+            || config.app_url.clone(),
+            |path| format!("{}{path}", config.app_url.trim_end_matches('/')),
+        );
+    append_header(&mut response, header::LOCATION, &target);
     append_header(
         &mut response,
         header::SET_COOKIE,
@@ -869,8 +912,24 @@ mod tests {
             csrf_token: String::new(),
             idle_expires_at: 100,
             absolute_expires_at: 1_000,
+            auth_time: None,
         };
         assert!(!row.expired_at(99));
         assert!(row.expired_at(100));
+    }
+}
+
+#[cfg(test)]
+mod return_path_tests {
+    use super::safe_return_path;
+
+    #[test]
+    fn return_to_stays_inside_the_app() {
+        assert!(safe_return_path("/approvals/apr-1"));
+        assert!(!safe_return_path("//evil.example/x"));
+        assert!(!safe_return_path("/\\evil.example"));
+        assert!(!safe_return_path("https://evil.example"));
+        assert!(!safe_return_path("approvals/apr-1"));
+        assert!(!safe_return_path("/a\nb"));
     }
 }

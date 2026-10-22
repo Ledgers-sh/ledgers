@@ -9,18 +9,22 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
+mod approvals;
+
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
+use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
-    ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, RateLimiter, Statement,
+    ApiKeys, Clock, Database, DbError, IdGen, Port, Ports, Problem, RateLimiter, Statement,
 };
+use ledgers_approvals::{ApprovalRequest, NewRequest, request_statement};
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
-    Command, CommandContext, CommandError, ExecToken, Execute, Executed, Executor, JournalPreview,
-    Plan, Registry,
+    Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
+    PendingApproval, Plan, Registry,
 };
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
@@ -37,7 +41,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use time::format_description::well_known::Iso8601;
 use time::{Date, OffsetDateTime, UtcOffset};
 
@@ -104,6 +108,7 @@ pub const DISPATCH_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
 pub struct ServerDispatch {
     company_id: String,
     app_origins: Vec<String>,
+    app_url: String,
 }
 
 impl ServerDispatch {
@@ -114,7 +119,15 @@ impl ServerDispatch {
         Self {
             company_id: company_id.into(),
             app_origins: Vec::new(),
+            app_url: String::new(),
         }
+    }
+
+    /// The app's absolute URL: approval links point at `{app_url}/approvals/{id}`.
+    #[must_use]
+    pub fn with_app_url(mut self, app_url: impl Into<String>) -> Self {
+        self.app_url = app_url.into();
+        self
     }
 
     /// The app origins a cookie-authenticated request may come from.
@@ -131,6 +144,7 @@ impl ServerDispatch {
     }
 
     /// Runs one command through the executor and maps its outcome to JSON.
+    #[allow(clippy::too_many_lines)]
     async fn execute<C: Command>(
         &self,
         deps: &Deps,
@@ -153,6 +167,7 @@ impl ServerDispatch {
             event_id: deps.id_gen.ulid(),
             now: rfc3339_utc(now_at),
         };
+        let now = ctx.now.clone();
         let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
             .await
             .map_err(fail)?;
@@ -181,9 +196,37 @@ impl ServerDispatch {
         let input: C::Input = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
 
+        // A needs-approval outcome stores its request in the same guarded batch
+        // as its audit row (docs/PLAN.md section 5).
+        let approval_id = deps.id_gen.ulid();
+        let raised: Mutex<Option<ApprovalRequest>> = Mutex::new(None);
+        let persist = |pending: &PendingApproval| -> Result<Vec<Statement>, CommandError> {
+            let preview = serde_json::to_value(&pending.preview)
+                .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+            let limits = approvals::low_risk_limits();
+            let (statement, request) = request_statement(&NewRequest {
+                id: &approval_id,
+                company_id: &self.company_id,
+                command: &pending.command,
+                input: &pending.input,
+                preview: &preview,
+                reads: &pending.reads,
+                request_hash: &pending.request_hash,
+                reason: &pending.reason,
+                requested_by: &pending.requested_by,
+                counterparty: None,
+                now: &now,
+                ttl: APPROVAL_TTL,
+                low_risk_limits: &limits,
+            })
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+            *raised.lock().unwrap_or_else(PoisonError::into_inner) = Some(request);
+            Ok(vec![statement])
+        };
+
         let executor = Executor::new(deps.db.as_ref(), authenticator, policy);
         match executor
-            .run(cmd, credential, ctx, &input, Execute::Run)
+            .run_for_approval(cmd, credential, ctx, &input, &persist)
             .await
             .map_err(fail)?
         {
@@ -194,13 +237,30 @@ impl ServerDispatch {
                 preview,
                 reason,
                 reads,
-            } => Ok(json!({
-                "status": "needs-approval",
-                "reason": reason,
-                "request_hash": request_hash,
-                "preview": preview,
-                "reads": reads,
-            })),
+            } => {
+                let stored = raised
+                    .into_inner()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .ok_or_else(|| {
+                        fail(CommandError::Database(DbError::Query(
+                            "the approval request was not stored".to_owned(),
+                        )))
+                    })?;
+                Ok(json!({
+                    "status": "needs-approval",
+                    "reason": reason,
+                    "request_hash": request_hash,
+                    "preview": preview,
+                    "reads": reads,
+                    "approval": {
+                        "id": approval_id,
+                        "url": approvals::approval_url(&self.app_url, &approval_id),
+                        "status": stored.status.as_str(),
+                        "risk": stored.risk.as_str(),
+                        "expires_at": stored.expires_at,
+                    },
+                }))
+            }
             Executed::DryRun(preview) => Ok(json!({ "status": "dry-run", "preview": preview })),
         }
     }
@@ -321,6 +381,22 @@ impl Dispatch for ServerDispatch {
             }
             "entries.list" => {
                 self.execute(deps, &EntriesList, presented, request_id, input)
+                    .await
+            }
+            "approvals.list" => {
+                self.execute(deps, &ApprovalsList, presented, request_id, input)
+                    .await
+            }
+            "approvals.get" => {
+                self.execute(deps, &ApprovalsGet, presented, request_id, input)
+                    .await
+            }
+            "approvals.decide" => {
+                self.approvals_decide(deps, presented, request_id, input)
+                    .await
+            }
+            "approvals.decide_bulk" => {
+                self.approvals_decide_bulk(deps, presented, request_id, input)
                     .await
             }
             "entries.get" => {
@@ -488,7 +564,7 @@ pub(crate) async fn load_key(
 
 /// The policy for one request: every agent key of the company, the chart's
 /// protected accounts, and the clock for expiry and rolling days.
-async fn load_policy(
+pub(crate) async fn load_policy(
     db: &dyn Database,
     company_id: &str,
     now: OffsetDateTime,

@@ -54,6 +54,40 @@ impl std::fmt::Display for Status {
     }
 }
 
+/// How risky an approval request is. Low risk may be bulk-approved; high risk
+/// needs a fresh sign-in to approve.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Risk {
+    /// A single-currency amount within the low-risk limit.
+    Low,
+    /// Anything else: no money movement, several currencies, or above the limit.
+    High,
+}
+
+impl Risk {
+    /// Returns the string form of this risk level.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Risk::Low => "low",
+            Risk::High => "high",
+        }
+    }
+
+    /// Parses a risk level from a string.
+    ///
+    /// # Errors
+    /// Returns an error if the string is not `low` or `high`.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "low" => Ok(Risk::Low),
+            "high" => Ok(Risk::High),
+            _ => Err(format!("unknown approval risk: {s}")),
+        }
+    }
+}
+
 /// An approval request: command metadata and preview, frozen for review.
 #[derive(Clone, Debug)]
 pub struct ApprovalRequest {
@@ -88,6 +122,18 @@ pub struct ApprovalRequest {
     pub decided_by: Option<String>,
     /// The credential (e.g., passkey credential id) used to approve, if approved.
     pub credential_id: Option<String>,
+    /// The risk level the request was raised with.
+    pub risk: Risk,
+    /// The counterparty named in the request, if the command has one.
+    pub counterparty: Option<String>,
+    /// When the request was decided (RFC 3339 UTC), if it was.
+    pub decided_at: Option<String>,
+    /// The reason the person gave for the decision, if any.
+    pub decision_reason: Option<String>,
+    /// The command output after an approval (the entry reference), as JSON.
+    pub result: Option<String>,
+    /// The audit event that recorded the decision.
+    pub audit_ref: Option<String>,
 }
 
 #[cfg(test)]

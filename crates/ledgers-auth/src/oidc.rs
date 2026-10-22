@@ -159,6 +159,34 @@ pub fn authorize_url(
     nonce: &str,
     challenge: &str,
 ) -> String {
+    authorize_url_with(
+        discovery,
+        client_id,
+        redirect_uri,
+        state,
+        nonce,
+        challenge,
+        false,
+    )
+}
+
+/// The authorization URL. With `reauthenticate`, the issuer must sign the
+/// person in again (`prompt=login`) and may not reuse an earlier login
+/// (`max_age=0`), so the ID token carries a fresh `auth_time`.
+///
+/// # Panics
+/// If the discovery's authorization endpoint is not an absolute URL; discovery
+/// documents are checked before they reach this function.
+#[must_use]
+pub fn authorize_url_with(
+    discovery: &Discovery,
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    nonce: &str,
+    challenge: &str,
+    reauthenticate: bool,
+) -> String {
     let mut url = url::Url::parse(&discovery.authorization_endpoint)
         .expect("discovery endpoints are absolute URLs");
     url.query_pairs_mut()
@@ -170,6 +198,11 @@ pub fn authorize_url(
         .append_pair("nonce", nonce)
         .append_pair("code_challenge", challenge)
         .append_pair("code_challenge_method", "S256");
+    if reauthenticate {
+        url.query_pairs_mut()
+            .append_pair("prompt", "login")
+            .append_pair("max_age", "0");
+    }
     url.to_string()
 }
 
@@ -289,6 +322,9 @@ pub struct IdClaims {
     pub email: Option<String>,
     #[serde(default)]
     pub email_verified: Option<bool>,
+    /// When the person authenticated at the issuer, epoch seconds.
+    #[serde(default)]
+    pub auth_time: Option<i64>,
     #[serde(default)]
     pub roles: Vec<String>,
 }
@@ -398,6 +434,9 @@ pub struct LoginState {
     pub verifier: String,
     /// Expiry, epoch seconds.
     pub exp: i64,
+    /// Where the app wants the person sent after sign-in (an app path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_to: Option<String>,
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -640,5 +679,34 @@ mod tests {
         let forged = sealed.replacen("cGF5", "ZmFr", 1);
         assert_eq!(open(&key, &forged), None);
         assert_eq!(open(&key, "no-dot-here"), None);
+    }
+}
+
+#[cfg(test)]
+mod reauth_url_tests {
+    use super::{Discovery, authorize_url_with};
+
+    #[test]
+    fn reauthentication_asks_the_issuer_for_a_fresh_login() {
+        let discovery = Discovery {
+            issuer: "https://issuer.example".to_owned(),
+            authorization_endpoint: "https://issuer.example/authorize".to_owned(),
+            token_endpoint: "https://issuer.example/token".to_owned(),
+            jwks_uri: "https://issuer.example/keys".to_owned(),
+        };
+        let fresh =
+            authorize_url_with(&discovery, "c", "https://r.example/cb", "s", "n", "x", true);
+        assert!(fresh.contains("prompt=login"));
+        assert!(fresh.contains("max_age=0"));
+        let normal = authorize_url_with(
+            &discovery,
+            "c",
+            "https://r.example/cb",
+            "s",
+            "n",
+            "x",
+            false,
+        );
+        assert!(!normal.contains("prompt="));
     }
 }
