@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BILLS_MATCH_OPERATION, operationIds } from './features';
+import { operationIds } from './features';
 import { fetchOpenApiDocument } from './openapi';
 import { defaultServerUrl, LOCAL_SERVER_URL } from './config';
 
@@ -8,14 +8,14 @@ const document = {
   paths: {
     '/v1/accounts': { get: { operationId: 'accounts_list' } },
     '/v1/entries': { get: { operationId: 'entries_list' }, post: { operationId: 'entries_post' } },
-    '/v1/bills/{id}/match': { post: { operationId: BILLS_MATCH_OPERATION } },
+    '/v1/bills/{id}/post': { post: { operationId: 'bills_post' } },
   },
 };
 
 describe('operationIds', () => {
   it('lists every operationId in the paths', () => {
     expect([...operationIds(document)].sort()).toEqual(
-      ['accounts_list', 'bills_match', 'entries_list', 'entries_post'].sort(),
+      ['accounts_list', 'bills_post', 'entries_list', 'entries_post'].sort(),
     );
   });
 
@@ -39,7 +39,7 @@ describe('reading the server’s operations', () => {
       return new Response(JSON.stringify(document), { status: 200 });
     }) as typeof fetch;
     const ids = operationIds(await fetchOpenApiDocument('https://api-staging.ledgers.sh/', fetchImpl));
-    expect(ids.has(BILLS_MATCH_OPERATION)).toBe(true);
+    expect(ids.has('bills_post')).toBe(true);
     expect(seen[0].url).toBe('https://api-staging.ledgers.sh/v1/openapi');
     expect(new Headers(seen[0].init?.headers).has('Authorization')).toBe(false);
   });

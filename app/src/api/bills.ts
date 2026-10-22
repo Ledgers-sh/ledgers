@@ -233,6 +233,11 @@ export function billPost(config: Config, id: string): Promise<PostedBill> {
   return billRequest(config, 'POST', `/v1/bills/${encodeURIComponent(id)}/post`, {});
 }
 
+/** GET /v1/documents/{id}: the stored document's metadata. */
+export function documentGet(config: Config, id: string): Promise<{ document: Document }> {
+  return billRequest(config, 'GET', `/v1/documents/${encodeURIComponent(id)}`);
+}
+
 /** GET /v1/documents/{id}/url: a link that serves the file for five minutes. */
 export function documentUrl(config: Config, id: string): Promise<{ url: string; expires_at: number }> {
   return billRequest(config, 'GET', `/v1/documents/${encodeURIComponent(id)}/url`);

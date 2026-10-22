@@ -543,6 +543,17 @@
                     },
                     "default": []
                   },
+                  "confidence": {
+                    "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "default": {}
+                  },
                   "source": {
                     "description": "Which extractor (or `manual`) produced the fields.",
                     "type": [
@@ -688,6 +699,98 @@
         "x-ledgers-cli": "ledgers bills list",
         "x-ledgers-mcp": "bills_list",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bills\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bills/{id}/discard": {
+      "post": {
+        "operationId": "bills_discard",
+        "description": "Execute command: bills.discard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "DiscardInput",
+                "description": "Input of `bills.discard`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bill id (from the path).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `bills.get`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.discard",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills discard",
+        "x-ledgers-mcp": "bills_discard",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/discard\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
     "/v1/bills/extract": {
@@ -1096,6 +1199,17 @@
                       "$ref": "#/components/schemas/BillLine"
                     },
                     "default": []
+                  },
+                  "confidence": {
+                    "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "default": {}
                   },
                   "source": {
                     "description": "Which extractor (or `manual`) produced the fields.",
@@ -2610,6 +2724,16 @@
               "$ref": "#/components/schemas/BillLine"
             }
           },
+          "confidence": {
+            "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
           "checks": {
             "description": "Every check on the bill.",
             "type": "array",
@@ -2662,6 +2786,7 @@
           "vendor",
           "currency",
           "lines",
+          "confidence",
           "checks",
           "flags",
           "source",
@@ -2688,6 +2813,11 @@
             "description": "The journal entry exists.",
             "type": "string",
             "const": "posted"
+          },
+          {
+            "description": "A person discarded the draft; it can no longer post.",
+            "type": "string",
+            "const": "discarded"
           }
         ]
       },

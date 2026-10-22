@@ -9,6 +9,7 @@ Usage: bills <COMMAND>
 Commands:
   confirm  bills.confirm
   create   bills.create
+  discard  bills.discard
   extract  bills.extract
   get      bills.get
   list     bills.list

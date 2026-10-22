@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { useHash, useOnline, usePendingCount } from './hooks';
-import { BILLS_MATCH_OPERATION, operationIds } from './api/features';
 import { fetchOpenApiDocument } from './api/openapi';
 import { ApiError } from './api/client';
 import { fetchSession, initialOf, signOut, type Person } from './api/auth';
@@ -30,7 +29,8 @@ import { Accounts } from './ui/Accounts';
 import { Journal, EntryDetail } from './ui/Journal';
 import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
-import { Bills } from './ui/Bills';
+import { Inbox } from './ui/Inbox';
+import { BillReview } from './ui/BillReview';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
 import { Settings } from './ui/Settings';
 import { badgeText } from './lib/approvals';
@@ -45,16 +45,10 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'journal', label: 'nav.journal', icon: 'journal', match: (r) => r === 'journal' || r.startsWith('journal/') },
   { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' },
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
-  { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' },
+  { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' || r.startsWith('bills/') },
   { hash: 'settings/agent-keys', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
-
-/**
- * Bills is shown only when the server's OpenAPI document lists bills.match.
- * `checking` covers the first moments after connecting, before the document arrives.
- */
-type BillsState = 'checking' | 'offered' | 'absent';
 
 /**
  * Who is using the app. A person signs in with a passkey on the server and
@@ -228,16 +222,13 @@ function Shell({
     };
   }, [baseUrl]);
 
-  const billsState: BillsState =
-    openApi === undefined ? 'checking' : operationIds(openApi).has(BILLS_MATCH_OPERATION) ? 'offered' : 'absent';
-
   const paletteData: PaletteData = useMemo(() => {
     if (openApi === undefined) return { status: 'loading' };
     if (openApi === null) return { status: 'unavailable' };
     return { status: 'ready', commands: paletteCommands(openApi) };
   }, [openApi]);
 
-  const nav = NAV.filter((item) => (item.hash !== 'bills' || billsState === 'offered') && (item.hash !== 'approvals' || !apiKey));
+  const nav = NAV.filter((item) => item.hash !== 'approvals' || !apiKey);
   const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
 
   const setPeriod = useCallback((next: string) => {
@@ -298,7 +289,7 @@ function Shell({
   }, []);
 
   const route = hash.replace(/\?.*$/, '');
-  const page = renderRoute(route, billsState);
+  const page = renderRoute(route);
   const current = NAV.find((item) => item.match(route));
   const shortcutKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K';
 
@@ -427,7 +418,7 @@ function Shell({
   );
 }
 
-function renderRoute(route: string, billsState: BillsState) {
+function renderRoute(route: string) {
   if (route === '' || route === 'overview') return <Overview />;
   if (route === 'journal') return <Journal />;
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
@@ -436,8 +427,8 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route === 'approvals') return <Approvals />;
   if (route === 'settings' || route === 'settings/agent-keys') return <Settings section="agent-keys" />;
   if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
-  if (route === 'bills' && billsState === 'offered') return <Bills />;
-  if (route === 'bills' && billsState === 'checking') return <p class="muted">{t('shell.checking_bills')}</p>;
+  if (route === 'bills') return <Inbox />;
+  if (route.startsWith('bills/')) return <BillReview billId={decodeURIComponent(route.slice('bills/'.length))} />;
   if (route === 'new') return <NewEntry />;
   return (
     <div class="empty">

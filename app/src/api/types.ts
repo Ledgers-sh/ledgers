@@ -166,8 +166,6 @@ export interface AccountBalanceByDimensionOutput {
 }
 
 /** bills.match is not in the registry yet; the response is shown as returned. */
-export type BillsMatchOutput = Record<string, unknown>;
-
 /** One currency's limits on an agent key, as canonical major-unit strings ("1000.00"). */
 export interface AgentKeyLimit {
   per_entry: string;
