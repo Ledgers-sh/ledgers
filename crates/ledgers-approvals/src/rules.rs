@@ -91,6 +91,12 @@ pub mod contract_tests {
             expires_at: "2026-01-16T09:30:00Z".to_string(),
             decided_by: None,
             credential_id: None,
+            risk: crate::approval::Risk::High,
+            counterparty: None,
+            decided_at: None,
+            decision_reason: None,
+            result: None,
+            audit_ref: None,
         }
     }
 

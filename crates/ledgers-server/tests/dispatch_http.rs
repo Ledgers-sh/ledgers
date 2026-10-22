@@ -644,3 +644,48 @@ fn the_registry_has_the_commands_the_web_app_needs() {
         "test.insert never ships"
     );
 }
+
+#[test]
+fn needs_approval_answers_with_the_stored_request_and_its_link() {
+    let fx = fixture();
+    let body = entry_json("inbox-link-1", "5010", "4000", "100000").to_string();
+    let response = fx.send(Method::POST, "/v1/entries", &fx.keys.unlimited, Some(&body));
+    assert_eq!(response.status.as_u16(), 200, "{}", response.json());
+    let answer = json(&response);
+    assert_eq!(answer["status"], "needs-approval");
+    let id = answer["approval"]["id"]
+        .as_str()
+        .expect("approval id")
+        .to_owned();
+    assert_eq!(answer["approval"]["url"], format!("/approvals/{id}"));
+    assert_eq!(answer["approval"]["status"], "pending");
+    let stored = pollster::block_on(ledgers_approvals::get_request(
+        fx.kit.db.as_ref(),
+        dispatch::DEV_COMPANY_ID,
+        &id,
+    ))
+    .expect("the request is stored in the same batch as the audit row");
+    assert_eq!(stored.command, "entries.post");
+    assert_eq!(stored.risk, ledgers_approvals::Risk::High);
+}
+
+#[test]
+fn agent_keys_are_refused_the_approval_inbox() {
+    let fx = fixture();
+    let list = fx.send(Method::GET, "/v1/approval-requests", &fx.keys.full, None);
+    assert_eq!(list.status.as_u16(), 403, "{}", list.json());
+    let get = fx.send(
+        Method::GET,
+        "/v1/approval-requests/any-id",
+        &fx.keys.full,
+        None,
+    );
+    assert_eq!(get.status.as_u16(), 403, "{}", get.json());
+    let decide = fx.send(
+        Method::POST,
+        "/v1/approval-requests/any-id/decision",
+        &fx.keys.full,
+        Some(r#"{"decision":"approve"}"#),
+    );
+    assert_eq!(decide.status.as_u16(), 403, "{}", decide.json());
+}
