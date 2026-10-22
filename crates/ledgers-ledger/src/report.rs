@@ -85,8 +85,8 @@ pub async fn trial_balance(
         SELECT
             jl.account_number,
             je.base_currency,
-            COALESCE(SUM(CASE WHEN jl.base_minor > 0 THEN jl.base_minor ELSE 0 END), 0) as total_debits,
-            COALESCE(SUM(CASE WHEN jl.base_minor < 0 THEN -jl.base_minor ELSE 0 END), 0) as total_credits
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor > 0 THEN jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_debits,
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor < 0 THEN -jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_credits
         FROM journal_line jl
         JOIN journal_entry je ON jl.entry_id = je.id
         WHERE je.company_id = ? AND je.vat_period = ?
@@ -97,6 +97,85 @@ pub async fn trial_balance(
     let statement = Statement::with_values(
         sql.to_string(),
         vec![SeaValue::from(company_id), SeaValue::from(period)],
+    );
+
+    let rows = db.query(&statement).await?;
+    let mut result = Vec::new();
+
+    for row in &rows.rows {
+        let account_code: String = row
+            .get("account_number")
+            .ok_or_else(|| required_column("account_number"))?;
+        let currency_code: String = row
+            .get("base_currency")
+            .ok_or_else(|| required_column("base_currency"))?;
+        let debit_minor: i64 = row
+            .get("total_debits")
+            .ok_or_else(|| required_column("total_debits"))?;
+        let credit_minor: i64 = row
+            .get("total_credits")
+            .ok_or_else(|| required_column("total_credits"))?;
+
+        let currency = Currency::from_str(&currency_code)?;
+        let debit = Amount::from_i64(debit_minor, currency);
+        let credit = Amount::from_i64(credit_minor, currency);
+        let balance = Amount::from_i64(debit_minor - credit_minor, currency);
+
+        result.push(TrialBalanceRow {
+            account_code,
+            debit,
+            credit,
+            balance,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Generates a trial balance filtered by a dimension value (e.g., for a specific unit or cost centre).
+///
+/// # Arguments
+/// * `db` - The database connection
+/// * `company_id` - The company identifier
+/// * `period` - The period in "YYYY-MM" format
+/// * `dimension_kind` - The dimension type ("unit", "`cost_centre`", "project")
+/// * `dimension_value` - The specific dimension value to filter by
+///
+/// # Errors
+/// Returns [`JournalError::Database`] if the query fails.
+///
+/// # Returns
+/// A vector of trial balance rows for lines tagged with the specified dimension,
+/// one per account that had activity with that dimension in the period.
+pub async fn trial_balance_for_dimension(
+    db: &dyn Database,
+    company_id: &str,
+    period: &str,
+    dimension_kind: &str,
+    dimension_value: &str,
+) -> Result<Vec<TrialBalanceRow>, JournalError> {
+    let sql = r"
+        SELECT
+            jl.account_number,
+            je.base_currency,
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor > 0 THEN jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_debits,
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor < 0 THEN -jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_credits
+        FROM journal_line jl
+        JOIN journal_entry je ON jl.entry_id = je.id
+        JOIN journal_line_dimension jld ON jl.entry_id = jld.entry_id AND jl.line_no = jld.line_no
+        WHERE je.company_id = ? AND je.vat_period = ? AND jld.kind = ? AND jld.value = ?
+        GROUP BY jl.account_number, je.base_currency
+        ORDER BY jl.account_number
+    ";
+
+    let statement = Statement::with_values(
+        sql.to_string(),
+        vec![
+            SeaValue::from(company_id),
+            SeaValue::from(period),
+            SeaValue::from(dimension_kind),
+            SeaValue::from(dimension_value),
+        ],
     );
 
     let rows = db.query(&statement).await?;
