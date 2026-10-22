@@ -60,6 +60,8 @@ pub struct SeedReport {
     pub skipped: usize,
     /// Dimension values created by this run.
     pub dimensions_created: usize,
+    /// Business units created by this run.
+    pub units_created: usize,
 }
 
 /// The authenticator for a person posting in-process: the owner principal.
@@ -93,6 +95,23 @@ pub async fn seed(
     seed_as(deps, company_id, AgentPoster::Key(agent_key), book).await
 }
 
+/// Seeds a demo book into its own company: creates the company with the
+/// book's currency and the chart when it does not exist yet, then loads the
+/// book as the internal agent and the demo owner. Idempotent like [`seed`].
+///
+/// # Errors
+/// As [`seed_as`], plus the company or chart setup failing.
+pub async fn seed_company_book(
+    deps: &Deps,
+    company_id: &str,
+    book: &DemoBook,
+) -> Result<SeedReport, String> {
+    dispatch::ensure_company(deps, company_id, book.company, book.currency).await?;
+    let journal_id = format!("general-{company_id}");
+    dispatch::seed_company_with_journal(deps, company_id, DEMO_OWNER_ID, &journal_id).await?;
+    seed_internal(deps, company_id, book).await
+}
+
 /// Seeds `book` into `company_id` as the internal agent principal, with no
 /// agent key. This is the loader behind `POST /admin/seed-demo`; the caller
 /// must have passed [`seed_demo_gate`] first.
@@ -105,6 +124,48 @@ pub async fn seed_internal(
     book: &DemoBook,
 ) -> Result<SeedReport, String> {
     seed_as(deps, company_id, AgentPoster::Internal, book).await
+}
+
+/// Creates the book's business units that the company does not have yet, as
+/// the demo owner (the audit trail names the owner). Returns how many it made.
+async fn ensure_units(
+    db: &dyn Database,
+    company_id: &str,
+    book: &DemoBook,
+    stamp: &str,
+    deps: &Deps,
+) -> Result<usize, String> {
+    let mut created = 0;
+    for unit in &book.units {
+        let known = ledgers_ledger::units::find_unit(db, company_id, unit.code)
+            .await
+            .map_err(|err| format!("read unit {}: {err}", unit.code))?;
+        if known.is_none() {
+            let audit = ledgers_audit::AuditContext::new(
+                ledgers_audit::Actor::Person {
+                    person_id: DEMO_OWNER_ID.to_owned(),
+                },
+                "demo-seed-units",
+                deps.id_gen.ulid(),
+            );
+            ledgers_ledger::units::create_unit(
+                db,
+                company_id,
+                ledgers_ledger::units::UnitDraft {
+                    code: unit.code.to_owned(),
+                    name: unit.name.to_owned(),
+                    colour: Some(unit.colour.to_owned()),
+                    logo_document_id: None,
+                },
+                stamp.to_owned(),
+                &audit,
+            )
+            .await
+            .map_err(|err| format!("create unit {}: {err}", unit.code))?;
+            created += 1;
+        }
+    }
+    Ok(created)
 }
 
 /// The loader both paths share: dimensions first, then every entry in posting
@@ -141,6 +202,8 @@ pub async fn seed_as(
             report.dimensions_created += 1;
         }
     }
+
+    report.units_created = ensure_units(db, company_id, book, &stamp, deps).await?;
 
     let agent = ServerDispatch::new(company_id);
     for entry in &book.entries {

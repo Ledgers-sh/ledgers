@@ -98,6 +98,7 @@ async fn seed(db: &dyn Database) {
     .await;
 }
 
+#[allow(clippy::too_many_lines)]
 async fn scenario(db: &dyn Database) {
     seed(db).await;
     let accounts = store::accounts(db, COMPANY, false).await.expect("accounts");

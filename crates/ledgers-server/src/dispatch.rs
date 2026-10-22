@@ -13,11 +13,14 @@ mod accounts;
 mod approvals;
 mod bank;
 mod bills;
+mod settings;
+mod settings_rules;
+mod units;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
 use accounts::AccountsGet;
-use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
+use approvals::{ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
     ApiKeys, Blob, Clock, Database, DbError, HttpClient, IdGen, Port, Ports, Problem, RateLimiter,
@@ -52,10 +55,16 @@ use ledgers_policy::store::{deserialize_key, parse_keys, serialize_key};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
+use settings::{
+    ApprovalSettingsGet, ApprovalSettingsUpdate, AuditList, CompanyGet, CompanyUpdate,
+    FiscalYearsList, NumberingList, NumberingSetNext, TaxSettingsGet,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use time::format_description::well_known::Iso8601;
 use time::{Date, OffsetDateTime, UtcOffset};
+use units::{ReportsUnitsSummary, UnitsList, resolve_scope};
 
 /// The company the development bootstrap creates when `LEDGERS_COMPANY_ID`
 /// is unset. Invented fixture id, never a real company.
@@ -268,12 +277,15 @@ impl ServerDispatch {
 
         // A needs-approval outcome stores its request in the same guarded batch
         // as its audit row (docs/PLAN.md section 5).
+        let rules = settings::approval_rules_for::<C>(deps.db.as_ref(), &self.company_id)
+            .await
+            .map_err(|err| fail(CommandError::Database(err)))?;
+        let ttl = Duration::from_hours(u64::from(rules.ttl_hours));
         let approval_id = deps.id_gen.ulid();
         let raised: Mutex<Option<ApprovalRequest>> = Mutex::new(None);
         let persist = |pending: &PendingApproval| -> Result<Vec<Statement>, CommandError> {
             let preview = serde_json::to_value(&pending.preview)
                 .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
-            let limits = approvals::low_risk_limits();
             let (statement, request) = request_statement(&NewRequest {
                 id: &approval_id,
                 company_id: &self.company_id,
@@ -286,8 +298,8 @@ impl ServerDispatch {
                 requested_by: &pending.requested_by,
                 counterparty: None,
                 now: &now,
-                ttl: APPROVAL_TTL,
-                low_risk_limits: &limits,
+                ttl,
+                low_risk_limits: &rules.low_risk,
             })
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
             // The Created notice is enqueued in the same batch as the request.
@@ -522,8 +534,21 @@ impl Dispatch for ServerDispatch {
         presented: Option<Presented>,
     ) -> Result<Value, Problem> {
         match command {
-            "entries.post" => {
-                self.execute(deps, &EntriesPost, presented, request_id, input)
+            "entries.post" => self.entries_post(deps, presented, request_id, input).await,
+            "entries.transfer" => {
+                self.entries_transfer(deps, presented, request_id, input)
+                    .await
+            }
+            "units.list" => {
+                self.execute(deps, &UnitsList, presented, request_id, input)
+                    .await
+            }
+            "units.create" | "units.rename" | "units.archive" => {
+                self.units_write(deps, presented, request_id, command, input)
+                    .await
+            }
+            "reports.units_summary" => {
+                self.execute(deps, &ReportsUnitsSummary, presented, request_id, input)
                     .await
             }
             "entries.reverse" => {
@@ -651,6 +676,59 @@ impl Dispatch for ServerDispatch {
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
+            "company.get" => {
+                self.execute(deps, &CompanyGet, presented, request_id, input)
+                    .await
+            }
+            "company.update" => {
+                self.execute(deps, &CompanyUpdate, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.list" => {
+                self.execute(deps, &FiscalYearsList, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.create" => {
+                self.fiscal_years_create(deps, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.close" => {
+                self.fiscal_years_close(deps, presented, request_id, input)
+                    .await
+            }
+            "periods.close" => self.periods_close(deps, presented, request_id, input).await,
+            "periods.reopen" => {
+                self.periods_reopen(deps, presented, request_id, input)
+                    .await
+            }
+            "numbering.list" => {
+                self.execute(deps, &NumberingList, presented, request_id, input)
+                    .await
+            }
+            "numbering.set_next" => {
+                self.execute(deps, &NumberingSetNext, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.get" => {
+                self.execute(deps, &TaxSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.update" => {
+                self.tax_settings_update(deps, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.get" => {
+                self.execute(deps, &ApprovalSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.update" => {
+                self.execute(deps, &ApprovalSettingsUpdate, presented, request_id, input)
+                    .await
+            }
+            "audit.list" => {
+                self.execute(deps, &AuditList, presented, request_id, input)
+                    .await
+            }
             other => Err(
                 Problem::validation_failed(format!("unknown command {other:?}"))
                     .instance(request_id),
@@ -726,6 +804,7 @@ fn internal_agent_policy(
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit: None,
     })
 }
 
@@ -915,7 +994,7 @@ pub async fn issue_key(
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
-    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits)
+    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits, None)
         .await
         .map(|(_, token)| token)
 }
@@ -929,9 +1008,11 @@ pub(crate) async fn issue_key_as(
     owner: &str,
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
+    unit: Option<String>,
 ) -> Result<(String, String), String> {
     let key_id = deps.id_gen.ulid();
-    let policy = agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits)?;
+    let policy =
+        agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits, unit)?;
     deps.db
         .execute(&policy)
         .await
@@ -943,6 +1024,7 @@ pub(crate) async fn issue_key_as(
 /// The insert of an agent key's policy row, with the key's id and the time the
 /// row is stamped with. Built here so the bootstrap can run it inside its guarded
 /// batch; [`issue_key_as`] runs it on its own.
+#[allow(clippy::too_many_arguments)]
 fn agent_key_policy_statement(
     deps: &Deps,
     company_id: &str,
@@ -951,6 +1033,7 @@ fn agent_key_policy_statement(
     owner: &str,
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
+    unit: Option<String>,
 ) -> Result<Statement, String> {
     let now = deps.clock.now();
     let key = AgentKey {
@@ -966,6 +1049,7 @@ fn agent_key_policy_statement(
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
     Ok(Statement::with_values(
@@ -1014,6 +1098,20 @@ pub(crate) async fn mint_key(
 /// # Errors
 /// A message naming the failed step.
 pub async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
+    seed_company_with_journal(deps, company_id, owner, DEV_JOURNAL_ID).await
+}
+
+/// [`seed_company`] with the general journal's id given. Journal ids are
+/// global keys, so a second company in one database names its own.
+///
+/// # Errors
+/// As [`seed_company`].
+pub async fn seed_company_with_journal(
+    deps: &Deps,
+    company_id: &str,
+    owner: &str,
+    journal_id: &str,
+) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();
@@ -1042,7 +1140,7 @@ pub async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<
                 kind: JournalKind::General,
                 name: "General journal".to_owned(),
             },
-            DEV_JOURNAL_ID,
+            journal_id,
             &stamp,
             &audit,
         )
@@ -1222,6 +1320,7 @@ pub async fn bootstrap_company(
         BOOTSTRAP_OWNER,
         Tier::PostWithinLimits,
         bootstrap_limits(&input.currency),
+        None,
     )
     .map_err(BootstrapError::Failed)?;
 
@@ -1457,6 +1556,48 @@ pub fn registry() -> Registry {
             ),
         ),
         (
+            "entries.transfer",
+            (
+                schema_of::<units::EntriesTransferInput>(),
+                schema_of::<PostEntryOutput>(),
+            ),
+        ),
+        (
+            "units.list",
+            (
+                schema_of::<units::UnitsListInput>(),
+                schema_of::<units::UnitsListOutput>(),
+            ),
+        ),
+        (
+            "units.create",
+            (
+                schema_of::<units::UnitsCreateInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "units.rename",
+            (
+                schema_of::<units::UnitsRenameInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "units.archive",
+            (
+                schema_of::<units::UnitsCodeInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "reports.units_summary",
+            (
+                schema_of::<units::UnitsSummaryInput>(),
+                schema_of::<units::UnitsSummaryOutput>(),
+            ),
+        ),
+        (
             "entries.post",
             (
                 schema_of::<EntriesPostInput>(),
@@ -1601,6 +1742,104 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::commands::ConfirmInput>(),
                 schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "company.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "company.update",
+            (
+                schema_of::<settings::CompanyUpdateInput>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::FiscalYearsListOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.create",
+            (
+                schema_of::<settings::FiscalYearCreateInput>(),
+                schema_of::<settings::FiscalYearView>(),
+            ),
+        ),
+        (
+            "fiscal_years.close",
+            (
+                schema_of::<settings::FiscalYearCloseInput>(),
+                schema_of::<settings::FiscalYearCloseOutput>(),
+            ),
+        ),
+        (
+            "periods.close",
+            (
+                schema_of::<settings::PeriodCloseInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "periods.reopen",
+            (
+                schema_of::<settings::PeriodReopenInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "numbering.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::NumberingListOutput>(),
+            ),
+        ),
+        (
+            "numbering.set_next",
+            (
+                schema_of::<settings::NumberingSetNextInput>(),
+                schema_of::<settings::NumberingSetNextInput>(),
+            ),
+        ),
+        (
+            "tax_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "tax_settings.update",
+            (
+                schema_of::<settings::TaxSettingsInput>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "approval_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "approval_settings.update",
+            (
+                schema_of::<settings::ApprovalSettingsInput>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "audit.list",
+            (
+                schema_of::<settings::AuditListInput>(),
+                schema_of::<settings::AuditListOutput>(),
             ),
         ),
     ]);
@@ -2191,6 +2430,9 @@ impl Command for AccountsList {
 pub struct PeriodInput {
     /// The VAT period, `YYYY-MM`.
     pub period: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// One trial-balance row.
@@ -2245,7 +2487,8 @@ impl Command for ReportsTrialBalance {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let rows = report::trial_balance(db, &ctx.company_id, &input.period)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let rows = report::trial_balance_scoped(db, &ctx.company_id, &input.period, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(TrialBalanceOutput {
@@ -2306,7 +2549,8 @@ impl Command for ReportsProfitAndLoss {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let pnl = report::profit_and_loss(db, &ctx.company_id, &input.period)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let pnl = report::profit_and_loss_scoped(db, &ctx.company_id, &input.period, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(ProfitAndLossOutput {
@@ -2323,6 +2567,9 @@ impl Command for ReportsProfitAndLoss {
 pub struct BalanceSheetInput {
     /// The date the balance sheet is as of, `YYYY-MM-DD`.
     pub as_of: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// The output of `reports.balance_sheet`.
@@ -2377,7 +2624,8 @@ impl Command for ReportsBalanceSheet {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         parse_date(&input.as_of)?;
-        let sheet = report::balance_sheet(db, &ctx.company_id, &input.as_of)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let sheet = report::balance_sheet_scoped(db, &ctx.company_id, &input.as_of, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(BalanceSheetOutput {
@@ -2402,6 +2650,9 @@ pub struct DimensionBalanceInput {
     pub dimension: String,
     /// The VAT period, `YYYY-MM`.
     pub period: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// One dimension value's balance.
@@ -2456,12 +2707,14 @@ impl Command for ReportsAccountBalanceByDimension {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let rows = report::account_balance_by_dimension(
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let rows = report::account_balance_by_dimension_scoped(
             db,
             &ctx.company_id,
             &input.account,
             &input.dimension,
             &input.period,
+            &scope,
         )
         .await
         .map_err(|err| domain(&err))?;
@@ -2491,6 +2744,9 @@ pub struct TrendsInput {
     /// The dimension kind to split by: `cost_centre`, `project` or `unit`.
     #[serde(default)]
     pub dimension: Option<String>,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// One month of `reports.trends`.
@@ -2627,9 +2883,17 @@ impl Command for ReportsTrends {
                 "{kind:?} is not a dimension kind (cost_centre, project or unit)"
             )));
         }
-        let trends = report::trends(db, &ctx.company_id, &input.from, &input.to, dimension)
-            .await
-            .map_err(|err| domain(&err))?;
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let trends = report::trends_scoped(
+            db,
+            &ctx.company_id,
+            &input.from,
+            &input.to,
+            dimension,
+            &scope,
+        )
+        .await
+        .map_err(|err| domain(&err))?;
         let currency = trends
             .months
             .first()

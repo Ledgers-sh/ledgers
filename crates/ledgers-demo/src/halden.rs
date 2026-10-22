@@ -127,6 +127,7 @@ pub fn book(year: i32) -> DemoBook {
         currency: CURRENCY,
         year,
         dimensions: dimensions(),
+        units: Vec::new(),
         entries,
     }
 }

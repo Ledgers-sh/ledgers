@@ -208,8 +208,12 @@ pub async fn seed_bank(
     company_id: &str,
     book: &DemoBook,
 ) -> Result<BankSeedReport, String> {
-    let db = deps.db.as_ref();
     let mut report = BankSeedReport::default();
+    // The statement and account are Halden Works': other demo books have their own banks.
+    if book.company != ledgers_demo::halden::COMPANY {
+        return Ok(report);
+    }
+    let db = deps.db.as_ref();
     let (xml, opening) = statement_xml(book);
     let account = match ledgers_bank::store::accounts(db, company_id, true)
         .await

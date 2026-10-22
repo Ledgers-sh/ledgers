@@ -306,6 +306,7 @@ fn make_agent_key(now: OffsetDateTime) -> AgentKey {
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit: None,
     }
 }
 

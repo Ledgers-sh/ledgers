@@ -60,6 +60,10 @@ impl Status {
                 "reason": self.extraction.reason.map(FallbackReason::as_str),
             },
             "unavailable": self.unavailable,
+            "limits": {
+                "document_max_bytes": ledgers_documents::sniff::MAX_BYTES,
+                "pdf_max_pages": ledgers_documents::sniff::MAX_PDF_PAGES,
+            },
         })
     }
 }
@@ -125,4 +129,27 @@ impl Module for StatusModule {
 
 async fn read_status(State(status): State<Arc<Status>>) -> Json<Value> {
     Json(status.to_json())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_read_names_the_document_limits_and_the_reader() {
+        let status = Status {
+            extraction: ExtractionStatus {
+                provider: "rules",
+                configured: Some("minimax".to_owned()),
+                reason: Some(FallbackReason::MissingKey),
+            },
+            unavailable: Vec::new(),
+        };
+        let body = status.to_json();
+        assert_eq!(body["extraction"]["provider"], "rules");
+        assert_eq!(body["extraction"]["configured"], "minimax");
+        assert_eq!(body["extraction"]["reason"], "missing_key");
+        assert_eq!(body["limits"]["document_max_bytes"], 10 * 1024 * 1024);
+        assert_eq!(body["limits"]["pdf_max_pages"], 50);
+    }
 }

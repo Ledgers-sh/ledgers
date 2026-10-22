@@ -448,11 +448,167 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/reports/trends",
             "ledgers reports trends",
         ),
+        entry(
+            "reports.units_summary",
+            "read",
+            "GET",
+            "/v1/reports/units-summary",
+            "ledgers reports units-summary",
+        ),
+        entry(
+            "units.list",
+            "read",
+            "GET",
+            "/v1/units",
+            "ledgers units list",
+        ),
+        entry(
+            "entries.transfer",
+            "post-within-limits",
+            "POST",
+            "/v1/transfers",
+            "ledgers entries transfer",
+        ),
     ];
     commands.extend(human_only_commands());
     commands.extend(approval_commands());
     commands.extend(bank_commands());
+    commands.extend(settings_commands());
     commands
+}
+
+/// The Settings commands: person only. A write is audited with the change in
+/// the same batch; a read writes no audit row. An agent key gets a 403 on both.
+fn settings_commands() -> Vec<CommandDescriptor> {
+    let mut commands = settings_reads();
+    commands.extend(settings_writes());
+    commands
+}
+
+/// One Settings command as a person-only route.
+fn settings_entry(
+    name: &str,
+    tier: &str,
+    method: &str,
+    path: &str,
+    cli: &str,
+) -> CommandDescriptor {
+    CommandDescriptor {
+        human_only: true,
+        idempotent: method == "GET",
+        mcp: None,
+        ..entry(name, tier, method, path, cli)
+    }
+}
+
+/// The Settings reads.
+fn settings_reads() -> Vec<CommandDescriptor> {
+    vec![
+        settings_entry(
+            "company.get",
+            "read",
+            "GET",
+            "/v1/company",
+            "ledgers company get",
+        ),
+        settings_entry(
+            "fiscal_years.list",
+            "read",
+            "GET",
+            "/v1/fiscal-years",
+            "ledgers fiscal-years list",
+        ),
+        settings_entry(
+            "numbering.list",
+            "read",
+            "GET",
+            "/v1/numbering",
+            "ledgers numbering list",
+        ),
+        settings_entry(
+            "tax_settings.get",
+            "read",
+            "GET",
+            "/v1/tax-settings",
+            "ledgers tax-settings get",
+        ),
+        settings_entry(
+            "approval_settings.get",
+            "read",
+            "GET",
+            "/v1/approval-settings",
+            "ledgers approval-settings get",
+        ),
+        settings_entry(
+            "audit.list",
+            "read",
+            "GET",
+            "/v1/audit-events",
+            "ledgers audit list",
+        ),
+    ]
+}
+
+/// The Settings writes, each audited with its change.
+fn settings_writes() -> Vec<CommandDescriptor> {
+    vec![
+        settings_entry(
+            "company.update",
+            "draft",
+            "POST",
+            "/v1/company",
+            "ledgers company update",
+        ),
+        settings_entry(
+            "fiscal_years.create",
+            "draft",
+            "POST",
+            "/v1/fiscal-years",
+            "ledgers fiscal-years create",
+        ),
+        settings_entry(
+            "fiscal_years.close",
+            "draft",
+            "POST",
+            "/v1/fiscal-years/close",
+            "ledgers fiscal-years close",
+        ),
+        settings_entry(
+            "periods.close",
+            "draft",
+            "POST",
+            "/v1/periods/close",
+            "ledgers periods close",
+        ),
+        settings_entry(
+            "periods.reopen",
+            "draft",
+            "POST",
+            "/v1/periods/reopen",
+            "ledgers periods reopen",
+        ),
+        settings_entry(
+            "numbering.set_next",
+            "draft",
+            "POST",
+            "/v1/numbering/next",
+            "ledgers numbering set-next",
+        ),
+        settings_entry(
+            "tax_settings.update",
+            "draft",
+            "POST",
+            "/v1/tax-settings",
+            "ledgers tax-settings update",
+        ),
+        settings_entry(
+            "approval_settings.update",
+            "draft",
+            "POST",
+            "/v1/approval-settings",
+            "ledgers approval-settings update",
+        ),
+    ]
 }
 
 /// A chart-changing command. It is human-only by default: agent keys get a
@@ -501,6 +657,27 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "POST",
             "/v1/keys",
             "ledgers keys create",
+        ),
+        human_entry(
+            "units.create",
+            "draft",
+            "POST",
+            "/v1/units",
+            "ledgers units create",
+        ),
+        human_entry(
+            "units.rename",
+            "draft",
+            "POST",
+            "/v1/units/{code}/rename",
+            "ledgers units rename",
+        ),
+        human_entry(
+            "units.archive",
+            "draft",
+            "POST",
+            "/v1/units/{code}/archive",
+            "ledgers units archive",
         ),
         human_entry(
             "keys.revoke",

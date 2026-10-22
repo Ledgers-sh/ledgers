@@ -38,7 +38,7 @@ import { BankAccounts, BankAccountNew } from './ui/BankAccounts';
 import { BankAccountPage } from './ui/BankAccount';
 import { BankRules } from './ui/BankRules';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
-import { Settings } from './ui/Settings';
+import { Settings, settingsSectionOf } from './ui/Settings';
 import { badgeText } from './lib/approvals';
 import { normaliseRange, type MonthRange } from './lib/trends';
 import { PeriodPicker } from './ui/PeriodPicker';
@@ -56,7 +56,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' || r.startsWith('bills/') },
   { hash: 'bank', label: 'nav.bank', icon: 'bank', match: (r) => r === 'bank' || r.startsWith('bank/') },
-  { hash: 'settings/agent-keys', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
+  { hash: 'settings', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
 
@@ -432,7 +432,7 @@ function renderRoute(route: string) {
   if (route.startsWith('accounts/')) return <AccountDetail number={decodeURIComponent(route.slice('accounts/'.length))} />;
   if (route === 'reports') return <Reports />;
   if (route === 'approvals') return <Approvals />;
-  if (route === 'settings' || route === 'settings/agent-keys') return <Settings section="agent-keys" />;
+  if (route === 'settings' || route.startsWith('settings/')) return <Settings section={settingsSectionOf(route)} />;
   if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
   if (route === 'bills') return <Inbox />;
   if (route.startsWith('bills/')) return <BillReview billId={decodeURIComponent(route.slice('bills/'.length))} />;

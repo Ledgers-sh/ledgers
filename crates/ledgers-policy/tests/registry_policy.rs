@@ -76,6 +76,7 @@ fn test_agent_cannot_change_policy_or_keys() {
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit: None,
     };
 
     // Create policy with the agent key.
