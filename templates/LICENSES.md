@@ -12,6 +12,15 @@ Licence status of every data file bundled in this directory.
 | `i18n/de.toml` | German translations | Original Ledgers data, MIT |
 | `i18n/id.toml` | Indonesian translations | Original Ledgers data, MIT |
 | `i18n/ar.toml` | Arabic translations | Original Ledgers data, MIT |
+| `countries/de/pack.toml` | Country pack | Original Ledgers data, MIT. Statutory rates cite §12 UStG; the 2026 restaurant rate change is a TODO |
+| `countries/sg/pack.toml` | Country pack | Original Ledgers data, MIT. Cites IRAS (GST 9%) and ACRA; zero and history rows are TODO |
+| `countries/id/pack.toml` | Country pack | Original Ledgers data, MIT. Cites PMK 131/2024 and PMK 112/2022; pre-2025 rates are TODO |
+| `countries/nl/pack.toml` | Country pack | Original Ledgers data, MIT. Rates TODO until dated from Belastingdienst |
+| `countries/gb/pack.toml` | Country pack | Original Ledgers data, MIT. Cites GOV.UK (20% from 2011-01-04); other rates TODO |
+| `countries/au/pack.toml` | Country pack | Original Ledgers data, MIT. Rate TODO until dated from the ATO |
+| `countries/us/pack.toml` | Country pack | Original Ledgers data, MIT. No statutory rates; EIN format cites IRS SS-4 |
+| `countries/eu/pack.toml` | Country pack | Original Ledgers data, MIT. No rates shipped; all 27 member states TODO |
+| `countries/generic/pack.toml` | Country pack | Original Ledgers data, MIT. No rates; the company defines its own |
 
 ## Deliberately not bundled
 

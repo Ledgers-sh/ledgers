@@ -118,7 +118,7 @@ fn company_reads_the_books_company_and_saves_its_profile() {
             "name": "Halden Works GmbH",
             "profile": {
                 "legal_form": "GmbH",
-                "vat_id": " de 123.456.789 ",
+                "vat_id": " de 136.695.976 ",
                 "registration_number": "HRB 12345",
                 "address_line": "Hauptstraße 1",
                 "postal_code": "10115",
@@ -129,7 +129,7 @@ fn company_reads_the_books_company_and_saves_its_profile() {
         })),
     ));
     assert_eq!(saved["name"], "Halden Works GmbH");
-    assert_eq!(saved["profile"]["vat_id"], "DE123456789", "normalized");
+    assert_eq!(saved["profile"]["vat_id"], "DE136695976", "normalized");
     assert_eq!(saved["profile"]["country"], "DE");
     let again = ok(&as_owner(&fx, Method::GET, "/v1/company", None));
     assert_eq!(again["profile"]["registration_number"], "HRB 12345");
@@ -409,6 +409,9 @@ fn tax_settings_show_german_rates_and_save_the_basis() {
     ));
     let german = ok(&as_owner(&fx, Method::GET, "/v1/tax-settings", None));
     assert_eq!(german["rate_table"], true);
+    assert_eq!(german["pack"], "de");
+    assert_eq!(german["regime"], "vat");
+    assert_eq!(german["registration_label"], "USt-IdNr.");
     let percents: Vec<&str> = german["rates"]
         .as_array()
         .unwrap()
@@ -436,6 +439,88 @@ fn tax_settings_show_german_rates_and_save_the_basis() {
     assert_eq!(saved["vat_basis"], "cash");
     let events = audit_events(&fx, "command=tax.set_settings");
     assert_eq!(events.len(), 1, "one audited settings change");
+}
+
+#[test]
+fn the_company_country_is_fixed_once_an_entry_is_posted() {
+    let fx = owned();
+    let set_country = |country: &str| {
+        as_owner(
+            &fx,
+            Method::POST,
+            "/v1/company",
+            Some(json!({"name": "Halden Works GmbH", "profile": {"country": country}})),
+        )
+    };
+    assert_eq!(
+        set_country("SG").status.as_u16(),
+        200,
+        "free before any entry"
+    );
+    assert_eq!(
+        post_on(&fx, "country-lock", "2026-10-15").status.as_u16(),
+        200
+    );
+    let text = refused(&set_country("AT"), 422);
+    assert!(text.contains("country"), "names the field: {text}");
+    let kept = ok(&as_owner(&fx, Method::GET, "/v1/company", None));
+    assert_eq!(kept["profile"]["country"], "SG", "unchanged");
+    ok(&as_owner(
+        &fx,
+        Method::POST,
+        "/v1/company",
+        Some(
+            json!({"name": "Halden Works GmbH", "profile": {"country": "SG", "contact_email": "a@b.example"}}),
+        ),
+    ));
+}
+
+#[test]
+fn a_generic_country_takes_its_own_rates_and_a_statutory_one_refuses_them() {
+    let fx = owned();
+    ok(&as_owner(
+        &fx,
+        Method::POST,
+        "/v1/company",
+        Some(json!({"name": "Halden Works GmbH", "profile": {"country": "JP"}})),
+    ));
+    let generic = ok(&as_owner(&fx, Method::GET, "/v1/tax-settings", None));
+    assert_eq!(generic["pack"], "generic");
+    assert_eq!(generic["user_rates_allowed"], true);
+    let saved = ok(&as_owner(
+        &fx,
+        Method::POST,
+        "/v1/tax-settings",
+        Some(json!({
+            "small_business": false,
+            "vat_basis": "accrual",
+            "user_rates": [{"category": "standard", "percent": "10", "valid_from": "2026-01-01", "source": "Local tax office notice"}]
+        })),
+    ));
+    assert_eq!(saved["rates"][0]["percent"], "10");
+    assert_eq!(saved["rates"][0]["source"], "Local tax office notice");
+    let events = audit_events(&fx, "command=tax.set_rates");
+    assert_eq!(events.len(), 1, "the company rates are audited");
+
+    ok(&as_owner(
+        &fx,
+        Method::POST,
+        "/v1/company",
+        Some(
+            json!({"name": "Halden Works GmbH", "profile": {"country": "DE", "vat_id": "DE136695976"}}),
+        ),
+    ));
+    refused(
+        &as_owner(
+            &fx,
+            Method::POST,
+            "/v1/tax-settings",
+            Some(
+                json!({"small_business": false, "vat_basis": "accrual", "user_rates": [{"category": "standard", "percent": "25", "valid_from": "2026-01-01", "source": "x"}]}),
+            ),
+        ),
+        422,
+    );
 }
 
 #[test]

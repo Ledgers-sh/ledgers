@@ -245,3 +245,88 @@ pub async fn set_tax_settings(
 
 // Dummy sleep function for retry compatibility.
 fn no_sleep(_: Duration) {}
+
+/// Stores the company's own tax rates (JSON, under `tax.user_rates`): human-only,
+/// guarded and audited like [`set_tax_settings`]. The caller has validated the
+/// rates against the pack; this only persists them.
+///
+/// # Errors
+///
+/// [`SettingsError::HumanOnly`] for an agent actor, or [`SettingsError::Database`].
+pub async fn set_user_rates(
+    db: &dyn Database,
+    company_id: &str,
+    rates_json: &str,
+    at: &str,
+    audit: &AuditContext,
+    audit_config: &AuditConfig,
+) -> Result<(), SettingsError> {
+    let input = serde_json::json!({ "rates": rates_json });
+    if !audit.actor.is_person() {
+        record(
+            db,
+            audit_config,
+            company_id,
+            audit,
+            &AuditRecord::from_input(
+                "tax.set_rates",
+                &input,
+                Outcome::Denied,
+                vec![company_id.to_owned()],
+                None,
+            )
+            .with_reason("human-only action"),
+            at,
+            RetryPolicy::default(),
+            no_sleep,
+        )
+        .await
+        .map_err(|e| SettingsError::Database(e.to_string()))?;
+        return Err(SettingsError::HumanOnly);
+    }
+    let audited = AuditRecord::from_input(
+        "tax.set_rates",
+        &input,
+        Outcome::Allowed,
+        vec![company_id.to_owned()],
+        None,
+    );
+    retry::run_batch_with_retry(
+        db,
+        RetryPolicy::default(),
+        || {
+            let audit = audit.clone();
+            let audited = audited.clone();
+            let company_id = company_id.to_owned();
+            let at = at.to_owned();
+            let rates_json = rates_json.to_owned();
+
+            async move {
+                let head = chain::read_head(db, &company_id).await?;
+                let appended =
+                    append_statements(&company_id, &head, &audit, &audited, &at, audit_config)
+                        .map_err(|e| DbError::Query(e.to_string()))?;
+                let upsert = Statement::with_values(
+                    "INSERT INTO company_setting (company_id, key, value, updated_at) \
+                     VALUES (?, ?, ?, ?) \
+                     ON CONFLICT (company_id, key) DO UPDATE SET \
+                       value = excluded.value, updated_at = excluded.updated_at"
+                        .to_owned(),
+                    vec![
+                        SeaValue::from(company_id.as_str()),
+                        SeaValue::from("tax.user_rates"),
+                        SeaValue::from(rates_json.as_str()),
+                        SeaValue::from(at.as_str()),
+                    ],
+                );
+                let mut statements = vec![upsert];
+                statements.extend(appended.statements);
+                Ok(statements)
+            }
+        },
+        no_sleep,
+    )
+    .await
+    .map_err(|e| SettingsError::Database(e.to_string()))?;
+    Ok(())
+}
