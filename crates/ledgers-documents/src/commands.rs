@@ -179,7 +179,12 @@ fn validate(input: &RegisterInput) -> Result<(), CommandError> {
     }
     if !matches!(
         input.mime.as_str(),
-        "application/pdf" | "image/png" | "image/jpeg"
+        "application/pdf"
+            | "image/png"
+            | "image/jpeg"
+            | "application/xml"
+            | "text/plain"
+            | "text/csv"
     ) {
         return Err(CommandError::InvalidInput(format!(
             "mime {} is not stored",

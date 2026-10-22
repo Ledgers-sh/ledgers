@@ -1,0 +1,11 @@
+Kontoauszug Girokonto (anonymisiert)
+Zeitraum;01.03.2026 - 31.03.2026
+Anfangssaldo;12500,00;EUR
+Buchungstag;Valuta;Auftraggeber/Empfaenger;Buchungstext;Verwendungszweck;Betrag;Waehrung
+02.03.2026;02.03.2026;Halden Supplies GmbH;LASTSCHRIFT;"Rechnung 4711; Stahltraeger";-1.234,50;EUR
+03.03.2026;03.03.2026;Nordlicht Office GmbH;GUTSCHRIFT;RE 2026-031 Projekt Nord;4.200,00;EUR
+05.03.2026;05.03.2026;Stadtwerke Beispiel AG;LASTSCHRIFT;"Strom Kd.-Nr. 8812
+02/2026";-89,90;EUR
+10.03.2026;10.03.2026;Halden Supplies GmbH;UEBERWEISUNG;Rechnung 4790 Schrauben;-310,00;EUR
+14.03.2026;14.03.2026;Acme GmbH;GUTSCHRIFT;Anzahlung Auftrag 22;1.500,00;EUR
+27.03.2026;27.03.2026;;ENTGELT;Kontofuehrungsentgelt Maerz;-25,00;EUR
