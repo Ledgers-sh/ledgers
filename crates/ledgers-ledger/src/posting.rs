@@ -32,6 +32,7 @@
 //! new entries whose `reverses` names the original, read back through
 //! [`crate::entry::reversed_by`].
 
+use crate::dimension;
 use crate::entry::{Entry, JournalError, Line, iso_date_string};
 use cratefield_core::{Database, DbError, Statement};
 use ledgers_audit::{AuditConfig, AuditContext, AuditRecord, Outcome, append_statements};
@@ -42,7 +43,7 @@ use ledgers_db::numbering;
 use ledgers_db::outbox::OUTBOX_TABLE;
 use ledgers_db::period::{self, assert_postable_statement};
 use ledgers_db::retry::{self, RetryPolicy};
-use ledgers_money::Currency;
+use ledgers_money::{Amount, Currency};
 use sea_query::Value as SeaValue;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -172,7 +173,7 @@ impl RawLine {
     /// # Errors
     /// [`JournalError::Money`] when a signed minor unit does not fit
     /// an `i64`.
-    fn from_line(line: &Line, base_currency: Currency) -> Result<Self, JournalError> {
+    pub fn from_line(line: &Line, base_currency: Currency) -> Result<Self, JournalError> {
         let narrow = |minor: i128| -> Result<i64, JournalError> {
             i64::try_from(minor)
                 .map_err(|_| JournalError::Money(ledgers_money::MoneyError::Overflow))
@@ -277,6 +278,7 @@ pub async fn plan_post_batch(
 /// As [`plan_post_batch`], plus [`DbError`] when `created_at` does not
 /// start with a `YYYY-MM-DD` date and a daily allowance is requested.
 #[doc(hidden)]
+#[allow(clippy::too_many_lines)]
 pub async fn plan_post_batch_statements_only(
     db: &dyn Database,
     raw: &RawEntry,
@@ -300,7 +302,65 @@ pub async fn plan_post_batch_statements_only(
     period_of("document_date", &raw.document_date)?;
     let vat_period = period_of("tax_point_date", &raw.tax_point_date)?;
 
-    let mut statements = Vec::with_capacity(raw.lines.len() + 15);
+    // Handle dimensions: read own-books units and clearing account, generate
+    // clearing lines if needed. We do this before building the batch so the
+    // posted entry includes the clearing lines.
+    let own_books_units = read_own_books_units(db, &raw.company_id).await?;
+    let mut raw = raw.clone();
+    let mut clearing_lines = Vec::new();
+
+    if !own_books_units.is_empty()
+        && let Some(clearing_account) = read_clearing_account(db, &raw.company_id).await?
+    {
+        let base_currency = ledgers_money::Currency::from_code(&raw.base_currency)
+            .map_err(|e| DbError::Query(format!("invalid base_currency: {e}")))?;
+
+        // Convert lines to domain type for clearing calculation.
+        let domain_lines: Vec<Line> = raw
+            .lines
+            .iter()
+            .map(|raw_line| {
+                let side = if raw_line.base_minor > 0 {
+                    crate::Side::Debit
+                } else {
+                    crate::Side::Credit
+                };
+                Line {
+                    account_number: raw_line.account_number.clone(),
+                    side,
+                    base: Amount::from_i64(raw_line.base_minor.abs(), base_currency),
+                    fx: None,
+                    tax_code: raw_line.tax_code.clone(),
+                    dimensions: raw_line.dimensions.clone(),
+                    memo: raw_line.memo.clone(),
+                }
+            })
+            .collect();
+
+        match dimension::clearing_lines_for_units(
+            &domain_lines,
+            &own_books_units,
+            &clearing_account,
+            base_currency,
+        ) {
+            Ok(lines) => {
+                for line in lines {
+                    match RawLine::from_line(&line, base_currency) {
+                        Ok(raw_line) => clearing_lines.push(raw_line),
+                        Err(e) => return Err(DbError::Query(format!("clearing line: {e}"))),
+                    }
+                }
+            }
+            Err(e) => {
+                // Money overflow in clearing calculation.
+                return Err(DbError::Query(format!("clearing line calculation: {e}")));
+            }
+        }
+    }
+
+    raw.lines.extend(clearing_lines);
+
+    let mut statements = Vec::with_capacity(raw.lines.len() + 30);
 
     // 1. Gapless numbering: provision (idempotent), bump, insert with
     //    literal number, then guard to verify the counter matches.
@@ -310,7 +370,7 @@ pub async fn plan_post_batch_statements_only(
     ));
     statements.push(numbering::bump_statement(&raw.journal_id, ctx.fiscal_year));
     statements.push(entry_insert_statement(
-        raw,
+        &raw,
         ctx,
         &vat_period,
         expected_number,
@@ -331,9 +391,28 @@ pub async fn plan_post_batch_statements_only(
         expected_number,
     ));
 
-    // 2. The lines, 1-based, in order.
+    // 2. The lines, 1-based, in order, plus normalized dimension rows.
     for (index, line) in raw.lines.iter().enumerate() {
         statements.push(line_insert(ctx.entry_id.as_str(), index, line));
+
+        // Insert normalized dimension rows for this line.
+        let line_no = index + 1;
+        for (kind, value) in &line.dimensions {
+            // Only normalize the three known kinds: unit, cost_centre, project.
+            if ["unit", "cost_centre", "project"].contains(&kind.as_str()) {
+                statements.push(Statement::with_values(
+                    "INSERT INTO journal_line_dimension (company_id, entry_id, line_no, kind, value) VALUES (?, ?, ?, ?, ?)"
+                        .to_owned(),
+                    vec![
+                        SeaValue::from(raw.company_id.as_str()),
+                        SeaValue::from(ctx.entry_id.as_str()),
+                        SeaValue::BigInt(Some(i64::try_from(line_no).expect("line count fits in i64"))),
+                        SeaValue::from(kind.as_str()),
+                        SeaValue::from(value.as_str()),
+                    ],
+                ));
+            }
+        }
     }
 
     // 3–8. The write-time checks and their releases.
@@ -342,7 +421,7 @@ pub async fn plan_post_batch_statements_only(
         .as_ref()
         .map(|_| meter_day(&ctx.recorded_at))
         .transpose()?;
-    statements.extend(guard_statements(raw, ctx, &posting_period, options, day));
+    statements.extend(guard_statements(&raw, ctx, &posting_period, options, day));
 
     // 9. The outbox enqueue: the event exists exactly when the posting
     //     commits. The payload names the entry and its number.
@@ -350,7 +429,7 @@ pub async fn plan_post_batch_statements_only(
         cratefield_core::Outbox::new(OUTBOX_TABLE).enqueue_statement(
             &ctx.outbox_id,
             TOPIC_ENTRY_POSTED,
-            &outbox_payload(raw, ctx, &vat_period),
+            &outbox_payload(&raw, ctx, &vat_period),
             None,
             &ctx.recorded_at,
         ),
@@ -467,16 +546,53 @@ fn entry_insert_statement(
     )
 }
 
+/// Reads own-books unit codes from the company.
+async fn read_own_books_units(db: &dyn Database, company_id: &str) -> Result<Vec<String>, DbError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT code FROM dimension_value WHERE company_id = ? AND kind = ? AND own_books = 1"
+                .to_owned(),
+            vec![SeaValue::from(company_id), SeaValue::from("unit")],
+        ))
+        .await?;
+    let mut units = Vec::new();
+    for row in &rows.rows {
+        if let Some(code) = row.get::<String>("code") {
+            units.push(code);
+        }
+    }
+    Ok(units)
+}
+
+/// Reads the single inter-unit-clearing account: must be exactly one
+/// unarchived leaf tagged with `inter-unit-clearing`.
+async fn read_clearing_account(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<Option<String>, DbError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT number FROM account WHERE company_id = ? AND archived = 0 AND tags LIKE '%inter-unit-clearing%' \
+             AND NOT EXISTS (SELECT 1 FROM account AS child WHERE child.parent_number = account.number)"
+                .to_owned(),
+            vec![SeaValue::from(company_id)],
+        ))
+        .await?;
+    Ok(rows.first().and_then(|row| row.get::<String>("number")))
+}
+
 /// The write-time checks — guard statements, never read-then-write —
 /// plus their releases, in firing order: journal ownership (the
 /// journal must belong to the posting company — company A cannot
 /// consume company B's number sequence), the reversal target when set
 /// (same company), the period-open guard (fails closed, so a closed OR
 /// unknown period refuses), the accounts guard (every line's account
-/// exists and is not archived), and the balanced guard (≥ 2 lines,
+/// exists and is not archived), the balanced guard (≥ 2 lines,
 /// base sums to zero, a single transaction currency sums to zero; a
 /// mixed-currency entry — a genuine FX trade — escapes the third
-/// conjunct through `<> 1` and balances in base only, by design).
+/// conjunct through `<> 1` and balances in base only, by design),
+/// dimension guards (required/forbidden/known values), and per-unit balance.
+#[allow(clippy::too_many_lines)]
 fn guard_statements(
     raw: &RawEntry,
     ctx: &PostContext,
@@ -581,7 +697,101 @@ fn guard_statements(
         ));
     }
 
-    // Release all guards in order: journal, reversals, period, accounts, balance
+    // Dimension guards: required, forbidden, known values.
+    let dimension_required_key = guard::guard_key(&["dimension-required", entry_id]);
+    let dimension_forbidden_key = guard::guard_key(&["dimension-forbidden", entry_id]);
+    let dimension_known_key = guard::guard_key(&["dimension-known", entry_id]);
+
+    // For each dimension kind that has a "required" rule, no line on an account
+    // with that rule can lack the dimension.
+    statements.push(guard::assert_statement(
+        &dimension_required_key,
+        &format!(
+            "(SELECT COUNT(*) FROM {LINE_TABLE} jl \
+             WHERE jl.entry_id = ? \
+             AND EXISTS (SELECT 1 FROM account_dimension_rule \
+                        WHERE company_id = ? AND account_number = jl.account_number \
+                        AND rule = 'required' \
+                        AND NOT EXISTS (SELECT 1 FROM journal_line_dimension \
+                                       WHERE company_id = ? AND entry_id = ? \
+                                       AND line_no = jl.line_no \
+                                       AND kind = account_dimension_rule.kind))) = 0"
+        ),
+        vec![
+            SeaValue::from(entry_id),
+            SeaValue::from(company),
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+        ],
+    ));
+    statements.push(guard::release_statement(&dimension_required_key));
+
+    // For each line, it must not carry a dimension its account forbids.
+    statements.push(guard::assert_statement(
+        &dimension_forbidden_key,
+        &format!(
+            "(SELECT COUNT(*) FROM journal_line_dimension jld \
+             WHERE jld.entry_id = ? \
+             AND EXISTS (SELECT 1 FROM account_dimension_rule \
+                        WHERE company_id = ? AND account_number = \
+                        (SELECT account_number FROM {LINE_TABLE} WHERE entry_id = ? AND line_no = jld.line_no) \
+                        AND kind = jld.kind AND rule = 'forbidden')) = 0"
+        ),
+        vec![
+            SeaValue::from(entry_id),
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+        ],
+    ));
+    statements.push(guard::release_statement(&dimension_forbidden_key));
+
+    // Every dimension value on a line must exist in dimension_value for the company.
+    statements.push(guard::assert_statement(
+        &dimension_known_key,
+        "(SELECT COUNT(*) FROM journal_line_dimension jld \
+         WHERE jld.company_id = ? \
+         AND jld.entry_id = ? \
+         AND NOT EXISTS (SELECT 1 FROM dimension_value dv \
+                        WHERE dv.company_id = ? AND dv.kind = jld.kind AND dv.code = jld.value)) = 0",
+        vec![
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+            SeaValue::from(company),
+        ],
+    ));
+    statements.push(guard::release_statement(&dimension_known_key));
+
+    // Per-unit balance: for each own-books unit in this entry, its lines must net to zero in base.
+    // Count how many own-books units have unbalanced lines in this entry.
+    let dimension_balance_key = guard::guard_key(&["dimension-balance", entry_id]);
+    statements.push(guard::assert_statement(
+        &dimension_balance_key,
+        &format!(
+            "(SELECT COUNT(*) FROM ( \
+             SELECT dv.code \
+             FROM dimension_value dv \
+             WHERE dv.company_id = ? AND dv.kind = 'unit' AND dv.own_books = 1 \
+             AND EXISTS (SELECT 1 FROM journal_line_dimension jld \
+                        WHERE jld.company_id = ? AND jld.entry_id = ? \
+                        AND jld.kind = 'unit' AND jld.value = dv.code) \
+             ) own_unit_in_entry \
+             WHERE (SELECT COALESCE(SUM(jl.base_minor), 0) FROM {LINE_TABLE} jl \
+                   WHERE jl.entry_id = ? \
+                   AND EXISTS (SELECT 1 FROM journal_line_dimension jld \
+                              WHERE jld.entry_id = jl.entry_id \
+                              AND jld.line_no = jl.line_no \
+                              AND jld.kind = 'unit' AND jld.value = own_unit_in_entry.code)) != 0) = 0"
+        ),
+        vec![
+            SeaValue::from(company),
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+            SeaValue::from(entry_id),
+        ],
+    ));
+    statements.push(guard::release_statement(&dimension_balance_key));
+
+    // Release all guards in order: journal, reversals, period, accounts, balance, dimensions
     statements.push(guard::release_statement(&journal_key));
     for key in reversal_release_keys {
         statements.push(guard::release_statement(&key));
@@ -840,7 +1050,7 @@ pub async fn post_raw_entry_with(
             ledgers_db::GuardError::Database(db_error) if is_guard_refusal(&db_error) => {
                 // Reads after a failed write (ADR 0004): the batch is
                 // gone; these only choose which error the caller reads.
-                diagnose_refusal(db, raw, options)
+                diagnose_refusal(db, raw, options, &ctx.entry_id)
                     .await
                     .unwrap_or(JournalError::Database(db_error))
             }
@@ -958,10 +1168,12 @@ async fn diagnose_reversal_guards(
 /// nothing attributable is found (an unbalanced raw entry, or a read
 /// that itself failed) — the caller then keeps the original database
 /// error, which is the honest answer for both.
+#[allow(clippy::too_many_lines)]
 async fn diagnose_refusal(
     db: &dyn Database,
     raw: &RawEntry,
     options: &PostOptions,
+    _entry_id: &str,
 ) -> Option<JournalError> {
     async fn scalar(db: &dyn Database, statement: Statement) -> Option<i64> {
         let rows = db.query(&statement).await.ok()?;
@@ -1055,6 +1267,30 @@ async fn diagnose_refusal(
             });
         }
     }
+
+    // TODO: Dimension diagnosis (required, forbidden, unknown-value) - the Rows type
+    // does not support iteration, so diagnosis of dimension-related guard failures
+    // would require a different API or workaround.
+
+    // Diagnose per-unit balance: check the raw entry's dimensions to find unbalanced units.
+    // For each own-books unit that has lines in this entry, sum the base_minor of those lines.
+    let own_books_units = read_own_books_units(db, company).await.ok()?;
+    if !own_books_units.is_empty() {
+        let mut unit_sums: BTreeMap<String, i64> = BTreeMap::new();
+        for line in &raw.lines {
+            if let Some(unit) = line.dimensions.get("unit")
+                && own_books_units.contains(unit)
+            {
+                *unit_sums.entry(unit.clone()).or_insert(0) += line.base_minor;
+            }
+        }
+        for (unit, sum) in unit_sums {
+            if sum != 0 {
+                return Some(JournalError::UnitUnbalanced { unit });
+            }
+        }
+    }
+
     None
 }
 
