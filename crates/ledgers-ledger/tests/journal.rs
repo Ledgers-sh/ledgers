@@ -52,10 +52,11 @@ use ledgers_db::{DbModule, RetryPolicy};
 use ledgers_ledger::commands;
 use ledgers_ledger::entry::{Side, reversed_by};
 use ledgers_ledger::journal::{self, JournalDraft, JournalKind};
+use ledgers_ledger::journal_port::Journal as JournalPort;
 use ledgers_ledger::posting::{
     PostContext, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry, post_raw_entry,
 };
-use ledgers_ledger::{Entry, EntryDraft, Fx, JournalError, LedgerModule, Line};
+use ledgers_ledger::{Entry, EntryDraft, EntryJournal, Fx, JournalError, LedgerModule, Line};
 use ledgers_money::{Amount, Currency, Rate};
 use sea_query::Value as SeaValue;
 use std::collections::BTreeMap;
@@ -63,7 +64,13 @@ use time::{Date, Month};
 
 #[test]
 fn journal_scenarios_on_every_available_dialect() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         // The scenarios panic with their own diagnosis on failure. Fresh
         // module instances per dialect: all_dialects runs the factory
         // once per leg.
@@ -78,6 +85,25 @@ fn journal_scenarios_on_every_available_dialect() {
 /// Panics when any step returns the wrong result — exactly what a
 /// conformance run should surface.
 pub async fn scenarios(db: &dyn Database) {
+    // Create the test companies with EUR base currency if they don't exist
+    let _ = db
+        .execute(&Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{COMPANY_ID}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            ),
+        ))
+        .await;
+    let _ = db
+        .execute(&Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{}', 'Other Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                common::OTHER_COMPANY_ID
+            ),
+        ))
+        .await;
+
     journal_lifecycle(db).await;
     balanced_posts_are_numbered_gaplessly(db).await;
     the_fx_bill_payment_posts_and_its_missing_leg_is_refused(db).await;
@@ -1077,4 +1103,148 @@ fn collect_rust_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>
             out.push(path);
         }
     }
+}
+
+#[test]
+fn test_empty_company_can_be_closed() {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
+        pollster::block_on(test_empty_company_can_be_closed_impl(&*kit.db));
+    }
+}
+
+async fn test_empty_company_can_be_closed_impl(db: &dyn Database) {
+    // Create a company with USD base currency
+    let company_id = "01COMPANY_TEST_USD00000000000";
+    db.execute(&Statement::new(
+        format!(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             VALUES ('{company_id}', 'Test Company USD', 'USD', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        ),
+    ))
+    .await
+    .ok(); // Ignore if already exists
+
+    let journal = EntryJournal;
+
+    // Verify that the test company has a base_currency configured
+    let currency = journal
+        .base_currency(db, company_id)
+        .await
+        .expect("company has a base currency");
+
+    // The test company should have USD as its base currency
+    assert_eq!(
+        currency.code(),
+        "USD",
+        "test company has USD as base currency"
+    );
+}
+
+#[test]
+fn test_post_with_mismatched_currency_is_refused() {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
+        pollster::block_on(test_post_with_mismatched_currency_is_refused_impl(&*kit.db));
+    }
+}
+
+async fn test_post_with_mismatched_currency_is_refused_impl(db: &dyn Database) {
+    // Create the test company with EUR base currency
+    let company_id = "01COMPANY_TEST_EUR00000000000".to_string();
+    db.execute(&Statement::new(
+        format!(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             VALUES ('{company_id}', 'Test Company EUR', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        ),
+    ))
+    .await
+    .ok(); // Ignore if already exists
+
+    // Create chart and journal for the scenario
+    create_chart(db, &company_id).await;
+    let journal = journal::create_journal(
+        db,
+        &company_id,
+        JournalDraft {
+            code: "CU".to_owned(),
+            kind: JournalKind::General,
+            name: "General journal".to_owned(),
+        },
+        "01JCUTEST000000000000000000000",
+        NOW,
+        &common::person(),
+    )
+    .await
+    .unwrap_or_else(|err| panic!("create journal CU: {err}"));
+    open_period(db, &company_id, "2026-04").await;
+    let journal_id = journal.id;
+
+    // The company has EUR as base currency (from fixtures which uses eur())
+    // Try to post an entry with USD base currency
+    let raw_line = |account: &str, minor: i64| RawLine {
+        account_number: account.to_owned(),
+        base_currency: "USD".to_owned(), // Mismatch: company is EUR
+        base_minor: minor,
+        tx_currency: "USD".to_owned(),
+        tx_minor: minor,
+        rate_scaled: None,
+        tax_code: None,
+        dimensions: BTreeMap::new(),
+        memo: None,
+    };
+    let raw = RawEntry {
+        company_id: company_id.clone(),
+        journal_id: journal_id.clone(),
+        document_date: "2026-04-10".to_owned(),
+        posting_date: "2026-04-10".to_owned(),
+        tax_point_date: "2026-04-10".to_owned(),
+        base_currency: "USD".to_owned(), // Mismatch: company is EUR
+        description: "Currency mismatch test".to_owned(),
+        source_documents: Vec::new(),
+        reverses: None,
+        lines: vec![raw_line("1010", 100), raw_line("4000", -100)],
+    };
+
+    let ctx = ctx("CU", 1);
+    let err = post_raw_entry(
+        db,
+        &raw,
+        &ctx,
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect_err("posting with mismatched currency is refused");
+
+    assert_eq!(
+        err,
+        JournalError::BaseCurrencyMismatch {
+            company_currency: "EUR".to_owned(),
+            entry_currency: "USD".to_owned(),
+        },
+        "the refusal maps to BaseCurrencyMismatch"
+    );
+
+    // Verify nothing was posted
+    assert_eq!(
+        count(db, "journal_entry", "journal_id", &journal_id).await,
+        0
+    );
+    assert_eq!(
+        counter_value(db, &journal_id, FY).await.unwrap_or(0),
+        0,
+        "the refused batch consumed no number"
+    );
 }

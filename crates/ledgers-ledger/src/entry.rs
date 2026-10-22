@@ -585,6 +585,17 @@ pub enum JournalError {
     #[error("reversing a human-posted entry is human-only; an agent key cannot perform it")]
     HumanOnlyReversal,
 
+    /// The entry's base currency does not match the company's base currency.
+    #[error(
+        "entry base currency {entry_currency} does not match company base currency {company_currency}"
+    )]
+    BaseCurrencyMismatch {
+        /// The company's base currency code.
+        company_currency: String,
+        /// The entry's base currency code.
+        entry_currency: String,
+    },
+
     /// The entry id was already used to post an entry to a different
     /// journal. Entry ids are idempotency keys: a resubmit with the same
     /// id returns the original entry (if it posted) or lets it post again
@@ -718,6 +729,13 @@ impl JournalError {
             JournalError::FxSameCurrency { currency } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("currency", currency.clone()),
+            JournalError::BaseCurrencyMismatch {
+                company_currency,
+                entry_currency,
+            } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("companyCurrency", company_currency.clone())
+                .with_extension("entryCurrency", entry_currency.clone()),
             JournalError::InvalidJournalCode { code, .. } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("code", code.clone()),

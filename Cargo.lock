@@ -1879,6 +1879,7 @@ dependencies = [
  "ledgers-commands",
  "ledgers-db",
  "ledgers-money",
+ "ledgers-storage",
  "pollster",
  "schemars",
  "sea-query",

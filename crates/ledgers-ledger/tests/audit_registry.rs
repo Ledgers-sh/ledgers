@@ -191,6 +191,17 @@ fn every_mutating_or_denied_command_writes_exactly_one_audit_event() {
         // company, and each case asserts on the tail it caused, keeps
         // the chain order assertions honest and the setup readable.
         let company = COMPANY_ID;
+
+        // Create the company with EUR base currency
+        let _ = db
+            .execute(&Statement::new(
+                format!(
+                    "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                     VALUES ('{company}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+                ),
+            ))
+            .await;
+
         // The posting cases need somewhere to post into, and the year
         // they post in.
         common::mount(db, company).await;

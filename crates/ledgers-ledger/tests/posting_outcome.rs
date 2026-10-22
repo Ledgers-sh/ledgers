@@ -25,7 +25,13 @@ const JOURNAL_2: &str = "01JRN00000000000000000000000002";
 
 #[test]
 fn idempotent_resubmit_returns_same_entry_and_posts_nothing_new() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
             // The fixtures are audited too: count the chain from here.
@@ -81,7 +87,13 @@ fn idempotent_resubmit_returns_same_entry_and_posts_nothing_new() {
 
 #[test]
 fn entry_id_already_used_in_different_journal_is_rejected() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
             set_up_journal(&kit.db, JOURNAL_2).await;
@@ -127,7 +139,13 @@ fn entry_id_already_used_in_different_journal_is_rejected() {
 
 #[test]
 fn a_failure_after_commit_still_reports_the_number() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
             let entry = the_entry(JOURNAL_1);
@@ -159,7 +177,13 @@ fn a_failure_after_commit_still_reports_the_number() {
 
 #[test]
 fn an_ambiguous_commit_resubmitted_with_the_same_id_returns_the_original() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(async {
             set_up(&kit.db, JOURNAL_1).await;
             // The fixtures are audited too: count the chain from here.
@@ -312,6 +336,17 @@ impl Database for FailureWrapper {
 }
 
 async fn set_up(db: &Arc<dyn Database>, journal_id: &str) {
+    // Create the company with EUR base currency
+    let _ = db
+        .as_ref()
+        .execute(&Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{COMPANY_ID}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            ),
+        ))
+        .await;
+
     create_chart(db.as_ref(), COMPANY_ID).await;
     set_up_journal(db, journal_id).await;
 }
