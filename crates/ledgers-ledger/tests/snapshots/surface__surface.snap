@@ -231,6 +231,20 @@ expression: registry.to_json()
                 "type": "string"
               }
             },
+            "external_id": {
+              "description": "External ID from the source application (for idempotency).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_app": {
+              "description": "The application that posted this entry.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "reverses": {
               "description": "Entry this reverses, if any.",
               "type": [

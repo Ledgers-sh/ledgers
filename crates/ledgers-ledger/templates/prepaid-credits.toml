@@ -1,0 +1,82 @@
+# Prepaid credits SaaS chart: a journal template for companies managing
+# deferred revenue through customer prepaid credit accounts.
+#
+# This chart tracks payment processor float, credit recognition as revenue,
+# promotional credit adjustments, and payment processing costs. Suited for
+# SaaS platforms, app stores, digital marketplaces, and other businesses
+# with credit-based purchasing and fulfillment.
+#
+# Original Ledgers data, MIT-licensed with the repository licence.
+
+id = "prepaid-credits"
+name = "template.prepaid_credits.name"
+version = 1
+
+# --- Assets: Payment Processing ------------------------------------------------
+
+[[accounts]]
+number = "2100"
+name = "account.prepaid_credits.payment_processor_assets"
+type = "asset"
+
+[[accounts]]
+number = "2110"
+name = "account.prepaid_credits.cash_at_payment_processor"
+type = "asset"
+parent = "2100"
+tags = ["cash", "processor"]
+
+[[accounts]]
+number = "2120"
+name = "account.prepaid_credits.pending_payouts"
+type = "asset"
+parent = "2100"
+tags = ["payouts", "processor"]
+
+# --- Liabilities: Deferred Revenue and Adjustments ----------------------------
+
+[[accounts]]
+number = "2800"
+name = "account.prepaid_credits.promotional_credits"
+type = "liability"
+tags = ["promotional"]
+
+[[accounts]]
+number = "4100"
+name = "account.prepaid_credits.deferred_revenue"
+type = "liability"
+tags = ["deferred-revenue"]
+
+# --- Revenue: Recognition as Credits Are Used --------------------------------
+
+[[accounts]]
+number = "4200"
+name = "account.prepaid_credits.revenue"
+type = "income"
+tags = ["revenue", "operating"]
+
+[[accounts]]
+number = "4300"
+name = "account.prepaid_credits.revenue_by_category"
+type = "income"
+tags = ["revenue", "breakdown"]
+
+# --- Expenses: Payment Processing and Fulfillment ----------------------------
+
+[[accounts]]
+number = "5100"
+name = "account.prepaid_credits.payment_processing_fees"
+type = "expense"
+tags = ["fees", "processor"]
+
+[[accounts]]
+number = "5200"
+name = "account.prepaid_credits.cost_of_revenue_by_provider"
+type = "expense"
+tags = ["cogs", "provider"]
+
+[[accounts]]
+number = "5300"
+name = "account.prepaid_credits.refunds"
+type = "expense"
+tags = ["refunds", "adjustment"]

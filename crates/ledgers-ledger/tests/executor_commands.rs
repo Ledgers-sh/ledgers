@@ -213,6 +213,8 @@ fn owner_posts_balanced_entry_succeeds() {
                 base_currency: "EUR".to_string(),
                 description: "test post".to_string(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![
                     SerializableLine {
@@ -303,6 +305,8 @@ fn agent_exceeding_limit_needs_approval() {
                 base_currency: "EUR".to_string(),
                 description: "over limit".to_string(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![
                     SerializableLine {
@@ -390,6 +394,8 @@ fn dryrun_returns_preview_without_posting() {
                 base_currency: "EUR".to_string(),
                 description: "dry run test".to_string(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![
                     SerializableLine {
@@ -476,6 +482,8 @@ fn agent_with_draft_tier_denied() {
                 base_currency: "EUR".to_string(),
                 description: "draft agent post".to_string(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![
                     SerializableLine {
@@ -555,6 +563,8 @@ fn idempotent_replay_same_entry_id() {
                 base_currency: "EUR".to_string(),
                 description: "idempotent test".to_string(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![
                     SerializableLine {

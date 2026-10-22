@@ -168,6 +168,8 @@ impl StoredEntryDraft {
             base_currency,
             description: self.description,
             source_documents: self.source_documents,
+            external_id: None,
+            source_app: None,
             reverses: self.reverses,
             lines,
         })

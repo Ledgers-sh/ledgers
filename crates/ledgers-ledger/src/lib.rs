@@ -76,6 +76,7 @@ pub mod period;
 pub mod posting;
 pub mod recurring;
 pub mod registry;
+pub mod report;
 pub mod reversal;
 pub mod store;
 pub mod surface;
@@ -103,6 +104,10 @@ pub use period::{
 };
 pub use posting::{PostContext, PostedEntry, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry};
 pub use registry::{COMMANDS, CommandKind, CommandSpec, EXEMPT};
+pub use report::{
+    BalanceSheet, DimensionBalance, ProfitAndLoss, TrialBalanceRow, account_balance_by_dimension,
+    balance_sheet, profit_and_loss, trial_balance,
+};
 pub use reversal::{ReverseContext, reverse_entry};
 
 /// The generic small-business chart (`templates/generic-sme.toml`).
@@ -140,6 +145,16 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "entries_lifecycle",
         include_str!("../migrations/sqlite/0004_entries_lifecycle.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "external_id",
+        include_str!("../migrations/sqlite/0005_external_id.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0006",
+        "source_app",
+        include_str!("../migrations/sqlite/0006_source_app.sql"),
+    ),
 ];
 
 /// The Postgres override set: identical DDL for the tables, and the
@@ -166,6 +181,16 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0004",
         "entries_lifecycle",
         include_str!("../migrations/postgres/0004_entries_lifecycle.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "external_id",
+        include_str!("../migrations/postgres/0005_external_id.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0006",
+        "source_app",
+        include_str!("../migrations/postgres/0006_source_app.sql"),
     ),
 ];
 
@@ -214,7 +239,7 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 4);
+            assert_eq!(set.len(), 6);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
@@ -223,6 +248,10 @@ mod tests {
             assert_eq!(set[2].name, "fiscal_year");
             assert_eq!(set[3].id, "0004");
             assert_eq!(set[3].name, "entries_lifecycle");
+            assert_eq!(set[4].id, "0005");
+            assert_eq!(set[4].name, "external_id");
+            assert_eq!(set[5].id, "0006");
+            assert_eq!(set[5].name, "source_app");
         }
     }
 

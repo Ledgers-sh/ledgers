@@ -185,6 +185,10 @@ pub struct SerializableEntryDraft {
     pub description: String,
     /// Source document links.
     pub source_documents: Vec<String>,
+    /// External ID from the source application (for idempotency).
+    pub external_id: Option<String>,
+    /// The application that posted this entry.
+    pub source_app: Option<String>,
     /// Entry this reverses, if any.
     pub reverses: Option<String>,
     /// The entry lines.
@@ -282,6 +286,8 @@ impl SerializableEntryDraft {
             base_currency,
             description: self.description,
             source_documents: self.source_documents,
+            external_id: self.external_id,
+            source_app: self.source_app,
             reverses: self.reverses,
             lines,
         })

@@ -166,6 +166,8 @@ fn draft(journal_id: &str, lines: Vec<Line>) -> EntryDraft {
         base_currency: eur(),
         description: "Scenario entry".to_owned(),
         source_documents: Vec::new(),
+        external_id: None,
+        source_app: None,
         reverses: None,
         lines,
     }

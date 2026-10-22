@@ -190,6 +190,8 @@ fn api_entry(journal_id: &str, date: &str, number: &str) -> Entry {
             base_currency: eur(),
             description: format!("api entry {number}"),
             source_documents: Vec::new(),
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines: vec![line("1010", Side::Debit), line("4000", Side::Credit)],
         },
