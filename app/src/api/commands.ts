@@ -21,6 +21,7 @@ import type {
   ProfitAndLossOutput,
   ReverseEntryInput,
   TrialBalanceOutput,
+  TrendsOutput,
 } from './types';
 
 export type Config = ClientConfig;
@@ -156,6 +157,18 @@ export function reportsBalanceSheet(config: Config, asOf: string): Promise<Balan
     method: 'GET',
     path: '/v1/reports/balance-sheet',
     query: { as_of: asOf },
+  });
+}
+
+/** GET /v1/reports/trends?from=YYYY-MM&to=YYYY-MM[&dimension=cost_centre|project] (reports.trends). */
+export function reportsTrends(
+  config: Config,
+  params: { from: string; to: string; dimension?: string },
+): Promise<TrendsOutput> {
+  return request<TrendsOutput>(config, {
+    method: 'GET',
+    path: '/v1/reports/trends',
+    query: params.dimension ? { from: params.from, to: params.to, dimension: params.dimension } : { from: params.from, to: params.to },
   });
 }
 

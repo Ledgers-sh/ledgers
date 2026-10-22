@@ -569,6 +569,10 @@ impl Dispatch for ServerDispatch {
                 self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
             }
+            "reports.trends" => {
+                self.execute(deps, &ReportsTrends, presented, request_id, input)
+                    .await
+            }
             "reports.profit_and_loss" => {
                 self.execute(deps, &ReportsProfitAndLoss, presented, request_id, input)
                     .await
@@ -1377,6 +1381,10 @@ pub fn registry() -> Registry {
                 schema_of::<PeriodInput>(),
                 schema_of::<TrialBalanceOutput>(),
             ),
+        ),
+        (
+            "reports.trends",
+            (schema_of::<TrendsInput>(), schema_of::<TrendsOutput>()),
         ),
         (
             "keys.list",
@@ -2350,6 +2358,212 @@ impl Command for ReportsAccountBalanceByDimension {
                 .map(|row| DimensionValueView {
                     dimension_value: row.dimension_value,
                     balance: SerializableAmount::from(row.balance),
+                })
+                .collect(),
+        }))
+    }
+}
+
+/// The input of `reports.trends`: a month range and an optional dimension
+/// kind to split revenue and expenses by.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TrendsInput {
+    /// The first month, `YYYY-MM`.
+    pub from: String,
+    /// The last month, `YYYY-MM`, inclusive. At most 120 months after `from`.
+    pub to: String,
+    /// The dimension kind to split by: `cost_centre`, `project` or `unit`.
+    #[serde(default)]
+    pub dimension: Option<String>,
+}
+
+/// One month of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrendMonthView {
+    /// The month, `YYYY-MM`.
+    pub period: String,
+    /// Income for the month.
+    pub revenue: SerializableAmount,
+    /// Expenses for the month.
+    pub expenses: SerializableAmount,
+    /// Revenue minus expenses.
+    pub net_result: SerializableAmount,
+    /// Cash and bank balance at month end.
+    pub cash: SerializableAmount,
+    /// Receivables balance at month end.
+    pub receivables: SerializableAmount,
+    /// Payables balance at month end, as a positive amount owed.
+    pub payables: SerializableAmount,
+}
+
+/// One ranked expense account of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ExpenseAccountView {
+    /// The account number.
+    pub account: String,
+    /// The account's name key.
+    pub name_key: String,
+    /// The account's expenses in the range.
+    pub amount: SerializableAmount,
+    /// Share of the range's expenses in basis points (1/100 of a percent).
+    pub share_bps: i64,
+}
+
+/// Revenue and expenses of one dimension value in `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DimensionShareView {
+    /// The dimension value's code.
+    pub code: String,
+    /// The dimension value's name.
+    pub name: String,
+    /// Income tagged with the value.
+    pub revenue: SerializableAmount,
+    /// Expenses tagged with the value.
+    pub expenses: SerializableAmount,
+}
+
+/// One month of entries posted, by actor, in `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ActivityMonthView {
+    /// The month, `YYYY-MM`.
+    pub period: String,
+    /// Entries posted by an agent key.
+    pub agent: i64,
+    /// Entries posted by a person.
+    pub human: i64,
+}
+
+/// The output of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrendsOutput {
+    /// The company's base currency code.
+    pub currency: String,
+    /// The first month reported.
+    pub from: String,
+    /// The last month reported.
+    pub to: String,
+    /// One row per month, in order.
+    pub months: Vec<TrendMonthView>,
+    /// The largest expense accounts in the range.
+    pub top_expense_accounts: Vec<ExpenseAccountView>,
+    /// The dimension kind the split is by, when one was asked for.
+    pub dimension: Option<String>,
+    /// Revenue and expenses per dimension value; empty without a dimension.
+    pub by_dimension: Vec<DimensionShareView>,
+    /// Entries posted per month by actor; months with none are left out.
+    pub activity: Vec<ActivityMonthView>,
+}
+
+/// The longest range `reports.trends` answers, in months.
+pub const TRENDS_MAX_MONTHS: usize = 120;
+
+/// The dimension kinds a trend report can split by.
+const TREND_DIMENSIONS: [&str; 3] = ["cost_centre", "project", "unit"];
+
+/// `reports.trends`: monthly revenue, expenses, net result, cash, receivables
+/// and payables over a range, the top expense accounts, and an optional split
+/// by dimension (`GET /v1/reports/trends?from=YYYY-MM&to=YYYY-MM`).
+pub struct ReportsTrends;
+
+#[async_trait]
+impl Command for ReportsTrends {
+    const NAME: &'static str = "reports.trends";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = TrendsInput;
+    type Output = TrendsOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        check_period(&input.from)?;
+        check_period(&input.to)?;
+        let months = report::month_range(&input.from, &input.to).ok_or_else(|| {
+            CommandError::InvalidInput(format!(
+                "from {:?} must not be after to {:?}",
+                input.from, input.to
+            ))
+        })?;
+        if months.len() > TRENDS_MAX_MONTHS {
+            return Err(CommandError::InvalidInput(format!(
+                "a trend range covers at most {TRENDS_MAX_MONTHS} months"
+            )));
+        }
+        let dimension = input.dimension.as_deref().filter(|kind| !kind.is_empty());
+        if let Some(kind) = dimension
+            && !TREND_DIMENSIONS.contains(&kind)
+        {
+            return Err(CommandError::InvalidInput(format!(
+                "{kind:?} is not a dimension kind (cost_centre, project or unit)"
+            )));
+        }
+        let trends = report::trends(db, &ctx.company_id, &input.from, &input.to, dimension)
+            .await
+            .map_err(|err| domain(&err))?;
+        let currency = trends
+            .months
+            .first()
+            .map(|month| SerializableAmount::from(month.revenue).currency)
+            .unwrap_or_default();
+        Ok(Plan::with_output(TrendsOutput {
+            currency,
+            from: trends.from,
+            to: trends.to,
+            months: trends
+                .months
+                .into_iter()
+                .map(|month| TrendMonthView {
+                    period: month.period,
+                    revenue: SerializableAmount::from(month.revenue),
+                    expenses: SerializableAmount::from(month.expenses),
+                    net_result: SerializableAmount::from(month.net_result),
+                    cash: SerializableAmount::from(month.cash),
+                    receivables: SerializableAmount::from(month.receivables),
+                    payables: SerializableAmount::from(month.payables),
+                })
+                .collect(),
+            top_expense_accounts: trends
+                .top_expense_accounts
+                .into_iter()
+                .map(|account| ExpenseAccountView {
+                    account: account.account_code,
+                    name_key: account.name_key,
+                    amount: SerializableAmount::from(account.amount),
+                    share_bps: account.share_bps,
+                })
+                .collect(),
+            dimension: trends.dimension,
+            by_dimension: trends
+                .by_dimension
+                .into_iter()
+                .map(|share| DimensionShareView {
+                    code: share.code,
+                    name: share.name,
+                    revenue: SerializableAmount::from(share.revenue),
+                    expenses: SerializableAmount::from(share.expenses),
+                })
+                .collect(),
+            activity: trends
+                .activity
+                .into_iter()
+                .map(|month| ActivityMonthView {
+                    period: month.period,
+                    agent: month.agent,
+                    human: month.human,
                 })
                 .collect(),
         }))

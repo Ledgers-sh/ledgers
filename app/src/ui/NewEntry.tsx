@@ -8,9 +8,10 @@ import { todayIso, yearOf } from '../lib/period';
 import { useAsync } from '../hooks';
 import { loadCurrency, saveCurrency, useSession } from '../session';
 import { Empty, ErrorBanner, PageHead, Skeleton } from './common';
-import { accountName, intlLocale, t, tRich } from '../i18n';
+import { accountName, intlLocale, t, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { entryRef } from './Journal';
+import { Select } from './Select';
 
 const DEFAULT_JOURNAL = 'general';
 
@@ -185,36 +186,38 @@ export function NewEntry() {
               </div>
               {lines.map((line, index) => (
                 <div class="line-row" key={index}>
-                  <label class="field account">
+                  <div class="field account">
                     <span class="label-sm">{t('new.line_account')}</span>
-                    <select
-                      class="input"
+                    <Select
+                      id={`line-account-${index}`}
+                      label={t('new.line_account_aria', { n: index + 1 })}
                       value={line.account}
-                      aria-label={t('new.line_account_aria', { n: index + 1 })}
-                      aria-invalid={touched && line.account === '' ? 'true' : undefined}
-                      onChange={(e) => update(index, { account: (e.target as HTMLSelectElement).value })}
-                    >
-                      <option value="">{t('new.choose_account')}</option>
-                      {postable.map((account) => (
-                        <option key={account.number} value={account.number}>
-                          {account.number} · {accountName(account.name_key)}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder={t('new.choose_account')}
+                      invalid={touched && line.account === ''}
+                      options={postable.map((account) => ({
+                        value: account.number,
+                        label: accountName(account.name_key),
+                        hint: account.number,
+                        group: t(`accountType.${account.account_type}` as MessageKey),
+                      }))}
+                      onChange={(value) => update(index, { account: value })}
+                    />
                     {lineErrors[index] && line.account === '' && <span class="field-error">{lineErrors[index]}</span>}
-                  </label>
-                  <label class="field side">
+                  </div>
+                  <div class="field side">
                     <span class="label-sm">{t('new.col_side')}</span>
-                    <select
-                      class="input"
+                    <Select
+                      id={`line-side-${index}`}
+                      label={t('new.line_side_aria', { n: index + 1 })}
                       value={line.side}
-                      aria-label={t('new.line_side_aria', { n: index + 1 })}
-                      onChange={(e) => update(index, { side: (e.target as HTMLSelectElement).value as 'debit' | 'credit' })}
-                    >
-                      <option value="debit">{t('new.side_debit')}</option>
-                      <option value="credit">{t('new.side_credit')}</option>
-                    </select>
-                  </label>
+                      searchable={false}
+                      options={[
+                        { value: 'debit', label: t('new.side_debit') },
+                        { value: 'credit', label: t('new.side_credit') },
+                      ]}
+                      onChange={(value) => update(index, { side: value as 'debit' | 'credit' })}
+                    />
+                  </div>
                   <label class="field amount">
                     <span class="label-sm">{t('term.amount')}</span>
                     <input

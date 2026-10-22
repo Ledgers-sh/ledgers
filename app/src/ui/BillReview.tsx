@@ -20,6 +20,7 @@ import { useSession } from '../session';
 import { parseMajorToMinor, toPlainMajor } from '../lib/money';
 import { accountNameFromCatalogue } from '../i18n/chart';
 import { ConfirmDialog, ErrorBanner, Money, PageHead, Skeleton, useToasts, Toasts } from './common';
+import { Select } from './Select';
 import { t, useLocale, type MessageKey } from '../i18n';
 
 /** Below this, the field is highlighted for a closer look. */
@@ -304,20 +305,25 @@ export function BillReview({ billId }: { billId: string }) {
                     <TextField label={t('bills.rate')} value={line.rate} mono num onInput={(v) => updateLine(index, { rate: v })} />
                     <TextField label={`${t('bills.vat')} (${current.currency})`} value={line.vat} mono num onInput={(v) => updateLine(index, { vat: v })} />
                   </div>
-                  <label class="field">
-                    <span>{t('bills.expense_account')}</span>
-                    <select class="input mono" value={line.account} onChange={(e) => updateLine(index, { account: (e.target as HTMLSelectElement).value, suggestedFrom: null })}>
-                      <option value="">{t('bills.choose_account')}</option>
-                      {chart.map((choice) => (
-                        <option key={choice.number} value={choice.number}>
-                          {choice.number} {accountLabel(choice, locale.code)}
-                        </option>
-                      ))}
-                    </select>
+                  <div class="field">
+                    <span id={`bill-account-label-${index}`}>{t('bills.expense_account')}</span>
+                    <Select
+                      id={`bill-account-${index}`}
+                      labelledBy={`bill-account-label-${index}`}
+                      value={line.account}
+                      placeholder={t('bills.choose_account')}
+                      options={chart.map((choice) => ({
+                        value: choice.number,
+                        label: accountLabel(choice, locale.code),
+                        hint: choice.number,
+                        group: t(`accountType.${choice.type}` as MessageKey),
+                      }))}
+                      onChange={(value) => updateLine(index, { account: value, suggestedFrom: null })}
+                    />
                     {line.suggestedFrom && (
                       <span class="hint">{t('bills.suggested_from', { bill: line.suggestedFrom })}</span>
                     )}
-                  </label>
+                  </div>
                   {!readOnly && (
                     <button type="button" class="btn btn-ghost btn-sm" onClick={() => setDraft((prev) => ({ ...(prev as Draft), lines: (prev as Draft).lines.filter((_, i) => i !== index) }))}>
                       {t('bills.remove_line')}

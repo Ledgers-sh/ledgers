@@ -441,6 +441,13 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/reports/trial-balance",
             "ledgers reports trial-balance",
         ),
+        entry(
+            "reports.trends",
+            "read",
+            "GET",
+            "/v1/reports/trends",
+            "ledgers reports trends",
+        ),
     ];
     commands.extend(human_only_commands());
     commands.extend(approval_commands());

@@ -71,8 +71,8 @@ for (const locale of LOCALES) {
       await signIn(page, 'dark', locale);
       await page.goto('/#/overview');
       await expect(page.locator('h1').first()).toBeVisible();
-      await page.locator('.lang-button').click();
-      await expect(page.getByRole('combobox')).toBeFocused();
+      await page.locator('#language-select').click();
+      await expect(page.getByRole('listbox')).toBeFocused();
       expect(await blockingViolations(page)).toEqual([]);
     });
   });
