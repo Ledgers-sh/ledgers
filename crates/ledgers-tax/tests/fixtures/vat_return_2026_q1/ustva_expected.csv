@@ -1,0 +1,22 @@
+kz,label,amount
+81,Steuerpflichtige Umsätze (19%),1273.00
+81-tax,Umsatzsteuer (19%),241.87
+86,Steuerpflichtige Umsätze (7%),800.00
+86-tax,Umsatzsteuer (7%),56.00
+41,Lieferungen ins EU-Ausland,2225.00
+21,Sonstige Leistungen,500.00
+43,Umsätze mit Vorsteuerabzug,300.00
+48,Umsätze ohne Vorsteuerabzug,250.00
+89,Intra-EU-Erwerbe (19%),100.00
+89-tax,Umsatzsteuer (19%),19.00
+93,Intra-EU-Erwerbe (7%),140.00
+93-tax,Umsatzsteuer (7%),9.80
+46,Reverse Charge EU-Dienste,400.00
+47,Reverse Charge (Steuer),76.00
+84,Reverse Charge sonstiges,300.00
+85,Reverse Charge (Steuer),57.00
+66,Vorsteuer (Inland),38.00
+61,Vorsteuer (Intra-EU),28.80
+62,Vorsteuer (Einfuhr),9.50
+67,Vorsteuer (Reverse Charge),133.00
+83,Verbleibende Umsatzsteuer-Vorauszahlung bzw. Überschuss,250.37
