@@ -163,7 +163,10 @@ pub fn fixture_with_options(
         Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
         Box::new(ApiKeysModule),
         // Carries the session table the owner sessions are stored in.
-        Box::new(ledgers_server::people::PeopleModule::new(None)),
+        Box::new(ledgers_server::people::PeopleModule::new(None, COMPANY)),
+        Box::new(ledgers_server::members::MembersModule::new(vec![
+            "https://app.test".to_owned(),
+        ])),
         Box::new(ledgers_documents::DocumentsStoreModule),
         Box::new(ledgers_bills::BillsModule),
         Box::new(ledgers_bank::BankModule),
@@ -172,6 +175,7 @@ pub fn fixture_with_options(
     let blob = Arc::new(MemoryBlob::new());
     let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
     let patch_limiter = limiter.clone();
+    let patch_clock_for_auth: Arc<dyn cratefield_core::Clock> = clock.clone();
     let patch_blob = blob.clone();
     let kit = TestHarness::with_builder(
         builtin,
@@ -185,6 +189,13 @@ pub fn fixture_with_options(
             ports.id_gen = Some(patch_ids as Arc<dyn IdGen>);
             ports.rate_limiter = patch_limiter;
             ports.blob = Some(patch_blob as Arc<dyn cratefield_core::Blob>);
+            // The organization module identifies the person by the session cookie.
+            ports.auth = ports.db.clone().map(|db| {
+                Arc::new(ledgers_server::members::SessionIdentity::new(
+                    db,
+                    patch_clock_for_auth.clone(),
+                )) as Arc<dyn cratefield_core::Auth>
+            });
         },
     );
     let deps = Deps {

@@ -155,6 +155,7 @@ impl Authenticator for TestAuthenticator {
         if credential == "owner" {
             Ok(Principal::Person {
                 person_id: OWNER_PERSON_ID.to_string(),
+                role: ledgers_commands::Role::Owner,
             })
         } else if credential == "agent" {
             Ok(Principal::Agent {

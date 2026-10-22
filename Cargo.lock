@@ -621,6 +621,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cratefield-adapter-owlpost"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22309f8f191a8e147e66ff1cda945452f4cf1ea7ee5b9c3d8de189117a670f40"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cratefield-core",
+ "getrandom 0.4.3",
+ "http",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "cratefield-adapter-postgres"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -704,6 +720,42 @@ dependencies = [
  "unicode-normalization",
  "url",
  "zeroize",
+]
+
+[[package]]
+name = "cratefield-mail-templates"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22be637d69b2e7a8f637548b7b06d1b28898c8c9fc84ca473c0d5651d65ede36"
+dependencies = [
+ "cratefield-core",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "cratefield-module-orgs"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "501316294b6086c50b749a128810e0d225e5a387c5e6ac21a94a21456bc179fc"
+dependencies = [
+ "async-trait",
+ "axum",
+ "cratefield-core",
+ "cratefield-mail-templates",
+ "getrandom 0.4.3",
+ "hex",
+ "http",
+ "schemars 1.2.3",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror",
+ "time",
+ "tracing",
 ]
 
 [[package]]
@@ -2423,8 +2475,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "cratefield-adapter-owlpost",
  "cratefield-adapter-sqlite",
  "cratefield-core",
+ "cratefield-module-orgs",
  "cratefield-runtime-cloudflare",
  "cratefield-runtime-native",
  "cratefield-testing",

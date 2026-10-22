@@ -140,13 +140,79 @@ impl<'de> Deserialize<'de> for Limits {
     }
 }
 
-/// A principal: either the owner or an agent with a tier and limits.
+/// A role a person holds in the company (docs/permissions.md). The role is
+/// the person's membership role, read from the organization at sign-in and on
+/// every command; the permission matrix lives in `ledgers-policy`.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Role {
+    /// Everything, including ownership transfer and removing members.
+    Owner,
+    /// Everything an owner does except transferring ownership.
+    Admin,
+    /// Posts, reverses, bills, accounts; no settings, keys or people.
+    Accountant,
+    /// Decides approval requests; reads the books.
+    Approver,
+    /// Reads the books.
+    Viewer,
+    /// Reads the books, the audit log and exports.
+    Auditor,
+}
+
+impl Role {
+    /// Every role, in the order the matrix and the app list them.
+    pub const ALL: [Role; 6] = [
+        Role::Owner,
+        Role::Admin,
+        Role::Accountant,
+        Role::Approver,
+        Role::Viewer,
+        Role::Auditor,
+    ];
+
+    /// The string form: the membership role stored in `org_members` and the
+    /// `roles` the organization module accepts.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Owner => "owner",
+            Role::Admin => "admin",
+            Role::Accountant => "accountant",
+            Role::Approver => "approver",
+            Role::Viewer => "viewer",
+            Role::Auditor => "auditor",
+        }
+    }
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Role {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Role::ALL
+            .into_iter()
+            .find(|role| role.as_str() == s)
+            .ok_or_else(|| format!("unknown role: {s}"))
+    }
+}
+
+/// A principal: either a person with a company role, or an agent with a tier
+/// and limits.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub enum Principal {
-    /// The company owner (a human).
+    /// A signed-in person (a human), with the role they hold in the company.
     Person {
-        /// The owner's id.
+        /// The person's subject id.
         person_id: String,
+        /// The membership role the policy checks every command against.
+        role: Role,
     },
     /// An agent key.
     Agent {
@@ -164,7 +230,7 @@ impl Principal {
     #[must_use]
     pub fn to_actor(&self) -> ledgers_audit::Actor {
         match self {
-            Principal::Person { person_id } => ledgers_audit::Actor::Person {
+            Principal::Person { person_id, .. } => ledgers_audit::Actor::Person {
                 person_id: person_id.clone(),
             },
             Principal::Agent { key_id, tier, .. } => ledgers_audit::Actor::Agent {
@@ -254,6 +320,7 @@ mod tests {
     fn principal_actor_conversion() {
         let person = Principal::Person {
             person_id: "alice".to_owned(),
+            role: Role::Owner,
         };
         assert_eq!(
             person.to_actor(),

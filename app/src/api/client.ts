@@ -47,7 +47,7 @@ export interface ClientConfig {
 }
 
 export interface RequestSpec {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   query?: Record<string, string | undefined>;
   body?: unknown;
@@ -151,5 +151,7 @@ export async function request<T>(config: ClientConfig, spec: RequestSpec): Promi
     const message = kind === 'validation' && problem.detail ? problem.detail : MESSAGES[kind];
     throw new ApiError(kind, message, response.status, problem.detail, problem.slug);
   }
+  // 204 No Content (a delete): there is no body to read.
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

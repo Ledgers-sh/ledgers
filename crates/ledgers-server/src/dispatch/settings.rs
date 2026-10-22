@@ -1640,7 +1640,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, cratefield_core::Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("fiscal_years.create"))
+            .await?;
         let body: FiscalYearCreateInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let audit = person_audit(deps, &person, request_id);
@@ -1676,7 +1678,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, cratefield_core::Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("fiscal_years.close"))
+            .await?;
         let body: FiscalYearCloseInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let audit = person_audit(deps, &person, request_id);
@@ -1776,7 +1780,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, cratefield_core::Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("periods.close"))
+            .await?;
         let body: PeriodCloseInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let period_id = parse_period(&body.period).map_err(fail)?;
@@ -1811,7 +1817,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, cratefield_core::Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("periods.reopen"))
+            .await?;
         let body: PeriodReopenInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let period_id = parse_period(&body.period).map_err(fail)?;
@@ -1843,7 +1851,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, cratefield_core::Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("tax_settings.update"))
+            .await?;
         let body: TaxSettingsInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let settings = clean_tax(&body).map_err(fail)?;

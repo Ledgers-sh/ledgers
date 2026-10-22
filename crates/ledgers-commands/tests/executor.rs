@@ -253,6 +253,7 @@ impl TestAuthenticator {
             "bearer-owner".to_string(),
             Principal::Person {
                 person_id: "owner-1".to_string(),
+                role: ledgers_commands::Role::Owner,
             },
         );
 

@@ -55,6 +55,7 @@ impl Authenticator for TestAuthenticator {
         if self.owner {
             Ok(Principal::Person {
                 person_id: "test_person".to_string(),
+                role: ledgers_commands::Role::Owner,
             })
         } else {
             Ok(Principal::Agent {

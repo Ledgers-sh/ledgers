@@ -73,6 +73,7 @@ pub mod contract_tests {
     pub fn entity_scope(scope: &dyn EntityScope, company: &CompanyId) {
         let principal = Principal::Person {
             person_id: "test".to_string(),
+            role: ledgers_commands::Role::Owner,
         };
 
         assert!(scope.resolve(&principal, None).is_ok());

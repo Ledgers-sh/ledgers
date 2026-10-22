@@ -2,7 +2,7 @@
 //! the fallback company. Production composition requires its own company.
 
 use cratefield_adapter_sqlite::SqliteDatabase;
-use cratefield_core::Config;
+use cratefield_core::{Config, Database};
 use cratefield_runtime_native::{DirBlob, Native};
 use ledgers_server::{DEV_WEB_ORIGIN, dispatch::registry, harness};
 use std::collections::BTreeMap;
@@ -11,10 +11,13 @@ use std::sync::Arc;
 /// A native runtime with an in-memory database and a blob directory: the ports
 /// the composition requires.
 fn runtime() -> Native {
+    let db: Arc<dyn Database> = Arc::new(SqliteDatabase::in_memory().expect("in-memory sqlite"));
     Native::new()
-        .db_arc(Arc::new(
-            SqliteDatabase::in_memory().expect("in-memory sqlite"),
-        ))
+        .db_arc(db.clone())
+        .auth_arc(Arc::new(ledgers_server::members::SessionIdentity::new(
+            db.clone(),
+            Arc::new(cratefield_core::SystemClock),
+        )))
         .blob_arc(DirBlob::arc(concat!(env!("CARGO_TARGET_TMPDIR"), "/blobs")))
 }
 

@@ -112,9 +112,13 @@ fn expected(plan: &[Planned], on_disk: &[PathBuf]) -> Vec<(String, &'static str)
     out
 }
 
-fn build(db: Arc<SqliteDatabase>, blob_dir: &str) -> Harness {
+fn build(db: &Arc<SqliteDatabase>, blob_dir: &str) -> Harness {
     let native = Native::new()
-        .db_arc(db as Arc<dyn Database>)
+        .db_arc(db.clone() as Arc<dyn Database>)
+        .auth_arc(Arc::new(ledgers_server::members::SessionIdentity::new(
+            db.clone() as Arc<dyn Database>,
+            Arc::new(cratefield_core::SystemClock),
+        )))
         .blob_arc(DirBlob::arc(blob_dir));
     harness(&registry(), &CompanyConfig, native).expect("the composition builds")
 }
@@ -133,7 +137,7 @@ fn files_on_disk() -> Vec<PathBuf> {
 fn d1_files_are_the_module_migrations_in_order() {
     let dir = Path::new(concat!(env!("CARGO_TARGET_TMPDIR"), "/d1-blobs"));
     let db = Arc::new(SqliteDatabase::in_memory().expect("in-memory sqlite"));
-    let plan = planned(&build(db, &dir.display().to_string()));
+    let plan = planned(&build(&db, &dir.display().to_string()));
     assert!(!plan.is_empty(), "the modules declare SQLite migrations");
 
     if std::env::var("LEDGERS_WRITE_D1_MIGRATIONS").as_deref() == Ok("1") {
@@ -186,7 +190,7 @@ fn d1_schema_equals_the_native_schema() {
     let native_db = Arc::new(
         SqliteDatabase::open(&native_path.display().to_string()).expect("native database"),
     );
-    let composition = build(native_db.clone(), &blobs.display().to_string());
+    let composition = build(&native_db, &blobs.display().to_string());
     for module in composition.modules() {
         native_db
             .apply_migrations(module.name(), module.migrations().sqlite)

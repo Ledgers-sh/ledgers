@@ -76,6 +76,7 @@ impl Authenticator for OwnerAuth {
     async fn authenticate(&self, _credential: &Credential) -> Result<Principal, CommandError> {
         Ok(Principal::Person {
             person_id: self.person_id.clone(),
+            role: ledgers_commands::Role::Owner,
         })
     }
 }
@@ -110,6 +111,45 @@ pub async fn seed_company_book(
     let journal_id = format!("general-{company_id}");
     dispatch::seed_company_with_journal(deps, company_id, DEMO_OWNER_ID, &journal_id).await?;
     seed_internal(deps, company_id, book).await
+}
+
+/// Makes the deployment's bootstrap owner, the owner of `home_company`, an
+/// owner of `demo_company` as well, so one sign-in sees both companies. The
+/// demo company must have no owner yet, or already have this person as owner;
+/// anything else is refused rather than changed. Idempotent.
+///
+/// # Errors
+/// A message when the home company has no owner yet, or the demo company is
+/// owned by someone else, or a database step fails.
+pub async fn grant_bootstrap_owner(
+    deps: &Deps,
+    home_company: &str,
+    demo_company: &str,
+) -> Result<(), String> {
+    let db = deps.db.as_ref();
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT user_sub FROM org_members WHERE org_id = ? AND role = 'owner' ORDER BY created_at, user_sub",
+            vec![sea_query::Value::from(home_company.to_owned())],
+        ))
+        .await
+        .map_err(|err| format!("read the bootstrap owner: {err}"))?;
+    let owner: String = rows
+        .rows
+        .first()
+        .and_then(|row| row.get("user_sub"))
+        .ok_or_else(|| "the deployment's company has no owner yet; sign in first".to_owned())?;
+    crate::members::bootstrap_owner(db, demo_company, &owner, deps.clock.now())
+        .await
+        .map_err(|err| format!("make the demo owner: {err}"))?;
+    match crate::members::role_of(db, demo_company, &owner).await {
+        Ok(Some(ledgers_commands::Role::Owner)) => Ok(()),
+        Ok(_) => Err(
+            "the demo company already has another owner; the bootstrap owner was not added"
+                .to_owned(),
+        ),
+        Err(err) => Err(format!("read the demo owner: {err}")),
+    }
 }
 
 /// Seeds `book` into `company_id` as the internal agent principal, with no

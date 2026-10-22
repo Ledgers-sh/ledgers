@@ -325,6 +325,14 @@ fn credential_of(presented: &Presented) -> Credential {
     }
 }
 
+/// An approver may not decide a request their own agent key raised.
+pub const SEGREGATION_OF_DUTIES: ProblemDef = ProblemDef {
+    slug: "segregation-of-duties",
+    status: StatusCode::FORBIDDEN,
+    title: "You cannot approve this request",
+    description: "This request was raised through an agent key you created. Another approver decides it.",
+};
+
 impl ServerDispatch {
     fn approvals_service<'db>(
         &self,
@@ -354,6 +362,8 @@ impl ServerDispatch {
                 db: Arc::clone(&deps.db),
                 clock: Arc::clone(&deps.clock),
                 app_origins: self.app_origins.clone(),
+                bootstrap: self.is_home(),
+                company_id: self.company_id.clone(),
                 presented: session.clone(),
             }),
         }
@@ -374,11 +384,15 @@ impl ServerDispatch {
         }
     }
 
-    /// Refuses any caller that is not a signed-in person.
+    /// Refuses any caller that is not a signed-in person, and a person whose
+    /// company role may not decide approvals (docs/permissions.md).
     async fn require_person(&self, deps: &Deps, presented: &Presented) -> Result<(), CommandError> {
         let authn = self.caller_authn(deps, presented);
         match authn.authenticate(&credential_of(presented)).await? {
-            ledgers_commands::Principal::Person { .. } => Ok(()),
+            ledgers_commands::Principal::Person { role, .. } => {
+                ledgers_policy::roles::check(role, "approvals.decide")
+                    .map_err(|_| CommandError::PolicyDenied)
+            }
             ledgers_commands::Principal::Agent { .. } => Err(CommandError::HumanOnly),
         }
     }
@@ -412,6 +426,25 @@ impl ServerDispatch {
             .await
             .map_err(ApprovalError::Command)?;
         let authn = self.caller_authn(deps, presented);
+        // Segregation of duties: a person may not approve a request that their
+        // own agent key raised. The key's owner is the person who created it.
+        let approver = authn
+            .authenticate(&credential_of(presented))
+            .await
+            .map_err(ApprovalError::Command)?;
+        if let ledgers_commands::Principal::Person { person_id, .. } = &approver
+            && policy
+                .agent_keys()
+                .get(&request.requested_by)
+                .is_some_and(|key| key.owner == *person_id)
+        {
+            return Err(ApprovalError::Command(CommandError::Domain(Problem::new(
+                &SEGREGATION_OF_DUTIES,
+            ))));
+        }
+        // The approval authorizes the command it was raised for, so the
+        // approver's role is not checked against it again.
+        let policy = policy.for_approval();
         let executor = Executor::new(db, self.caller_authn(deps, presented), policy);
         let approvals = self.approvals_service(db);
         let credential = credential_of(presented);

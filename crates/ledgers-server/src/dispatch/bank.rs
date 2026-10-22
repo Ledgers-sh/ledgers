@@ -30,7 +30,9 @@ impl ServerDispatch {
         mut input: Value,
     ) -> Result<Value, Problem> {
         // A person-only command: an agent key is refused here, before anything else.
-        let person = self.person_id(deps, presented.clone(), request_id).await?;
+        let person = self
+            .person_id(deps, presented.clone(), request_id, Some(command))
+            .await?;
         if let Value::Object(map) = &mut input {
             map.insert("actor".to_owned(), Value::String(person));
         }

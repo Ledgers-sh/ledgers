@@ -252,7 +252,9 @@ impl ServerDispatch {
             }
             Some(Presented::Principal(principal)) => Ok(principal_label(principal)),
             Some(Presented::Session(_)) => {
-                let person = self.person_id(deps, presented.cloned(), request_id).await?;
+                let person = self
+                    .person_id(deps, presented.cloned(), request_id, None)
+                    .await?;
                 Ok(format!("person:{person}"))
             }
             None => Err(CommandError::Unauthenticated
@@ -448,7 +450,9 @@ impl ServerDispatch {
 /// The label of a principal in the audit trail and on the records it wrote.
 fn principal_label(principal: &ledgers_commands::auth::Principal) -> String {
     match principal {
-        ledgers_commands::auth::Principal::Person { person_id } => format!("person:{person_id}"),
+        ledgers_commands::auth::Principal::Person { person_id, .. } => {
+            format!("person:{person_id}")
+        }
         ledgers_commands::auth::Principal::Agent { key_id, .. } => format!("agent:{key_id}"),
     }
 }

@@ -63,15 +63,18 @@ pub async fn init(
 
     let db = sqlite.clone() as Arc<dyn Database>;
     let registry = dispatch::registry();
-    let native_runtime = cratefield_runtime_native::Native::new()
-        .db_arc(db.clone())
-        .blob_arc(cratefield_runtime_native::DirBlob::arc(blob_dir));
-
     // Create a minimal config that uses the provided company_id and dev mode
     let config = MinimalConfig {
         company_id: company_id.to_owned(),
         dev: dev_mode,
     };
+    let native_runtime = ledgers_server::members::with_native_members_ports(
+        cratefield_runtime_native::Native::new()
+            .db_arc(db.clone())
+            .blob_arc(cratefield_runtime_native::DirBlob::arc(blob_dir)),
+        db.clone(),
+        &config,
+    );
     let harness_inst = harness(&registry, &config, native_runtime.clone())
         .map_err(|e| CliError::Serve(format!("build harness: {e}")))?;
 

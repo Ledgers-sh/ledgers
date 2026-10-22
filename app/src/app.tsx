@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { useHash, useOnline, usePendingCount } from './hooks';
 import { fetchOpenApiDocument } from './api/openapi';
 import { ApiError } from './api/client';
-import { fetchSession, initialOf, signOut, type Person } from './api/auth';
+import { fetchSession, initialOf, NotAMemberError, signOut, type Person } from './api/auth';
+import { isAcceptPath } from './lib/people';
+import { AcceptInvitation } from './ui/Accept';
+import { NotMember } from './ui/NotMember';
 import {
   clearCredentials,
   DEFAULT_SERVER_URL,
@@ -74,6 +77,7 @@ type Mode =
   | { kind: 'checking' }
   | { kind: 'signed-out'; error: string | null; advanced: boolean }
   | { kind: 'forbidden'; detail: string }
+  | { kind: 'not-member'; title: string }
   | { kind: 'person'; baseUrl: string; person: Person }
   | { kind: 'key'; credentials: Credentials };
 
@@ -90,7 +94,8 @@ export function App() {
   });
 
   useEffect(() => {
-    if (mode.kind !== 'checking') return;
+    // The accept page checks the sign-in itself (see AcceptInvitation).
+    if (mode.kind !== 'checking' || isAcceptPath(window.location.pathname)) return;
     let live = true;
     fetchSession(DEFAULT_SERVER_URL).then(
       (person) => {
@@ -100,7 +105,9 @@ export function App() {
       },
       (error: unknown) => {
         if (!live) return;
-        if (error instanceof ApiError && error.kind === 'forbidden') {
+        if (error instanceof NotAMemberError) {
+          setMode({ kind: 'not-member', title: error.title });
+        } else if (error instanceof ApiError && error.kind === 'forbidden') {
           setMode({ kind: 'forbidden', detail: error.detail ?? error.message });
         } else {
           const message = error instanceof ApiError ? (error.detail ?? describeError(error).title) : t('signin.unavailable');
@@ -118,6 +125,9 @@ export function App() {
     void clearApiCaches();
     setMode({ kind: 'signed-out', error: null, advanced: false });
   }, []);
+
+  // The invitation link: reachable signed in or not; the page signs the person in when it must.
+  if (isAcceptPath(window.location.pathname)) return <AcceptInvitation />;
 
   switch (mode.kind) {
     case 'checking':
@@ -161,6 +171,10 @@ export function App() {
             </div>
           </div>
         </main>
+      );
+    case 'not-member':
+      return (
+        <NotMember title={mode.title} onSignOut={() => void endPersonSession(DEFAULT_SERVER_URL)} />
       );
     case 'person':
       return (
@@ -278,6 +292,7 @@ function Shell({
 
   const session: Session = {
     client: apiKey ? { baseUrl, apiKey } : { baseUrl },
+    person,
     unit,
     units,
     refreshUnits: () => setUnitsTick((tick) => tick + 1),

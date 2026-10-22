@@ -83,6 +83,7 @@ fn reads_and_persons_are_not_gated_by_the_chart_rule() {
     );
     let person = Principal::Person {
         person_id: "usr_1".to_string(),
+        role: ledgers_commands::Role::Owner,
     };
     let write = policy.decide(&person, &meta("accounts.create"), &JournalPreview::empty());
     assert!(

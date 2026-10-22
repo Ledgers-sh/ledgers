@@ -161,6 +161,9 @@ pub const DISPATCH_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
 /// The server's command dispatch for one company.
 pub struct ServerDispatch {
     company_id: String,
+    /// The deployment's own company (`LEDGERS_COMPANY_ID`): the one whose
+    /// owner an `owner` sign-in claim may bootstrap.
+    home_company: String,
     app_origins: Vec<String>,
     app_url: String,
     /// The key that signs document download links; empty until configured,
@@ -178,14 +181,22 @@ impl ServerDispatch {
     /// [`ServerDispatch::with_app_origins`] names the origins they may come from.
     #[must_use]
     pub fn new(company_id: impl Into<String>) -> Self {
+        let company_id = company_id.into();
         Self {
-            company_id: company_id.into(),
+            home_company: company_id.clone(),
+            company_id,
             app_origins: Vec::new(),
             app_url: String::new(),
             document_key: Vec::new(),
             model: None,
             vies_enabled: false,
         }
+    }
+
+    /// Whether this dispatch serves the deployment's own company.
+    #[must_use]
+    pub fn is_home(&self) -> bool {
+        self.company_id == self.home_company
     }
 
     /// The key that signs document download links.
@@ -288,6 +299,8 @@ impl ServerDispatch {
                         db: Arc::clone(&deps.db),
                         clock: Arc::clone(&deps.clock),
                         app_origins: self.app_origins.clone(),
+                        bootstrap: self.is_home(),
+                        company_id: self.company_id.clone(),
                         presented: session,
                     }),
                     id,
@@ -384,11 +397,16 @@ impl ServerDispatch {
     /// The person behind a human-only command. An agent key answers 403
     /// (`human-only`), an unknown or revoked credential 401, and a session
     /// goes through the same origin, role and expiry checks as every command.
+    /// The signed-in person a route acts for. With a `command`, the company's
+    /// role matrix must let the person's role run it (docs/permissions.md);
+    /// without one the call only identifies the person. An agent key is refused
+    /// with `human-only`; a role the matrix refuses gets `policy-denied`.
     async fn person_id(
         &self,
         deps: &Deps,
         presented: Option<Presented>,
         request_id: &str,
+        command: Option<&str>,
     ) -> Result<String, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
         let principal = match presented
@@ -410,6 +428,8 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     app_origins: self.app_origins.clone(),
+                    bootstrap: self.is_home(),
+                    company_id: self.company_id.clone(),
                     presented: session,
                 }
                 .authenticate(&id)
@@ -419,7 +439,13 @@ impl ServerDispatch {
             Presented::Principal(principal) => principal,
         };
         match principal {
-            Principal::Person { person_id } => Ok(person_id),
+            Principal::Person { person_id, role } => {
+                if let Some(command) = command {
+                    ledgers_policy::roles::check(role, command)
+                        .map_err(|_| fail(CommandError::PolicyDenied))?;
+                }
+                Ok(person_id)
+            }
             Principal::Agent { .. } => Err(fail(CommandError::HumanOnly)),
         }
     }
@@ -431,7 +457,8 @@ impl ServerDispatch {
         request_id: &str,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        self.person_id(deps, presented, request_id).await?;
+        self.person_id(deps, presented, request_id, Some("keys.list"))
+            .await?;
         let keys = crate::agent_keys::list(deps, &self.company_id)
             .await
             .map_err(fail)?;
@@ -447,7 +474,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("keys.create"))
+            .await?;
         let input: crate::agent_keys::KeysCreateInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let output = crate::agent_keys::create(deps, &self.company_id, &person, &input)
@@ -465,7 +494,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("keys.revoke"))
+            .await?;
         let input: crate::agent_keys::KeysRevokeInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let output = crate::agent_keys::revoke(deps, &self.company_id, &person, &input.id)
@@ -518,7 +549,8 @@ impl ServerDispatch {
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        self.person_id(deps, presented.clone(), request_id).await?;
+        self.person_id(deps, presented.clone(), request_id, Some("bills.confirm"))
+            .await?;
         self.execute(deps, &BillsConfirm, presented, request_id, input)
             .await
     }
@@ -591,6 +623,17 @@ fn fill_server_fields(input: &mut Value, deps: &Deps, id_field: &str, caller: &s
 
 #[async_trait]
 impl Dispatch for ServerDispatch {
+    fn scoped(self: Arc<Self>, company_id: &str) -> Arc<dyn Dispatch> {
+        Arc::new(ServerDispatch {
+            company_id: company_id.to_owned(),
+            home_company: self.home_company.clone(),
+            app_origins: self.app_origins.clone(),
+            app_url: self.app_url.clone(),
+            document_key: self.document_key.clone(),
+            model: self.model.clone(),
+        })
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn dispatch(
         &self,
@@ -1200,6 +1243,38 @@ pub async fn seed_company_with_journal(
     owner: &str,
     journal_id: &str,
 ) -> Result<(), String> {
+    let template =
+        ledgers_ledger::generic_sme_template().map_err(|err| format!("bundled chart: {err}"))?;
+    seed_company_chart(deps, company_id, owner, journal_id, &template, 1).await
+}
+
+/// The chart a company's country pack starts from: the Dutch RGS chart for
+/// `nl`, the German HGB chart for `de`, the generic SME chart otherwise.
+///
+/// # Errors
+/// A message naming the bundled chart that failed to load.
+pub fn chart_for_pack(pack: &str) -> Result<ledgers_ledger::ChartTemplate, String> {
+    let template = match pack {
+        "nl" => ledgers_ledger::nl_rgs_bv_template(),
+        "de" => ledgers_ledger::de_hgb_template(),
+        _ => ledgers_ledger::generic_sme_template(),
+    };
+    template.map_err(|err| format!("bundled chart: {err}"))
+}
+
+/// [`seed_company_with_journal`] for a chart and a fiscal year that starts in
+/// `start_month` (1 to 12). The current calendar year is the first fiscal year.
+///
+/// # Errors
+/// A message naming the failed step.
+pub async fn seed_company_chart(
+    deps: &Deps,
+    company_id: &str,
+    owner: &str,
+    journal_id: &str,
+    template: &ledgers_ledger::ChartTemplate,
+    start_month: u8,
+) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();
@@ -1215,9 +1290,7 @@ pub async fn seed_company_with_journal(
         .await
         .map_err(|err| format!("read chart: {err}"))?;
     if existing.is_empty() {
-        let template = ledgers_ledger::generic_sme_template()
-            .map_err(|err| format!("bundled chart: {err}"))?;
-        ledgers_ledger::commands::import_template(db, company_id, &template, stamp.clone(), &audit)
+        ledgers_ledger::commands::import_template(db, company_id, template, stamp.clone(), &audit)
             .await
             .map_err(|err| format!("import chart: {err}"))?;
         ledgers_ledger::journal::create_journal(
@@ -1239,7 +1312,7 @@ pub async fn seed_company_with_journal(
             company_id,
             ledgers_ledger::FiscalYearSpec {
                 label: i64::from(now.year()),
-                start_month: 1,
+                start_month: u32::from(start_month),
                 has_adjustment_period: false,
             },
             stamp.clone(),

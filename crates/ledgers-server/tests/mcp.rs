@@ -52,6 +52,10 @@ struct TestDispatch;
 
 #[async_trait::async_trait]
 impl Dispatch for TestDispatch {
+    fn scoped(self: Arc<Self>, _company_id: &str) -> Arc<dyn Dispatch> {
+        self
+    }
+
     async fn dispatch(
         &self,
         _: &Deps,
@@ -82,6 +86,7 @@ impl Dispatch for TestDispatch {
             }),
             "sess_person" => Ok(Principal::Person {
                 person_id: "user_123".to_string(),
+                role: ledgers_commands::Role::Owner,
             }),
             _ => Err(Problem::validation_failed("unauthorized")),
         }

@@ -5,6 +5,7 @@
 
 use crate::demo;
 use crate::dispatch::{self, Deps};
+use crate::members;
 use crate::rate_limiting;
 use crate::{compose, is_dev};
 use cratefield_adapter_sqlite::SqliteDatabase;
@@ -47,10 +48,16 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
     // The native runtime has no Redis limiter unless one is configured; agent
     // keys then get this per-process fixed window instead of none at all.
     let per_minute = per_minute_setting(cfg.get("LEDGERS_RATE_LIMIT_PER_MIN").as_deref());
-    let native = Native::new()
-        .db_arc(sqlite.clone() as Arc<dyn Database>)
-        .blob_arc(DirBlob::arc(&options.blob_dir))
-        .rate_limiter(rate_limiting::InProcessRateLimiter::per_minute(per_minute));
+    // The organization module identifies the signed-in person through the Auth
+    // port and sends invitations through the Mailer port (docs/permissions.md).
+    let native = members::with_native_members_ports(
+        Native::new()
+            .db_arc(sqlite.clone() as Arc<dyn Database>)
+            .blob_arc(DirBlob::arc(&options.blob_dir))
+            .rate_limiter(rate_limiting::InProcessRateLimiter::per_minute(per_minute)),
+        sqlite.clone() as Arc<dyn Database>,
+        &cfg,
+    );
 
     let registry = dispatch::registry();
     // Optional features that are off are warned about here, and the server
