@@ -11,7 +11,7 @@
     "preview": "vite preview --port 5173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts tests/e2e/approvals.spec.ts",
+    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts tests/e2e/agent-keys.spec.ts tests/e2e/approvals.spec.ts",
     "screenshots": "playwright test tests/e2e/screenshots.spec.ts"
   },
   "dependencies": {

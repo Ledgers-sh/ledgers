@@ -340,8 +340,46 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers reports trial-balance",
         ),
     ];
+    commands.extend(human_only_commands());
     commands.extend(approval_commands());
     commands
+}
+
+/// The human-only commands: agents get a 403 on them, and the MCP server does
+/// not offer them as tools.
+#[must_use]
+fn human_only_commands() -> Vec<CommandDescriptor> {
+    fn human_entry(
+        name: &str,
+        tier: &str,
+        method: &str,
+        path: &str,
+        cli: &str,
+    ) -> CommandDescriptor {
+        CommandDescriptor {
+            human_only: true,
+            idempotent: method == "GET",
+            mcp: None,
+            ..entry(name, tier, method, path, cli)
+        }
+    }
+    vec![
+        human_entry("keys.list", "read", "GET", "/v1/keys", "ledgers keys list"),
+        human_entry(
+            "keys.create",
+            "post-within-limits",
+            "POST",
+            "/v1/keys",
+            "ledgers keys create",
+        ),
+        human_entry(
+            "keys.revoke",
+            "post-within-limits",
+            "POST",
+            "/v1/keys/{id}/revoke",
+            "ledgers keys revoke",
+        ),
+    ]
 }
 
 /// The approval inbox commands: person only, so agent keys are refused them.
