@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Ledgers server composition: harness and modules.
 
+pub mod agent_keys;
 pub mod config;
 pub mod dispatch;
 pub mod documents;
@@ -79,13 +80,12 @@ pub fn harness(
         .cors_origins(cors_origins.clone())
         .env(VentureEnv::Development);
 
-    // Every command surface (HTTP, MCP) dispatches through the rate-limiting
-    // wrapper. The limiter comes from the request's ports (`Deps`), so it is
-    // resolved per request on Workers as well as natively; agent keys are
-    // throttled, person principals pass through.
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(rate_limiting::RateLimitingDispatch::new(
-        Arc::new(dispatch::ServerDispatch::new(company_id).with_app_origins(cors_origins.clone())),
-    ));
+    // Every command surface (HTTP routes, MCP tool calls) admits agent keys
+    // through the rate limiter before dispatch (`rate_limiting::admit`). The
+    // limiter comes from the request's ports (`Deps`), so it is resolved per
+    // request on Workers as well as natively; persons pass through.
+    let dispatch: Arc<dyn routes::Dispatch> =
+        Arc::new(dispatch::ServerDispatch::new(company_id).with_app_origins(cors_origins.clone()));
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {

@@ -21,6 +21,7 @@ ledgers-auth = { workspace = true }
 ledgers-commands = { workspace = true }
 ledgers-ext = { workspace = true }
 ledgers-ledger = { workspace = true }
+ledgers-money = { workspace = true }
 ledgers-storage = { workspace = true }
 ledgers-db = { workspace = true }
 ledgers-policy = { workspace = true }

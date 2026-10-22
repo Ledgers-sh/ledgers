@@ -30,6 +30,7 @@ import { Journal, EntryDetail } from './ui/Journal';
 import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
 import { Bills } from './ui/Bills';
+import { Settings } from './ui/Settings';
 
 const NAV: { hash: string; label: string; icon: IconName; match: (route: string) => boolean }[] = [
   { hash: 'overview', label: 'Overview', icon: 'overview', match: (r) => r === '' || r === 'overview' },
@@ -37,6 +38,7 @@ const NAV: { hash: string; label: string; icon: IconName; match: (route: string)
   { hash: 'accounts', label: 'Accounts', icon: 'accounts', match: (r) => r === 'accounts' },
   { hash: 'reports', label: 'Reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'Bills', icon: 'bills', match: (r) => r === 'bills' },
+  { hash: 'settings/agent-keys', label: 'Settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
 ];
 
 /**
@@ -360,6 +362,7 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route === 'bills' && billsState === 'offered') return <Bills />;
   if (route === 'bills' && billsState === 'checking') return <p class="muted">Checking what this server offers…</p>;
   if (route === 'new') return <NewEntry />;
+  if (route === 'settings' || route === 'settings/agent-keys') return <Settings section="agent-keys" />;
   return (
     <div class="empty">
       <h2>Page not found</h2>

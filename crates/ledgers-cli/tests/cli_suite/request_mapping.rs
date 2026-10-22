@@ -126,12 +126,11 @@ fn every_registry_command_maps_to_its_descriptor_method_and_path() {
         }
         let req = plan(d, &inv).unwrap_or_else(|e| panic!("{}: {e}", d.name));
         assert_eq!(req.method, d.http_method, "{}", d.name);
-        assert_eq!(
-            req.path,
-            d.http_path.replace("{external_id}", "ID-1"),
-            "{}",
-            d.name
-        );
+        let mut expected = d.http_path.clone();
+        for placeholder in ledgers_cli::request::path_param_names(&d.http_path) {
+            expected = expected.replace(&format!("{{{placeholder}}}"), "ID-1");
+        }
+        assert_eq!(req.path, expected, "{}", d.name);
         assert_eq!(req.body.is_some(), d.http_method != "GET", "{}", d.name);
     }
 }

@@ -249,32 +249,33 @@ impl Default for Registry {
 /// cannot see the domain types); the server fills them in from the typed
 /// commands.
 #[must_use]
-pub fn default_commands() -> Vec<CommandDescriptor> {
-    fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
-        CommandDescriptor {
-            name: name.to_string(),
-            tier: tier.to_string(),
-            human_only: false,
-            supports_dry_run: false,
-            idempotent: true,
-            http_method: method.to_string(),
-            http_path: path.to_string(),
-            cli: cli.to_string(),
-            mcp: Some(name.replace('.', "_")),
-            curl: if method == "GET" {
-                format!(
-                    "curl -X GET \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
-                )
-            } else {
-                format!(
-                    "curl -X POST \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
-                )
-            },
-            input_schema: serde_json::json!({}),
-            output_schema: serde_json::json!({}),
-        }
+fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
+    CommandDescriptor {
+        name: name.to_string(),
+        tier: tier.to_string(),
+        human_only: false,
+        supports_dry_run: false,
+        idempotent: true,
+        http_method: method.to_string(),
+        http_path: path.to_string(),
+        cli: cli.to_string(),
+        mcp: Some(name.replace('.', "_")),
+        curl: if method == "GET" {
+            format!("curl -X GET \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\"")
+        } else {
+            format!(
+                "curl -X POST \"$LEDGERS_URL{path}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+            )
+        },
+        input_schema: serde_json::json!({}),
+        output_schema: serde_json::json!({}),
     }
-    vec![
+}
+
+/// The commands every surface shares, with their default surface descriptors.
+#[must_use]
+pub fn default_commands() -> Vec<CommandDescriptor> {
+    let mut commands = vec![
         entry(
             "accounts.list",
             "read",
@@ -337,6 +338,45 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "GET",
             "/v1/reports/trial-balance",
             "ledgers reports trial-balance",
+        ),
+    ];
+    commands.extend(human_only_commands());
+    commands
+}
+
+/// The human-only commands: agents get a 403 on them, and the MCP server does
+/// not offer them as tools.
+#[must_use]
+fn human_only_commands() -> Vec<CommandDescriptor> {
+    fn human_entry(
+        name: &str,
+        tier: &str,
+        method: &str,
+        path: &str,
+        cli: &str,
+    ) -> CommandDescriptor {
+        CommandDescriptor {
+            human_only: true,
+            idempotent: method == "GET",
+            mcp: None,
+            ..entry(name, tier, method, path, cli)
+        }
+    }
+    vec![
+        human_entry("keys.list", "read", "GET", "/v1/keys", "ledgers keys list"),
+        human_entry(
+            "keys.create",
+            "post-within-limits",
+            "POST",
+            "/v1/keys",
+            "ledgers keys create",
+        ),
+        human_entry(
+            "keys.revoke",
+            "post-within-limits",
+            "POST",
+            "/v1/keys/{id}/revoke",
+            "ledgers keys revoke",
         ),
     ]
 }

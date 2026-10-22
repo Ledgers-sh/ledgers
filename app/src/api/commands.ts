@@ -11,6 +11,10 @@ import type {
   BillsMatchOutput,
   EntriesListOutput,
   EntryRecord,
+  KeysCreateInput,
+  KeysCreateOutput,
+  KeysListOutput,
+  KeysRevokeOutput,
   PostEntryInput,
   PostEntryOutput,
   ProfitAndLossOutput,
@@ -106,3 +110,26 @@ export function billsMatch(config: Config, billId: string): Promise<BillsMatchOu
     body: {},
   });
 }
+
+/**
+ * GET /v1/keys (keys.list). Person sessions only: an agent key gets 403. The
+ * list carries public prefixes; no secret is ever returned here.
+ */
+export function keysList(config: Config): Promise<KeysListOutput> {
+  return request<KeysListOutput>(config, { method: 'GET', path: '/v1/keys' });
+}
+
+/** POST /v1/keys (keys.create). The answer carries the full token once. */
+export function keysCreate(config: Config, input: KeysCreateInput): Promise<KeysCreateOutput> {
+  return request<KeysCreateOutput>(config, { method: 'POST', path: '/v1/keys', body: input });
+}
+
+/** POST /v1/keys/{id}/revoke (keys.revoke). Takes effect on the next request with that key. */
+export function keysRevoke(config: Config, id: string): Promise<KeysRevokeOutput> {
+  return request<KeysRevokeOutput>(config, {
+    method: 'POST',
+    path: `/v1/keys/${encodeURIComponent(id)}/revoke`,
+    body: {},
+  });
+}
+

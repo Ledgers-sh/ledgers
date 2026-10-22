@@ -7,8 +7,9 @@
 import http from 'node:http';
 import type { Page } from '@playwright/test';
 
-export const API_ORIGIN = 'http://127.0.0.1:3000';
-const PORT = 3000;
+/** Port of the fake API. LEDGERS_MOCK_PORT moves it when another local server holds 3000. */
+const PORT = Number(process.env.LEDGERS_MOCK_PORT ?? 3000);
+export const API_ORIGIN = `http://127.0.0.1:${PORT}`;
 export const API_KEY = 'test_sk_mock_0123456789';
 
 type Side = 'debit' | 'credit';
@@ -38,6 +39,45 @@ interface Entry {
 export interface MockOptions {
   /** Seed entries so screens are populated (screenshots). */
   seed?: boolean;
+  /**
+   * A signed-in person: the session cookie is simulated by accepting
+   * credential-less calls, and `/v1/auth/session` answers with the owner.
+   */
+  person?: boolean;
+}
+
+/** An agent key as the fake keeps it. The token is held here only, like the server's hash. */
+interface MockKey {
+  id: string;
+  name: string;
+  prefix: string;
+  tier: string;
+  limits: Record<string, { per_entry: string; per_day: string }>;
+  created_at: string;
+  created_by: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token: string;
+}
+
+const OWNER = {
+  personId: 'person-owner',
+  email: 'owner@halden.test',
+  roles: ['owner'],
+  csrfToken: 'csrf-mock',
+  expiresAt: null,
+};
+
+let keyCounter = 0;
+const keyState: { keys: MockKey[] } = { keys: [] };
+
+function keyView(key: MockKey) {
+  const { token: _token, ...view } = key;
+  return view;
+}
+
+function hex(length: number, seed: number): string {
+  return Array.from({ length }, (_, i) => ((seed * 31 + i * 7) % 16).toString(16)).join('');
 }
 
 const ACCOUNTS = [
@@ -123,8 +163,9 @@ export interface MockApi {
 }
 
 /** The real server allows the app origin via CORS; the fake does the same. */
+const APP_ORIGIN = `http://localhost:${Number(process.env.LEDGERS_E2E_PORT ?? 5173)}`;
 const CORS: Record<string, string> = {
-  'Access-Control-Allow-Origin': 'http://localhost:5173',
+  'Access-Control-Allow-Origin': APP_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   // The app sends the session cookie with credentials: 'include'.
@@ -152,11 +193,44 @@ const OPENAPI = {
 };
 
 const state: MockApi = { entries: [], posts: [], reversals: [] };
+let personMode = false;
 let nextNumber = 1;
 
 /** Routes one request against the in-memory ledger. */
 function handle(method: string, url: URL, bodyText: string): Reply {
   const path = url.pathname;
+
+  if (method === 'GET' && path === '/v1/keys') return { status: 200, body: { keys: keyState.keys.map(keyView) } };
+  if (method === 'POST' && path === '/v1/keys') {
+    const input = JSON.parse(bodyText || '{}') as { name?: string; tier?: string; limits?: MockKey['limits'] };
+    const name = (input.name ?? '').trim();
+    if (name === '') return problem(400, 'Invalid input', 'name is required');
+    keyCounter += 1;
+    const id = `01KEY${String(keyCounter).padStart(20, '0')}`;
+    const prefix = `lk_live_${hex(16, keyCounter)}`;
+    const token = `${prefix}_${hex(64, keyCounter + 3)}`;
+    const key: MockKey = {
+      id,
+      name,
+      prefix,
+      tier: input.tier ?? 'read',
+      limits: input.limits ?? {},
+      created_at: '2026-10-22T10:00:00Z',
+      created_by: OWNER.personId,
+      last_used_at: null,
+      revoked_at: null,
+      token,
+    };
+    keyState.keys.push(key);
+    return { status: 200, body: { key: keyView(key), token } };
+  }
+  const revoke = /^\/v1\/keys\/([^/]+)\/revoke$/.exec(path);
+  if (method === 'POST' && revoke) {
+    const key = keyState.keys.find((k) => k.id === decodeURIComponent(revoke[1]));
+    if (!key) return problem(404, 'Not found');
+    key.revoked_at ??= '2026-10-22T11:00:00Z';
+    return { status: 200, body: { key: keyView(key) } };
+  }
 
   if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
   if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
@@ -280,6 +354,9 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.posts = [];
   state.reversals = [];
   nextNumber = state.entries.length + 1;
+  keyState.keys = [];
+  keyCounter = 0;
+  personMode = options.person === true;
   if (!server) {
     server = http.createServer((req, res) => {
       let text = '';
@@ -297,14 +374,34 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end(JSON.stringify(OPENAPI));
           return;
         }
+        const pathname = new URL(req.url ?? '/', API_ORIGIN).pathname;
+        const authorization = req.headers.authorization;
+        if (personMode && !authorization) {
+          // A signed-in person: the cookie is what the real server would check.
+          if (pathname === '/v1/auth/session') {
+            res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(OWNER));
+            return;
+          }
+          const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
+          res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(reply.body));
+          return;
+        }
         // Signed out: no key and no session. The people sign-in answers 401 here,
         // which the app shows as the sign-in screen. Specs mock signed-in sessions.
-        if (new URL(req.url ?? '/', API_ORIGIN).pathname === '/v1/auth/session' && req.headers.authorization !== `Bearer ${API_KEY}`) {
+        if (pathname === '/v1/auth/session' && authorization !== `Bearer ${API_KEY}`) {
           res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(401, 'Sign-in required').body));
           return;
         }
-        if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+        if (pathname.startsWith('/v1/keys') && authorization === `Bearer ${API_KEY}`) {
+          // The server refuses an agent key on every key command.
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
+          return;
+        }
+        if (authorization !== `Bearer ${API_KEY}`) {
           res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(401, 'Unauthorized').body));
           return;
