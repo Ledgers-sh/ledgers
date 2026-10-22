@@ -53,7 +53,8 @@ pub fn build_root(registry: &Registry) -> Command {
         )
         // Subcommands
         .subcommand(build_serve())
-        .subcommand(build_completions());
+        .subcommand(build_completions())
+        .subcommand(build_mcp());
 
     // Add registry-driven subcommands (clone to avoid lifetime issues)
     let descriptors: Vec<_> = registry.iter().cloned().collect();
@@ -86,6 +87,23 @@ fn build_completions() -> Command {
                 .value_name("SHELL")
                 .help("Shell type: bash, zsh, fish, powershell")
                 .required(true),
+        )
+}
+
+/// Builds the `ledgers mcp` subcommand.
+fn build_mcp() -> Command {
+    Command::new("mcp")
+        .about("Serve MCP over stdio, relaying to the server with your agent key")
+        .long_about(
+            "Reads newline-delimited JSON-RPC messages from stdin, relays each to the server's \
+             /mcp endpoint with your agent key as Bearer token, and writes responses to stdout.\n\n\
+             This allows MCP clients (like Claude) to use Ledgers as a tool.",
+        )
+        .arg(
+            Arg::new("read_only")
+                .long("read-only")
+                .help("Read-only mode: only list and allow read tools")
+                .action(ArgAction::SetTrue),
         )
 }
 

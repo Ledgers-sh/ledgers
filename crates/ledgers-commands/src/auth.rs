@@ -43,6 +43,19 @@ impl std::fmt::Display for Tier {
     }
 }
 
+impl std::str::FromStr for Tier {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read" => Ok(Tier::Read),
+            "draft" => Ok(Tier::Draft),
+            "post-within-limits" => Ok(Tier::PostWithinLimits),
+            _ => Err(format!("unknown tier: {s}")),
+        }
+    }
+}
+
 /// Per-currency limit for an agent key: base amount and transaction amount
 /// ceilings in minor units (i128).
 ///

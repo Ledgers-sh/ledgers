@@ -191,6 +191,7 @@ fn curl_example(http_method: &str, http_path: &str, _name: &str) -> String {
 
 /// The command registry: collection of all registered commands, sorted by name,
 /// with operations to add and iterate.
+#[derive(Clone)]
 pub struct Registry {
     commands: BTreeMap<String, CommandDescriptor>,
 }

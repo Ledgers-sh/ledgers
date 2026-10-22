@@ -12,9 +12,19 @@
 #[test]
 fn golden_surface_registry() {
     let registry = ledgers_ledger::surface::registry();
-
-    // Snapshot the full registry as JSON, which includes all descriptors
-    // with every field: name, tier, human_only, supports_dry_run, idempotent,
-    // http_method, http_path, cli, mcp, curl, input_schema, output_schema.
     insta::assert_json_snapshot!("surface", registry.to_json());
+}
+
+#[test]
+fn golden_mcp_tools() {
+    use ledgers_commands::Tier;
+    use ledgers_commands::mcp::{ToolScope, tools};
+
+    let registry = ledgers_ledger::surface::registry();
+    let scope = ToolScope {
+        tier: Tier::PostWithinLimits,
+        read_only: false,
+    };
+    let tool_list = tools(&registry, scope);
+    insta::assert_json_snapshot!("mcp_tools", tool_list);
 }

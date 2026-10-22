@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod documents;
+pub mod mcp;
 pub mod openapi;
 pub mod routes;
 
@@ -11,6 +12,7 @@ pub mod routes;
 pub mod worker;
 
 pub use config::LedgersConfig;
+pub use mcp::McpModule;
 pub use routes::Dispatch;
 
 use cratefield_core::{Config, ConfigError, Harness, Runtime, Venture, VentureEnv};
@@ -48,7 +50,7 @@ pub fn harness(
     );
 
     let venture = Venture::new("ledgers", &domain)
-        .public_url(public_url)
+        .public_url(public_url.clone())
         .cors_origins(cors_origins)
         .env(VentureEnv::Development);
 
@@ -89,6 +91,10 @@ pub fn harness(
     // Add OpenAPI module
     let openapi_module = openapi::OpenApiModule::new(registry);
     let builder = builder.module(openapi_module);
+
+    // Add MCP module
+    let mcp_module = mcp::McpModule::new(Arc::new(registry.clone()), dispatch.clone(), public_url);
+    let builder = builder.module(mcp_module);
 
     builder.build()
 }
