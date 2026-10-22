@@ -83,6 +83,11 @@ fn the_monthly_profit_and_loss_adds_up_to_the_golden_year() {
     assert_eq!(revenue - expenses, GOLDEN.fy_net_income);
 }
 
+/// The equity accounts of the fixture at year end, credit-positive: share
+/// capital 2,500,000 (3010) and retained earnings 1,200,000 (3020). The bank
+/// loan (2510, 15,000,000) is a liability in the generic chart.
+const GOLDEN_EQUITY_ACCOUNTS: i64 = 3_700_000;
+
 #[test]
 fn the_balance_sheet_at_year_end_balances_and_matches_the_golden_totals() {
     let f = fixture();
@@ -107,13 +112,55 @@ fn the_balance_sheet_at_year_end_balances_and_matches_the_golden_totals() {
         .map(|(_, balance)| balance)
         .sum();
     assert_eq!(assets, golden_assets);
-    // The report's equity is the equity accounts only; the year's result sits
-    // in the income and expense accounts. Assets equal liabilities, equity and
-    // the year's net income together.
+    assert_eq!(minor(&body["equity_accounts"]), GOLDEN_EQUITY_ACCOUNTS);
     assert_eq!(
-        assets,
-        liabilities + equity + GOLDEN.fy_net_income,
-        "assets = liabilities + equity + current-year result"
+        minor(&body["current_year_result"]),
+        GOLDEN.fy_net_income,
+        "the year's result is income minus expenses"
+    );
+    // Equity as presented includes the year's result, so the sheet balances on
+    // its own: assets = liabilities + equity, and the check reads zero.
+    assert_eq!(equity, GOLDEN_EQUITY_ACCOUNTS + GOLDEN.fy_net_income);
+    assert_eq!(assets, liabilities + equity);
+    assert_eq!(body["balanced"], true, "{body}");
+    assert_eq!(minor(&body["difference"]), 0, "{body}");
+}
+
+#[test]
+fn the_balance_sheet_mid_year_balances_against_the_fixture() {
+    let f = fixture();
+    seed_once(&f);
+    let through = format!("{YEAR}-06-30");
+    let book = halden::book(YEAR);
+    let balances = book.balances_through(&through);
+    let assets: i64 = balances
+        .iter()
+        .filter(|(account, _)| account.starts_with('1'))
+        .map(|(_, balance)| balance)
+        .sum();
+    // Income and expense activity from 1 January to 30 June, credit-positive.
+    let half_year_result: i64 = -balances
+        .iter()
+        .filter(|(account, _)| account.starts_with('4') || account.starts_with('5'))
+        .map(|(_, balance)| balance)
+        .sum::<i64>();
+    assert_ne!(half_year_result, 0, "the fixture has activity by June");
+
+    let response = f.send(
+        Method::GET,
+        &format!("/v1/reports/balance-sheet?as_of={through}"),
+        &f.keys.full,
+        None,
+    );
+    assert_eq!(response.status.as_u16(), 200, "{}", response.json());
+    let body = json(&response);
+    assert_eq!(minor(&body["assets"]), assets);
+    assert_eq!(minor(&body["current_year_result"]), half_year_result);
+    assert_eq!(body["balanced"], true, "{body}");
+    assert_eq!(minor(&body["difference"]), 0, "{body}");
+    assert_eq!(
+        minor(&body["equity"]),
+        minor(&body["equity_accounts"]) + half_year_result
     );
 }
 
@@ -302,4 +349,100 @@ fn the_december_trial_balance_matches_the_fixture_activity() {
         .map(|(account, balance)| (account.to_owned(), balance))
         .collect();
     assert_eq!(actual, expected);
+}
+
+// ------------------------------------------------ the deployed seed route
+
+use ledgers_server::demo::{SeedGate, seed_demo_gate};
+
+#[test]
+fn an_unset_seed_secret_is_not_found() {
+    assert_eq!(
+        seed_demo_gate(None, "anything", Some("1")),
+        SeedGate::NotFound
+    );
+    assert_eq!(seed_demo_gate(Some(""), "", Some("1")), SeedGate::NotFound);
+    assert_eq!(SeedGate::NotFound.status(), Some(404));
+}
+
+#[test]
+fn a_wrong_or_missing_token_is_unauthorized() {
+    assert_eq!(
+        seed_demo_gate(Some("s3cret"), "wrong", Some("1")),
+        SeedGate::Unauthorized
+    );
+    assert_eq!(
+        seed_demo_gate(Some("s3cret"), "", Some("1")),
+        SeedGate::Unauthorized
+    );
+    assert_eq!(SeedGate::Unauthorized.status(), Some(401));
+}
+
+#[test]
+fn a_missing_allow_flag_is_forbidden() {
+    for allow in [None, Some("0"), Some("true"), Some("")] {
+        assert_eq!(
+            seed_demo_gate(Some("s3cret"), "s3cret", allow),
+            SeedGate::Forbidden,
+            "{allow:?}"
+        );
+    }
+    assert_eq!(SeedGate::Forbidden.status(), Some(403));
+}
+
+#[test]
+fn the_right_token_and_the_flag_open_the_gate() {
+    assert_eq!(
+        seed_demo_gate(Some("s3cret"), "s3cret", Some("1")),
+        SeedGate::Open
+    );
+    assert_eq!(SeedGate::Open.status(), None);
+}
+
+#[test]
+fn the_internal_agent_loads_the_book_and_a_second_run_posts_nothing() {
+    let f = fixture();
+    let book = halden::book(YEAR);
+    let first = pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book))
+        .expect("the internal agent seeds the book");
+    assert_eq!(first.posted, 153, "{first:?}");
+    assert_eq!(first.reversed, 2, "{first:?}");
+    assert_eq!(first.dimensions_created, 4, "{first:?}");
+
+    let before = account_balances(&f);
+    let second = pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book))
+        .expect("a second run checks");
+    assert_eq!(second.posted, 0, "{second:?}");
+    assert_eq!(second.reversed, 0, "{second:?}");
+    assert_eq!(second.dimensions_created, 0, "{second:?}");
+    assert_eq!(second.skipped, first.posted + first.reversed, "{second:?}");
+    assert_eq!(account_balances(&f), before, "nothing new was posted");
+
+    // The trial balance is the fixture's golden year end.
+    let expected: BTreeMap<String, i64> = GOLDEN
+        .year_end_balances
+        .iter()
+        .map(|(account, balance)| ((*account).to_owned(), *balance))
+        .collect();
+    assert_eq!(account_balances(&f), expected);
+}
+
+#[test]
+fn the_internal_agent_posts_agent_entries_and_person_entries() {
+    let f = fixture();
+    let book = halden::book(YEAR);
+    pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book)).expect("seeds");
+    let march = f.send(
+        Method::GET,
+        &format!("/v1/entries?period={YEAR}-03&limit=200"),
+        &f.keys.full,
+        None,
+    );
+    let entries = json(&march)["entries"].as_array().expect("entries").clone();
+    let posted_by: Vec<&str> = entries
+        .iter()
+        .filter_map(|entry| entry["posted_by"].as_str())
+        .collect();
+    assert!(posted_by.contains(&"agent"), "{posted_by:?}");
+    assert!(posted_by.contains(&"person"), "{posted_by:?}");
 }

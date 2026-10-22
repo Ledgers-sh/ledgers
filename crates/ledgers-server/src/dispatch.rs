@@ -171,6 +171,10 @@ impl ServerDispatch {
         let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
             .await
             .map_err(fail)?;
+        let policy = match &presented {
+            Presented::Principal(principal) => internal_agent_policy(policy, principal, now_at),
+            Presented::Bearer(_) | Presented::Session(_) => policy,
+        };
         let (authenticator, credential) = match presented {
             Presented::Bearer(token) => (
                 Authn::Key(KeyStore {
@@ -180,6 +184,7 @@ impl ServerDispatch {
                 }),
                 token,
             ),
+            Presented::Principal(principal) => (Authn::Fixed(principal), String::new()),
             Presented::Session(session) => {
                 let id = session.id.clone();
                 (
@@ -355,10 +360,57 @@ impl Dispatch for ServerDispatch {
     }
 }
 
-/// The authenticator a command runs under: an agent key or a person session.
+/// Registers the policy row of an in-process agent principal. The principal is
+/// not in the `agent_key` table, so without this its entries would be denied as
+/// an unknown key. The row takes the principal's own tier and per-entry
+/// ceilings; the day's ceiling is the same figure, so the daily meter never
+/// binds before the per-entry one. A person principal needs no row.
+fn internal_agent_policy(
+    policy: KeyPolicy,
+    principal: &Principal,
+    now: OffsetDateTime,
+) -> KeyPolicy {
+    let Principal::Agent {
+        key_id,
+        tier,
+        limits,
+    } = principal
+    else {
+        return policy;
+    };
+    let limits = limits
+        .iter()
+        .map(|(code, limit)| {
+            (
+                code.clone(),
+                CurrencyLimit {
+                    per_entry: limit.base_ceiling,
+                    per_day: limit.base_ceiling,
+                },
+            )
+        })
+        .collect();
+    policy.with_key(AgentKey {
+        id: key_id.clone(),
+        label: "in-process".to_owned(),
+        owner: "server".to_owned(),
+        tier: *tier,
+        limits,
+        allowed_journals: None,
+        allowed_accounts: None,
+        expires_at: None,
+        created_at: now,
+        last_used_at: None,
+        revoked_at: None,
+    })
+}
+
+/// The authenticator a command runs under: an agent key, a person session, or
+/// a principal the server vouches for in-process (see [`Presented::Principal`]).
 enum Authn {
     Key(KeyStore),
     Session(SessionAuthenticator),
+    Fixed(Principal),
 }
 
 #[async_trait]
@@ -367,6 +419,7 @@ impl Authenticator for Authn {
         match self {
             Authn::Key(store) => store.authenticate(credential).await,
             Authn::Session(session) => session.authenticate(credential).await,
+            Authn::Fixed(principal) => Ok(principal.clone()),
         }
     }
 }
@@ -1629,8 +1682,17 @@ pub struct BalanceSheetOutput {
     pub assets: SerializableAmount,
     /// Total liabilities.
     pub liabilities: SerializableAmount,
-    /// Total equity.
+    /// Total equity as presented: `equity_accounts` plus `current_year_result`.
     pub equity: SerializableAmount,
+    /// The equity accounts alone (capital, reserves, retained earnings).
+    pub equity_accounts: SerializableAmount,
+    /// Income minus expenses from the fiscal year start up to `as_of`
+    /// (Jahresüberschuss, or Jahresfehlbetrag when negative).
+    pub current_year_result: SerializableAmount,
+    /// Assets minus liabilities minus equity. Zero when `balanced`.
+    pub difference: SerializableAmount,
+    /// Whether the sheet balances on its own: assets = liabilities + equity.
+    pub balanced: bool,
 }
 
 /// `reports.balance_sheet`: assets, liabilities and equity as of a date
@@ -1671,6 +1733,10 @@ impl Command for ReportsBalanceSheet {
             assets: SerializableAmount::from(sheet.assets),
             liabilities: SerializableAmount::from(sheet.liabilities),
             equity: SerializableAmount::from(sheet.equity),
+            equity_accounts: SerializableAmount::from(sheet.equity_accounts),
+            current_year_result: SerializableAmount::from(sheet.current_year_result),
+            difference: SerializableAmount::from(sheet.difference),
+            balanced: sheet.balanced,
         }))
     }
 }

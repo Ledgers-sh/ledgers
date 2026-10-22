@@ -17,8 +17,8 @@ use crate::dispatch::{
 };
 use crate::routes::{Dispatch, Presented};
 use async_trait::async_trait;
-use cratefield_core::Database;
-use ledgers_commands::auth::{Authenticator, Credential, Principal};
+use cratefield_core::{Database, constant_time_eq};
+use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::error::CommandError;
 use ledgers_commands::{CommandContext, Execute, Executor};
 use ledgers_demo::{DemoBook, DemoEntry, DemoLine, EntryKind, Poster};
@@ -28,6 +28,26 @@ use serde_json::{Value, json};
 /// The person id the in-process seeding posts as. The company's owner
 /// records it on the audit events of person entries.
 const DEMO_OWNER_ID: &str = "demo-owner";
+
+/// The key id the internal seeding agent is recorded under on audit events.
+/// No key with this id is issued or stored.
+const INTERNAL_AGENT_KEY_ID: &str = "demo-seed";
+
+/// The per-entry ceiling of the internal agent, the same generous ceiling the
+/// dev bootstrap grants its keys.
+const INTERNAL_AGENT_CEILING: i128 = 100_000_000_000_000;
+
+/// Who posts the agent entries of a seeding run.
+#[derive(Clone, Copy, Debug)]
+pub enum AgentPoster<'a> {
+    /// An agent key of the company, presented as a bearer token: the key is
+    /// verified and the policy decides as it does for any agent.
+    Key(&'a str),
+    /// The seeding path's internal agent principal, with the post-within-limits
+    /// tier. No key is issued, stored or presented; the server vouches for it
+    /// in-process only (the deployed `POST /admin/seed-demo` route).
+    Internal,
+}
 
 /// What a seeding run did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -70,6 +90,34 @@ pub async fn seed(
     agent_key: &str,
     book: &DemoBook,
 ) -> Result<SeedReport, String> {
+    seed_as(deps, company_id, AgentPoster::Key(agent_key), book).await
+}
+
+/// Seeds `book` into `company_id` as the internal agent principal, with no
+/// agent key. This is the loader behind `POST /admin/seed-demo`; the caller
+/// must have passed [`seed_demo_gate`] first.
+///
+/// # Errors
+/// As [`seed`].
+pub async fn seed_internal(
+    deps: &Deps,
+    company_id: &str,
+    book: &DemoBook,
+) -> Result<SeedReport, String> {
+    seed_as(deps, company_id, AgentPoster::Internal, book).await
+}
+
+/// The loader both paths share: dimensions first, then every entry in posting
+/// order, skipping what is already in the book.
+///
+/// # Errors
+/// As [`seed`].
+pub async fn seed_as(
+    deps: &Deps,
+    company_id: &str,
+    poster: AgentPoster<'_>,
+    book: &DemoBook,
+) -> Result<SeedReport, String> {
     let mut report = SeedReport::default();
     let db = deps.db.as_ref();
     let stamp = dispatch::rfc3339_utc(deps.clock.now());
@@ -109,7 +157,8 @@ pub async fn seed(
                 let input = post_input(book.currency, entry, lines);
                 match entry.poster {
                     Poster::Agent => {
-                        post_as_agent(deps, &agent, company_id, agent_key, &input)
+                        let presented = agent_presented(poster, book.currency);
+                        post_as_agent(deps, &agent, company_id, presented, &input)
                             .await
                             .map_err(|err| format!("{}: {err}", entry.external_id))?;
                     }
@@ -136,7 +185,8 @@ pub async fn seed(
                 };
                 match entry.poster {
                     Poster::Agent => {
-                        reverse_as_agent(deps, &agent, company_id, agent_key, &input)
+                        let presented = agent_presented(poster, book.currency);
+                        reverse_as_agent(deps, &agent, company_id, presented, &input)
                             .await
                             .map_err(|err| format!("reverse {of}: {err}"))?;
                     }
@@ -237,11 +287,39 @@ fn post_input(currency: &str, entry: &DemoEntry, lines: &[DemoLine]) -> EntriesP
     serde_json::from_value(input).expect("the demo entry matches the entries API schema")
 }
 
+/// How the agent entries present themselves: the key as a bearer token, or
+/// the internal principal in the book's currency.
+fn agent_presented(poster: AgentPoster<'_>, currency: &str) -> Presented {
+    match poster {
+        AgentPoster::Key(key) => Presented::Bearer(key.to_owned()),
+        AgentPoster::Internal => Presented::Principal(internal_agent(currency)),
+    }
+}
+
+/// The internal seeding agent: post-within-limits, with a ceiling in the
+/// book's currency and nothing else. It exists only in memory.
+fn internal_agent(currency: &str) -> Principal {
+    let limits = Limits::new()
+        .insert(
+            currency,
+            Limit {
+                base_ceiling: INTERNAL_AGENT_CEILING,
+                transaction_ceiling: INTERNAL_AGENT_CEILING,
+            },
+        )
+        .unwrap_or_default();
+    Principal::Agent {
+        key_id: INTERNAL_AGENT_KEY_ID.to_owned(),
+        tier: Tier::PostWithinLimits,
+        limits,
+    }
+}
+
 async fn post_as_agent(
     deps: &Deps,
     agent: &ServerDispatch,
     company_id: &str,
-    agent_key: &str,
+    presented: Presented,
     input: &EntriesPostInput,
 ) -> Result<(), String> {
     let value = serde_json::to_value(input).map_err(|err| err.to_string())?;
@@ -251,13 +329,13 @@ async fn post_as_agent(
             "entries.post",
             value,
             &request_id(deps),
-            Some(Presented::Bearer(agent_key.to_owned())),
+            Some(presented),
         )
         .await
         .map_err(|problem| problem.to_string())?;
     if outcome.get("status").and_then(Value::as_str) == Some("needs-approval") {
         return Err(format!(
-            "the agent key needs a person to approve this entry in {company_id}"
+            "the agent needs a person to approve this entry in {company_id}"
         ));
     }
     Ok(())
@@ -267,7 +345,7 @@ async fn reverse_as_agent(
     deps: &Deps,
     agent: &ServerDispatch,
     company_id: &str,
-    agent_key: &str,
+    presented: Presented,
     input: &EntriesReverseInput,
 ) -> Result<(), String> {
     let value = serde_json::to_value(input).map_err(|err| err.to_string())?;
@@ -277,16 +355,60 @@ async fn reverse_as_agent(
             "entries.reverse",
             value,
             &request_id(deps),
-            Some(Presented::Bearer(agent_key.to_owned())),
+            Some(presented),
         )
         .await
         .map_err(|problem| problem.to_string())?;
     if outcome.get("status").and_then(Value::as_str) == Some("needs-approval") {
         return Err(format!(
-            "the agent key needs a person to approve the reversal in {company_id}"
+            "the agent needs a person to approve the reversal in {company_id}"
         ));
     }
     Ok(())
+}
+
+/// What `POST /admin/seed-demo` answers before it reads or writes anything.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeedGate {
+    /// Every check passed: the seed may run.
+    Open,
+    /// `SEED_TOKEN` is unset or empty: the route does not exist (404).
+    NotFound,
+    /// The bearer token is missing or wrong (401).
+    Unauthorized,
+    /// `LEDGERS_ALLOW_DEMO_SEED` is not `"1"` (403).
+    Forbidden,
+}
+
+impl SeedGate {
+    /// The HTTP status the refusal answers with, `None` when open.
+    #[must_use]
+    pub fn status(self) -> Option<u16> {
+        match self {
+            SeedGate::Open => None,
+            SeedGate::NotFound => Some(404),
+            SeedGate::Unauthorized => Some(401),
+            SeedGate::Forbidden => Some(403),
+        }
+    }
+}
+
+/// The checks of `POST /admin/seed-demo`, in order, mirroring the bootstrap
+/// route: the route is absent while the secret is unset (404), a wrong bearer
+/// token is refused (401), and the demo also needs `LEDGERS_ALLOW_DEMO_SEED=1`,
+/// which is never set in production (403).
+#[must_use]
+pub fn seed_demo_gate(secret: Option<&str>, presented: &str, allow: Option<&str>) -> SeedGate {
+    let Some(secret) = secret.filter(|value| !value.is_empty()) else {
+        return SeedGate::NotFound;
+    };
+    if !constant_time_eq(presented.as_bytes(), secret.as_bytes()) {
+        return SeedGate::Unauthorized;
+    }
+    if allow != Some("1") {
+        return SeedGate::Forbidden;
+    }
+    SeedGate::Open
 }
 
 /// Posts one entry as the company's owner, through the executor under a
