@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { choose } from './select';
 import { API_KEY, API_ORIGIN, mockApi, stopMockApi } from './mockApi';
 
 test.describe('connect, post, reverse', () => {
@@ -36,10 +37,10 @@ test.describe('connect, post, reverse', () => {
     await page.getByRole('link', { name: 'New entry' }).first().click();
     await expect(page.getByRole('heading', { name: 'New entry' })).toBeVisible();
     await page.getByLabel('Description').fill('Office rent October');
-    await page.getByLabel('Line 1 account').selectOption('6000');
+    await choose(page, 'Line 1 account', /6000/);
     await page.getByLabel('Line 1 amount').fill('850.00');
-    await page.getByLabel('Line 2 account').selectOption('1000');
-    await page.getByLabel('Line 2 side').selectOption('credit');
+    await choose(page, 'Line 2 account', /1000/);
+    await choose(page, 'Line 2 side', 'Credit');
     await page.getByLabel('Line 2 amount').fill('800.00');
     await expect(page.getByText('Debits exceed by 50.00 EUR')).toBeVisible();
     await page.getByRole('button', { name: 'Post entry' }).click();

@@ -10,6 +10,7 @@ Commands:
   account-balance-by-dimension  reports.account_balance_by_dimension
   balance-sheet                 reports.balance_sheet
   profit-and-loss               reports.profit_and_loss
+  trends                        reports.trends
   trial-balance                 reports.trial_balance
   help                          Print this message or the help of the given subcommand(s)
 

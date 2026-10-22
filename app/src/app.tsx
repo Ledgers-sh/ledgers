@@ -8,11 +8,12 @@ import {
   DEFAULT_SERVER_URL,
   loadCredentials,
   loadCurrency,
-  loadPeriod,
+  loadRange,
   loadTheme,
   saveCredentials,
   saveCurrency,
   savePeriod,
+  saveRange,
   saveTheme,
   SessionContext,
   type Credentials,
@@ -36,7 +37,10 @@ import { BillReview } from './ui/BillReview';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
 import { Settings } from './ui/Settings';
 import { badgeText } from './lib/approvals';
+import { normaliseRange, type MonthRange } from './lib/trends';
+import { PeriodPicker } from './ui/PeriodPicker';
 import { t, useLocale, type MessageKey } from './i18n';
+
 import { LanguagePicker } from './i18n/LanguagePicker';
 import { Ltr } from './i18n/Ltr';
 import { CommandPalette, type PaletteData } from './palette/CommandPalette';
@@ -199,7 +203,8 @@ function Shell({
   const online = useOnline();
   const locale = useLocale();
   const { items, push, dismiss } = useToasts();
-  const [period, setPeriodState] = useState<string>(() => loadPeriod());
+  const [range, setRangeState] = useState<MonthRange>(() => loadRange());
+  const period = range.to;
   const [currency, setCurrencyState] = useState<string>(() => loadCurrency());
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   // The OpenAPI document: undefined while loading, null when the server did not return one.
@@ -233,10 +238,13 @@ function Shell({
   const nav = NAV.filter((item) => item.hash !== 'approvals' || !apiKey);
   const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
 
-  const setPeriod = useCallback((next: string) => {
-    savePeriod(next);
-    setPeriodState(next);
+  const setRange = useCallback((next: MonthRange) => {
+    const normalised = normaliseRange(next);
+    saveRange(normalised);
+    savePeriod(normalised.to);
+    setRangeState(normalised);
   }, []);
+  const setPeriod = useCallback((next: string) => setRange({ from: next, to: next }), [setRange]);
   const setCurrency = useCallback((next: string) => {
     saveCurrency(next);
     setCurrencyState(next);
@@ -246,6 +254,8 @@ function Shell({
     client: apiKey ? { baseUrl, apiKey } : { baseUrl },
     period,
     setPeriod,
+    range,
+    setRange,
     currency,
     setCurrency,
     online,
@@ -343,18 +353,7 @@ function Shell({
                 <span class="person-name">{person.email ?? t('shell.signed_in')}</span>
               </span>
             )}
-            <label class="period">
-              <span>{t('shell.period')}</span>
-              <input
-                class="input"
-                type="month"
-                value={period}
-                onInput={(event) => {
-                  const value = (event.target as HTMLInputElement).value;
-                  if (/^\d{4}-\d{2}$/.test(value)) setPeriod(value);
-                }}
-              />
-            </label>
+            <PeriodPicker range={range} onChange={setRange} />
             <span class="kbd-hint" aria-hidden="true">
               <kbd>N</kbd> {t('shell.hint_new')} <kbd>/</kbd> {t('shell.hint_search')}
             </span>

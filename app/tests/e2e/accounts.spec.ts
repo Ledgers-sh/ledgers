@@ -7,6 +7,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { mockApi, signInPerson, stopMockApi } from './mockApi';
+import { choose } from './select';
 
 test.afterAll(stopMockApi);
 
@@ -46,8 +47,8 @@ test.describe('chart of accounts', () => {
     await page.getByLabel('Account number').fill('1600');
     await expect(page.locator('#acct-number-error')).toHaveCount(0);
 
-    await page.getByLabel('Class').selectOption('asset');
-    await page.getByLabel('Parent account').selectOption('1500');
+    await choose(page, /Class/, 'Asset');
+    await choose(page, /Parent account/, /1500/);
     await page.locator('#acct-name').fill('Vehicles');
     await page.getByLabel('Tags').fill('Vehicles');
     await expect(page.locator('#acct-tags-error')).toHaveText('Use lowercase letters, digits and single hyphens.');
@@ -62,17 +63,10 @@ test.describe('chart of accounts', () => {
 
   test('a parent of another class is refused inline', async ({ page }) => {
     await openAs(page, '#/accounts/new');
-    await page.getByLabel('Class').selectOption('liability');
-    // The parent list only offers accounts of the chosen class, so pick an asset by hand through the option list.
-    await page.evaluate(() => {
-      const select = document.getElementById('acct-parent') as HTMLSelectElement;
-      const option = document.createElement('option');
-      option.value = '1500';
-      option.textContent = '1500 Fixed assets';
-      select.appendChild(option);
-      select.value = '1500';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    // Pick an asset parent while the class is asset, then change the class: the parent stays chosen and is refused.
+    await choose(page, /Class/, 'Asset');
+    await choose(page, /Parent account/, /1500/);
+    await choose(page, /Class/, 'Liability');
     await page.getByRole('button', { name: 'Create account' }).click();
     await expect(page.locator('#acct-parent-error')).toHaveText('The parent must be in the same class.');
   });
@@ -110,7 +104,8 @@ test.describe('chart of accounts', () => {
   test('the account page lists recent entries and links to the journal entry', async ({ page }) => {
     await openAs(page, '#/accounts/1000');
     const link = page.getByRole('link', { name: /Entry / }).first();
-    await expect(link).toHaveAttribute('href', '#/journal/entry-seed-1');
+    // Newest first: the rent entry (posted after the capital) is the account's latest line.
+    await expect(link).toHaveAttribute('href', '#/journal/entry-seed-3');
   });
 
   test('the list and the form pass axe with no serious violations', async ({ page }) => {

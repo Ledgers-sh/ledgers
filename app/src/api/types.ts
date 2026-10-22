@@ -247,3 +247,48 @@ export interface AccountDetailOutput {
 export interface AccountWriteOutput {
   account: Account;
 }
+
+/** One month of `reports.trends`. Balances are the position at the month's end. */
+export interface TrendMonth {
+  period: string;
+  revenue: Amount;
+  expenses: Amount;
+  net_result: Amount;
+  cash: Amount;
+  receivables: Amount;
+  payables: Amount;
+}
+
+/** An expense account ranked in `reports.trends`. `share_bps` is basis points of the range's expenses. */
+export interface TrendExpenseAccount {
+  account: string;
+  name_key: string;
+  amount: Amount;
+  share_bps: number;
+}
+
+/** Revenue and expenses of one dimension value in `reports.trends`. */
+export interface TrendDimensionShare {
+  code: string;
+  name: string;
+  revenue: Amount;
+  expenses: Amount;
+}
+
+/** Entries posted in one month, by who posted them. */
+export interface TrendActivity {
+  period: string;
+  agent: number;
+  human: number;
+}
+
+export interface TrendsOutput {
+  currency: string;
+  from: string;
+  to: string;
+  months: TrendMonth[];
+  top_expense_accounts: TrendExpenseAccount[];
+  dimension: string | null;
+  by_dimension: TrendDimensionShare[];
+  activity: TrendActivity[];
+}

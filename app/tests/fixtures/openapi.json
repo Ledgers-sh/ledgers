@@ -3018,6 +3018,125 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/p-and-l\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/reports/trends": {
+      "get": {
+        "operationId": "reports_trends",
+        "description": "Execute command: reports.trends",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TrendsOutput",
+                  "description": "The output of `reports.trends`.",
+                  "type": "object",
+                  "properties": {
+                    "currency": {
+                      "description": "The company's base currency code.",
+                      "type": "string"
+                    },
+                    "from": {
+                      "description": "The first month reported.",
+                      "type": "string"
+                    },
+                    "to": {
+                      "description": "The last month reported.",
+                      "type": "string"
+                    },
+                    "months": {
+                      "description": "One row per month, in order.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrendMonthView"
+                      }
+                    },
+                    "top_expense_accounts": {
+                      "description": "The largest expense accounts in the range.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ExpenseAccountView"
+                      }
+                    },
+                    "dimension": {
+                      "description": "The dimension kind the split is by, when one was asked for.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "by_dimension": {
+                      "description": "Revenue and expenses per dimension value; empty without a dimension.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DimensionShareView"
+                      }
+                    },
+                    "activity": {
+                      "description": "Entries posted per month by actor; months with none are left out.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ActivityMonthView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "currency",
+                    "from",
+                    "to",
+                    "months",
+                    "top_expense_accounts",
+                    "by_dimension",
+                    "activity"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.trends",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports trends",
+        "x-ledgers-mcp": "reports_trends",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/trends\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/reports/trial-balance": {
       "get": {
         "operationId": "reports_trial_balance",
@@ -4105,6 +4224,131 @@
         "required": [
           "dimension_value",
           "balance"
+        ]
+      },
+      "TrendMonthView": {
+        "description": "One month of `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The month, `YYYY-MM`.",
+            "type": "string"
+          },
+          "revenue": {
+            "description": "Income for the month.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "expenses": {
+            "description": "Expenses for the month.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "net_result": {
+            "description": "Revenue minus expenses.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "cash": {
+            "description": "Cash and bank balance at month end.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "receivables": {
+            "description": "Receivables balance at month end.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "payables": {
+            "description": "Payables balance at month end, as a positive amount owed.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "period",
+          "revenue",
+          "expenses",
+          "net_result",
+          "cash",
+          "receivables",
+          "payables"
+        ]
+      },
+      "ExpenseAccountView": {
+        "description": "One ranked expense account of `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "account": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "name_key": {
+            "description": "The account's name key.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "The account's expenses in the range.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "share_bps": {
+            "description": "Share of the range's expenses in basis points (1/100 of a percent).",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "account",
+          "name_key",
+          "amount",
+          "share_bps"
+        ]
+      },
+      "DimensionShareView": {
+        "description": "Revenue and expenses of one dimension value in `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The dimension value's code.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The dimension value's name.",
+            "type": "string"
+          },
+          "revenue": {
+            "description": "Income tagged with the value.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "expenses": {
+            "description": "Expenses tagged with the value.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "revenue",
+          "expenses"
+        ]
+      },
+      "ActivityMonthView": {
+        "description": "One month of entries posted, by actor, in `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The month, `YYYY-MM`.",
+            "type": "string"
+          },
+          "agent": {
+            "description": "Entries posted by an agent key.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "human": {
+            "description": "Entries posted by a person.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "agent",
+          "human"
         ]
       },
       "TrialBalanceRowView": {
