@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 
 type IconProps = { name: IconName; class?: string };
-export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'approvals' | 'plus' | 'sun' | 'moon' | 'logout' | 'settings';
+export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'bank' | 'approvals' | 'plus' | 'sun' | 'moon' | 'logout' | 'settings' | 'chevron' | 'check' | 'close' | 'chevron-left' | 'chevron-right' | 'info';
 
 const PATHS: Record<IconName, JSX.Element> = {
   settings: (
@@ -23,6 +23,13 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z" />
       <path d="M6 3a2 2 0 0 0-2 2v14" />
       <path d="M9 8h6M9 12h6M9 16h4" />
+    </>
+  ),
+  bank: (
+    <>
+      <path d="M3 10l9-6 9 6" />
+      <path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8" />
+      <path d="M3 20.5h18" />
     </>
   ),
   accounts: (
@@ -61,6 +68,17 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <path d="M16 17l5-5-5-5M21 12H9" />
+    </>
+  ),
+  chevron: <path d="M6 9l6 6 6-6" />,
+  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  'chevron-left': <path d="M15 6l-6 6 6 6" />,
+  'chevron-right': <path d="M9 6l6 6-6 6" />,
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8h.01" />
     </>
   ),
 };

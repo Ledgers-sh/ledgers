@@ -11,7 +11,7 @@
     "preview": "vite preview --port 5173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts tests/e2e/agent-keys.spec.ts tests/e2e/approvals.spec.ts tests/e2e/journal.spec.ts tests/e2e/a11y.spec.ts tests/e2e/i18n-palette.spec.ts tests/e2e/accounts.spec.ts tests/e2e/bills.spec.ts",
+    "test:e2e": "playwright test tests/e2e/smoke.spec.ts tests/e2e/signin.spec.ts tests/e2e/agent-keys.spec.ts tests/e2e/approvals.spec.ts tests/e2e/journal.spec.ts tests/e2e/a11y.spec.ts tests/e2e/i18n-palette.spec.ts tests/e2e/accounts.spec.ts tests/e2e/bills.spec.ts tests/e2e/overview.spec.ts tests/e2e/pickers.spec.ts tests/e2e/bank.spec.ts tests/e2e/settings.spec.ts",
     "screenshots": "playwright test tests/e2e/screenshots.spec.ts",
     "i18n:gen": "node scripts/gen-i18n.mjs"
   },

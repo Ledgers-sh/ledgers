@@ -4,10 +4,12 @@
 //! the ledger's own: an agent's post into a protected account is held for a
 //! person, and the bill records the entry it became.
 
+use crate::iban;
 use crate::model::{
     BillInput, BillLine, BillView, CheckView, FLAG_INSTRUCTION_TEXT, PreviewLine, Status,
     VendorView, derive_status, entry_lines, open_flags,
 };
+use crate::parties::{MatchCandidate, match_party};
 use crate::store::{self, BillRow};
 use cratefield_core::{Database, Problem, Statement};
 use ledgers_commands::auth::Tier;
@@ -20,6 +22,8 @@ use ledgers_ledger::surface::{
     PostEntry, PostEntryInput, PostEntryOutput, SerializableAmount, SerializableEntryDraft,
     SerializableLine, SerializablePostedEntry,
 };
+use ledgers_ledger::units::{self, UnitScope};
+use ledgers_tax::normalize_vat_id;
 use schemars::JsonSchema;
 use sea_query::Value;
 use serde::{Deserialize, Serialize};
@@ -192,32 +196,19 @@ fn checks_and_flags(
     (checks, flags)
 }
 
-fn normalise_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn normalise_iban(iban: &str) -> String {
-    iban.chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_uppercase()
-}
-
 /// Whether an invoice IBAN differs from the IBAN the vendor is known by. A
 /// vendor with no known IBAN, or an invoice with none, differs from nothing.
 fn iban_differs(known: Option<&str>, seen: Option<&str>) -> bool {
     match (known, seen) {
-        (Some(known), Some(seen)) => normalise_iban(known) != normalise_iban(seen),
+        (Some(known), Some(seen)) => iban::normalise(known) != iban::normalise(seen),
         _ => false,
     }
 }
 
-/// The vendor a bill belongs to: matched by VAT id, then by normalised name,
-/// otherwise a new vendor that needs a person. Returns the vendor and
-/// whether its IBAN differs from the one the vendor is known by.
+/// The vendor a bill belongs to: the party with the same VAT id, then with the
+/// same normalised name (`parties::match_party`), otherwise a new vendor that
+/// needs a person. Returns the vendor, the vendor to create (if any) and
+/// whether the invoice IBAN differs from the one the vendor is known by.
 async fn resolve_vendor(
     db: &dyn Database,
     company_id: &str,
@@ -225,24 +216,24 @@ async fn resolve_vendor(
     ctx: &CommandContext,
 ) -> Result<(VendorView, Option<VendorView>, bool), CommandError> {
     let known = store::vendors(db, company_id).await?;
-    let by_vat = input.vendor_vat_id.as_deref().and_then(|vat| {
-        known
+    let candidates: Vec<MatchCandidate> = known
+        .iter()
+        .map(|v| MatchCandidate {
+            id: v.id.clone(),
+            name: v.name.clone(),
+            vat_id: v.vat_id.as_deref().map(normalize_vat_id),
+        })
+        .collect();
+    if let Some(found) = match_party(
+        &candidates,
+        input.vendor_vat_id.as_deref(),
+        input.vendor_name.as_deref(),
+    ) {
+        let vendor = known
             .iter()
-            .find(|v| v.vat_id.as_deref() == Some(vat))
+            .find(|v| v.id == found.id)
             .cloned()
-    });
-    let by_name = input.vendor_name.as_deref().and_then(|name| {
-        let wanted = normalise_name(name);
-        (!wanted.is_empty())
-            .then(|| {
-                known
-                    .iter()
-                    .find(|v| normalise_name(&v.name) == wanted)
-                    .cloned()
-            })
-            .flatten()
-    });
-    if let Some(vendor) = by_vat.or(by_name) {
+            .ok_or_else(|| CommandError::InvalidInput("the matched vendor is missing".into()))?;
         let changed = iban_differs(vendor.iban.as_deref(), input.vendor_iban.as_deref());
         return Ok((vendor, None, changed));
     }
@@ -254,7 +245,11 @@ async fn resolve_vendor(
     let vendor = VendorView {
         id: format!("ven_{}", ctx.event_id),
         name,
-        vat_id: input.vendor_vat_id.clone(),
+        vat_id: input
+            .vendor_vat_id
+            .as_deref()
+            .map(normalize_vat_id)
+            .filter(|v| !v.is_empty()),
         iban: input.vendor_iban.clone(),
         needs_review: true,
     };
@@ -294,6 +289,7 @@ fn row_of(
         iban_changed,
         source: input.source.clone().unwrap_or_else(|| "manual".to_owned()),
         reader: input.reader.clone(),
+        unit: input.unit.clone(),
         posted_entry_id,
         discarded_at: None,
         created_by: input.created_by.clone(),
@@ -352,6 +348,7 @@ fn view_of(row: BillRow, journal_preview: Vec<PreviewLine>) -> BillView {
         flags,
         source: row.source,
         reader: row.reader,
+        unit: row.unit,
         posted_entry_id: row.posted_entry_id,
         journal_preview: if posted { Vec::new() } else { journal_preview },
         created_by: row.created_by,
@@ -505,8 +502,8 @@ fn insert_bill(company_id: &str, row: &BillRow) -> Result<Statement, CommandErro
     Ok(Statement::with_values(
         "INSERT INTO bill (id, company_id, document_id, vendor_id, invoice_number, invoice_date, due_date, \
          currency, net_minor, vat_minor, gross_minor, lines_json, confidence_json, checks_json, \
-         instruction_flags, iban_changed, source, reader, posted_entry_id, created_by, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)"
+         instruction_flags, iban_changed, source, reader, unit_code, posted_entry_id, created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)"
             .to_owned(),
         vec![
             Value::from(row.id.as_str()),
@@ -527,6 +524,7 @@ fn insert_bill(company_id: &str, row: &BillRow) -> Result<Statement, CommandErro
             Value::from(i64::from(row.iban_changed)),
             Value::from(row.source.as_str()),
             Value::from(row.reader.clone()),
+            Value::from(row.unit.clone()),
             Value::from(row.created_by.as_str()),
             Value::from(row.created_at.as_str()),
             Value::from(row.updated_at.as_str()),
@@ -628,7 +626,7 @@ impl Command for BillsUpdate {
         let statement = Statement::with_values(
             "UPDATE bill SET invoice_number = ?, invoice_date = ?, due_date = ?, currency = ?, net_minor = ?, \
              vat_minor = ?, gross_minor = ?, lines_json = ?, checks_json = ?, instruction_flags = ?, \
-             iban_changed = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
+             iban_changed = ?, unit_code = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
                 .to_owned(),
             vec![
                 Value::from(row.invoice_number.clone()),
@@ -642,6 +640,7 @@ impl Command for BillsUpdate {
                 Value::from(json_text(&row.checks)?),
                 Value::from(json_text(&row.instruction_flags)?),
                 Value::from(i64::from(row.iban_changed)),
+                Value::from(row.unit.clone()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
                 Value::from(existing.id.as_str()),
@@ -779,6 +778,9 @@ pub struct ListInput {
     pub limit: Option<u32>,
     /// Keep only bills with this status.
     pub status: Option<Status>,
+    /// The business-unit scope: a unit code, or `all` (the default).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// Output of `bills.list`.
@@ -818,7 +820,24 @@ impl Command for BillsList {
     ) -> Result<Plan<Self::Output>, CommandError> {
         let limit = input.limit.unwrap_or(50).clamp(1, MAX_LIST);
         let chart = load_chart(db, &ctx.company_id).await?;
-        let rows = store::list_bills(db, &ctx.company_id, limit).await?;
+        let unit_code = match UnitScope::parse(input.unit.as_deref())
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+        {
+            UnitScope::Consolidated => None,
+            UnitScope::Unit(code) => {
+                if units::find_unit(db, &ctx.company_id, &code)
+                    .await
+                    .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+                    .is_none()
+                {
+                    return Err(CommandError::InvalidInput(format!(
+                        "business unit {code} does not exist"
+                    )));
+                }
+                Some(code)
+            }
+        };
+        let rows = store::list_bills(db, &ctx.company_id, limit, unit_code.as_deref()).await?;
         let bills: Vec<BillView> = rows
             .into_iter()
             .map(|row| {
@@ -1022,6 +1041,7 @@ async fn entry_for(
         ));
     };
     let lines = entry_lines(&row.lines, vat_minor, gross, &vat, &payable);
+    let unit = bill_unit(db, &ctx.company_id, row.unit.as_deref()).await?;
     let journal_id = match &input.journal_id {
         Some(id) => id.clone(),
         None => ledgers_ledger::journal::find_journal(db, &ctx.company_id, "GN")
@@ -1061,17 +1081,25 @@ async fn entry_for(
         reverses: None,
         lines: lines
             .into_iter()
-            .map(|line| SerializableLine {
-                account_number: line.account,
-                side: line.side,
-                base: SerializableAmount {
-                    minor: line.minor.to_string(),
-                    currency: row.currency.clone(),
-                },
-                fx: None,
-                tax_code: None,
-                dimensions: BTreeMap::new(),
-                memo: None,
+            .map(|line| {
+                // Expense lines carry the bill's unit; VAT and the payable are
+                // balance-sheet lines and follow their account's unit rule.
+                let on_unit = line.account != vat && line.account != payable;
+                SerializableLine {
+                    account_number: line.account,
+                    side: line.side,
+                    base: SerializableAmount {
+                        minor: line.minor.to_string(),
+                        currency: row.currency.clone(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: match (&unit, on_unit) {
+                        (Some(code), true) => BTreeMap::from([("unit".to_owned(), code.clone())]),
+                        _ => BTreeMap::new(),
+                    },
+                    memo: None,
+                }
             })
             .collect(),
     };
@@ -1144,6 +1172,45 @@ impl Command for BillsPost {
     }
 }
 
+/// The business unit a bill posts under. While the company has units, a
+/// bill must name one (every expense line carries it); a named unit must
+/// exist and be active.
+///
+/// # Errors
+/// [`CommandError::InvalidInput`] when units are enabled and none is named,
+/// or the named unit is unknown or archived; [`CommandError::Database`] when
+/// a read fails.
+async fn bill_unit(
+    db: &dyn Database,
+    company_id: &str,
+    named: Option<&str>,
+) -> Result<Option<String>, CommandError> {
+    let enabled = units::units_enabled(db, company_id)
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    match named {
+        None if enabled => Err(CommandError::InvalidInput(
+            "the bill has no business unit; the company has units, so name one before it posts"
+                .into(),
+        )),
+        None => Ok(None),
+        Some(code) => {
+            let unit = units::find_unit(db, company_id, code)
+                .await
+                .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+                .ok_or_else(|| {
+                    CommandError::InvalidInput(format!("business unit {code} does not exist"))
+                })?;
+            if unit.archived {
+                return Err(CommandError::InvalidInput(format!(
+                    "business unit {code} is archived"
+                )));
+            }
+            Ok(Some(unit.code))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1151,13 +1218,10 @@ mod tests {
     #[test]
     fn vendor_names_match_regardless_of_case_and_punctuation() {
         assert_eq!(
-            normalise_name("Halden Supplies GmbH."),
-            normalise_name("halden supplies gmbh")
+            crate::parties::normalise_name("Halden Supplies GmbH."),
+            crate::parties::normalise_name("halden supplies gmbh")
         );
-        assert_eq!(
-            normalise_iban("de89 3704 0044"),
-            "DE89370400 44".replace(' ', "")
-        );
+        assert_eq!(iban::normalise("de89 3704 0044"), "DE8937040044");
     }
 
     #[test]

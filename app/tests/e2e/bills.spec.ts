@@ -58,7 +58,8 @@ test.describe('bills: inbox, review and posting (issues #20 to #22, #32, #34)', 
     await page.getByLabel('Description', { exact: true }).fill('Office paper');
     await page.getByRole('group', { name: 'Lines' }).getByLabel(/Net/).fill('1000.00');
     await page.getByRole('group', { name: 'Lines' }).getByLabel(/VAT \(EUR\)/).fill('190.00');
-    await page.getByLabel('Expense account').selectOption({ index: 1 });
+    await page.getByRole('combobox', { name: /Expense account/ }).click();
+    await page.getByRole('option').nth(1).click();
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Changes saved.')).toBeVisible();
 

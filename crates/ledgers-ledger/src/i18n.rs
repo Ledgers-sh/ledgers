@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// The locales the bundled charts ship: English, German, Indonesian.
+/// The locales the bundled charts ship: English, German, Indonesian, Dutch.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Locale {
     /// English (`"en"`).
@@ -26,6 +26,8 @@ pub enum Locale {
     De,
     /// Indonesian (`"id"`).
     Id,
+    /// Dutch (`"nl"`).
+    Nl,
 }
 
 impl Locale {
@@ -36,6 +38,7 @@ impl Locale {
             "en" => Some(Self::En),
             "de" => Some(Self::De),
             "id" => Some(Self::Id),
+            "nl" => Some(Self::Nl),
             _ => None,
         }
     }
@@ -47,13 +50,14 @@ impl Locale {
             Self::En => "en",
             Self::De => "de",
             Self::Id => "id",
+            Self::Nl => "nl",
         }
     }
 
     /// Every locale, in declaration order.
     #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::En, Self::De, Self::Id]
+    pub const fn all() -> [Self; 4] {
+        [Self::En, Self::De, Self::Id, Self::Nl]
     }
 }
 
@@ -73,17 +77,24 @@ pub const I18N_ID_TOML: &str = include_str!(concat!(
     "/../../templates/i18n/id.toml"
 ));
 
+/// The Dutch translation table (`templates/i18n/nl.toml`).
+pub const I18N_NL_TOML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../templates/i18n/nl.toml"
+));
+
 /// The parsed table for `locale`, built on first use. A file that fails
 /// to parse yields an empty table (lookups return `None`); the bundled
 /// files are covered by tests that would fail loudly first.
 fn table(locale: Locale) -> &'static HashMap<String, String> {
-    static TABLES: OnceLock<[HashMap<String, String>; 3]> = OnceLock::new();
+    static TABLES: OnceLock<[HashMap<String, String>; 4]> = OnceLock::new();
     &TABLES.get_or_init(|| {
         Locale::all().map(|locale| {
             let text = match locale {
                 Locale::En => I18N_EN_TOML,
                 Locale::De => I18N_DE_TOML,
                 Locale::Id => I18N_ID_TOML,
+                Locale::Nl => I18N_NL_TOML,
             };
             parse_table(text).unwrap_or_default()
         })
@@ -120,6 +131,7 @@ mod tests {
         assert_eq!(Locale::from_code("en"), Some(Locale::En));
         assert_eq!(Locale::from_code("de"), Some(Locale::De));
         assert_eq!(Locale::from_code("id"), Some(Locale::Id));
+        assert_eq!(Locale::from_code("nl"), Some(Locale::Nl));
         assert_eq!(Locale::from_code("fr"), None);
         assert_eq!(Locale::from_code(""), None);
     }
@@ -133,6 +145,7 @@ mod tests {
                 Locale::En => I18N_EN_TOML,
                 Locale::De => I18N_DE_TOML,
                 Locale::Id => I18N_ID_TOML,
+                Locale::Nl => I18N_NL_TOML,
             };
             let parsed = parse_table(text).expect("each bundled i18n file parses");
             assert!(!parsed.is_empty(), "{} table is empty", locale.code());

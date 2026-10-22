@@ -9,8 +9,8 @@ import { t, type MessageKey } from '../i18n';
 
 /** Shown on the Bills screen: upload, scan, drop, the queue and the drafts. */
 export function Inbox() {
-  const { client, online } = useSession();
-  const bills = useAsync(() => billsList(client).then((r) => r.bills), [client.baseUrl, client.apiKey]);
+  const { client, online, unit } = useSession();
+  const bills = useAsync(() => billsList(client, unit).then((r) => r.bills), [client.baseUrl, client.apiKey, unit]);
   const storeRef = useRef<UploadStore | null>(null);
   const [queued, setQueued] = useState(0);
   const [busy, setBusy] = useState(false);

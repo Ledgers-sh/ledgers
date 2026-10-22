@@ -18,8 +18,10 @@ import {
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { parseMajorToMinor, toPlainMajor } from '../lib/money';
+import { colourOf } from '../lib/units';
 import { accountNameFromCatalogue } from '../i18n/chart';
 import { ConfirmDialog, ErrorBanner, Money, PageHead, Skeleton, useToasts, Toasts } from './common';
+import { Select } from './Select';
 import { t, useLocale, type MessageKey } from '../i18n';
 
 /** Below this, the field is highlighted for a closer look. */
@@ -27,6 +29,8 @@ export const LOW_CONFIDENCE = 70;
 
 /** The form's text state. Amounts are kept as typed, in major units. */
 interface Draft {
+  /** The business unit the expense lines belong to; empty when none is chosen. */
+  unit: string;
   vendor_name: string;
   vendor_vat_id: string;
   vendor_iban: string;
@@ -52,6 +56,7 @@ interface DraftLine {
 function draftFrom(bill: Bill): Draft {
   const major = (minor: number | null) => (minor === null ? '' : toPlainMajor(String(minor), bill.currency));
   return {
+    unit: bill.unit ?? '',
     vendor_name: bill.vendor.name,
     vendor_vat_id: bill.vendor.vat_id ?? '',
     vendor_iban: bill.vendor.iban ?? '',
@@ -89,7 +94,14 @@ function rateOf(text: string): { value: number | null; ok: boolean } {
 }
 
 /** Builds the fields the server takes from the form; null when something will not parse. */
-export function fieldsFrom(draft: Draft, currency: string, bill: Bill): { fields: BillFields } | { error: MessageKey } {
+export function fieldsFrom(
+  draft: Draft,
+  currency: string,
+  bill: Bill,
+  unitsEnabled = false,
+): { fields: BillFields } | { error: MessageKey } {
+  // Once the company has units, a bill names the unit its expenses belong to (the server refuses to post without one).
+  if (unitsEnabled && draft.unit === '') return { error: 'units.err_bill' };
   const amounts = [draft.net, draft.vat, draft.gross].map((text) => minorOf(text, currency));
   if (amounts.some((amount) => !amount.ok)) return { error: 'bills.err_amount' };
   const lines: BillLine[] = [];
@@ -111,6 +123,7 @@ export function fieldsFrom(draft: Draft, currency: string, bill: Bill): { fields
   }
   return {
     fields: {
+      unit: draft.unit === '' ? null : draft.unit,
       vendor_name: draft.vendor_name.trim() === '' ? bill.vendor.name : draft.vendor_name.trim(),
       vendor_vat_id: draft.vendor_vat_id.trim() === '' ? null : draft.vendor_vat_id.trim(),
       vendor_iban: draft.vendor_iban.trim() === '' ? null : draft.vendor_iban.replace(/\s+/g, '').toUpperCase(),
@@ -132,8 +145,9 @@ function isMine(bill: Bill, draft: Draft, currency: string): boolean {
 
 /** The review screen: the document beside the fields, the checks, the journal preview and the actions. */
 export function BillReview({ billId }: { billId: string }) {
-  const { client, toast } = useSession();
+  const { client, toast, units } = useSession();
   const locale = useLocale();
+  const unitsEnabled = units.length > 0;
   const bill = useAsync(() => billGet(client, billId).then((r) => r.bill), [client.baseUrl, client.apiKey, billId]);
   const accounts = useAsync(() => expenseAccounts(client), [client.baseUrl, client.apiKey]);
   const document = useAsync(
@@ -181,7 +195,7 @@ export function BillReview({ billId }: { billId: string }) {
 
   const save = (event: Event) => {
     event.preventDefault();
-    const built = fieldsFrom(draft, current.currency, current);
+    const built = fieldsFrom(draft, current.currency, current, unitsEnabled);
     if ('error' in built) {
       setFormError(built.error);
       return;
@@ -195,13 +209,18 @@ export function BillReview({ billId }: { billId: string }) {
     });
   };
 
-  const post = () =>
-    run('post', async () => {
+  const post = () => {
+    if (unitsEnabled && draft.unit === '') {
+      setFormError('units.err_bill');
+      return;
+    }
+    void run('post', async () => {
       const result = await billPost(client, current.id);
       setPosted({ entryId: result.entry.entry_id, number: result.entry.number });
       bill.reload();
       toast(t('bills.posted'));
     });
+  };
 
   const confirm = () =>
     run('confirm', async () => {
@@ -279,6 +298,31 @@ export function BillReview({ billId }: { billId: string }) {
               )}
             </fieldset>
 
+            {unitsEnabled && (
+              <fieldset class="field-group" disabled={readOnly}>
+                <legend>{t('units.group_bill')}</legend>
+                <div class="field">
+                  <span id="bill-unit-label">{t('units.bill_field')}</span>
+                  <Select
+                    id="bill-unit"
+                    labelledBy="bill-unit-label"
+                    value={draft.unit}
+                    placeholder={t('units.choose_unit')}
+                    invalid={formError === 'units.err_bill' && draft.unit === ''}
+                    describedBy={formError === 'units.err_bill' && draft.unit === '' ? 'bill-unit-error' : 'bill-unit-hint'}
+                    options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                    searchable={false}
+                    onChange={(value) => update({ unit: value })}
+                  />
+                  {formError === 'units.err_bill' && draft.unit === '' ? (
+                    <span id="bill-unit-error" class="field-error">{t('units.err_bill')}</span>
+                  ) : (
+                    <span id="bill-unit-hint" class="hint">{t('units.bill_hint')}</span>
+                  )}
+                </div>
+              </fieldset>
+            )}
+
             <fieldset class="field-group" disabled={readOnly}>
               <legend>{t('bills.group_invoice')}</legend>
               <TextField label={t('bills.invoice_number')} value={draft.invoice_number} mono onInput={(v) => update({ invoice_number: v })} confidence={confidence.invoice_number} />
@@ -304,20 +348,25 @@ export function BillReview({ billId }: { billId: string }) {
                     <TextField label={t('bills.rate')} value={line.rate} mono num onInput={(v) => updateLine(index, { rate: v })} />
                     <TextField label={`${t('bills.vat')} (${current.currency})`} value={line.vat} mono num onInput={(v) => updateLine(index, { vat: v })} />
                   </div>
-                  <label class="field">
-                    <span>{t('bills.expense_account')}</span>
-                    <select class="input mono" value={line.account} onChange={(e) => updateLine(index, { account: (e.target as HTMLSelectElement).value, suggestedFrom: null })}>
-                      <option value="">{t('bills.choose_account')}</option>
-                      {chart.map((choice) => (
-                        <option key={choice.number} value={choice.number}>
-                          {choice.number} {accountLabel(choice, locale.code)}
-                        </option>
-                      ))}
-                    </select>
+                  <div class="field">
+                    <span id={`bill-account-label-${index}`}>{t('bills.expense_account')}</span>
+                    <Select
+                      id={`bill-account-${index}`}
+                      labelledBy={`bill-account-label-${index}`}
+                      value={line.account}
+                      placeholder={t('bills.choose_account')}
+                      options={chart.map((choice) => ({
+                        value: choice.number,
+                        label: accountLabel(choice, locale.code),
+                        hint: choice.number,
+                        group: t(`accountType.${choice.type}` as MessageKey),
+                      }))}
+                      onChange={(value) => updateLine(index, { account: value, suggestedFrom: null })}
+                    />
                     {line.suggestedFrom && (
                       <span class="hint">{t('bills.suggested_from', { bill: line.suggestedFrom })}</span>
                     )}
-                  </label>
+                  </div>
                   {!readOnly && (
                     <button type="button" class="btn btn-ghost btn-sm" onClick={() => setDraft((prev) => ({ ...(prev as Draft), lines: (prev as Draft).lines.filter((_, i) => i !== index) }))}>
                       {t('bills.remove_line')}

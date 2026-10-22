@@ -599,6 +599,212 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/approval-settings": {
+      "get": {
+        "operationId": "approval_settings_get",
+        "description": "Execute command: approval_settings.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "approval-settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ApprovalSettingsView",
+                  "description": "The approval rules the Settings screen edits.",
+                  "type": "object",
+                  "properties": {
+                    "low_risk_limits": {
+                      "description": "Per-currency amount (major units, canonical) at or below which a money\nrequest is low risk and may be approved in bulk.",
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "request_ttl_hours": {
+                      "description": "How long a request waits for a decision before it expires.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "fresh_sign_in_minutes": {
+                      "description": "The sign-in window high-risk approvals need. Fixed by the approvals\ncrate, shown so the rule is visible.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "low_risk_limits",
+                    "request_ttl_hours",
+                    "fresh_sign_in_minutes"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "approval_settings.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers approval-settings get",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/approval-settings\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      },
+      "post": {
+        "operationId": "approval_settings_update",
+        "description": "Execute command: approval_settings.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "approval-settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ApprovalSettingsInput",
+                "description": "The input of `approval_settings.update`.",
+                "type": "object",
+                "properties": {
+                  "low_risk_limits": {
+                    "description": "Per-currency low-risk limits, in canonical amounts.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "request_ttl_hours": {
+                    "description": "The request expiry in hours.",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "low_risk_limits",
+                  "request_ttl_hours"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ApprovalSettingsView",
+                  "description": "The approval rules the Settings screen edits.",
+                  "type": "object",
+                  "properties": {
+                    "low_risk_limits": {
+                      "description": "Per-currency amount (major units, canonical) at or below which a money\nrequest is low risk and may be approved in bulk.",
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "request_ttl_hours": {
+                      "description": "How long a request waits for a decision before it expires.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "fresh_sign_in_minutes": {
+                      "description": "The sign-in window high-risk approvals need. Fixed by the approvals\ncrate, shown so the rule is visible.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "low_risk_limits",
+                    "request_ttl_hours",
+                    "fresh_sign_in_minutes"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "approval_settings.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers approval-settings update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/approval-settings\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/approval-requests/{id}/decision": {
       "post": {
         "operationId": "approvals_decide",
@@ -841,6 +1047,2024 @@
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/approval-requests\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
         "x-ledgers-human-only": true
+      }
+    },
+    "/v1/audit-events": {
+      "get": {
+        "operationId": "audit_list",
+        "description": "Execute command: audit.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "audit-events"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AuditListOutput",
+                  "description": "The output of `audit.list`.",
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "description": "The matching events, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEventView"
+                      }
+                    },
+                    "next_before_seq": {
+                      "description": "Pass as `before_seq` to get the next page; null when there is no more.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "audit.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers audit list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/audit-events\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/accounts/{id}/archive": {
+      "post": {
+        "operationId": "bank_accounts_archive",
+        "description": "Execute command: bank.accounts.archive",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsArchiveInput",
+                "description": "`bank.accounts.archive`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The account id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.archive",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts archive",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts/{id}/archive\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/accounts": {
+      "post": {
+        "operationId": "bank_accounts_create",
+        "description": "Execute command: bank.accounts.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsCreateInput",
+                "description": "`bank.accounts.create`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "The name a person gives the account.",
+                    "type": "string"
+                  },
+                  "iban": {
+                    "description": "The IBAN, validated with its check digits.",
+                    "type": "string"
+                  },
+                  "bic": {
+                    "description": "The BIC, optional.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "currency": {
+                    "description": "The ISO 4217 currency of the account.",
+                    "type": "string"
+                  },
+                  "ledger_account_number": {
+                    "description": "The linked ledger account; it must carry the `bank` tag.",
+                    "type": "string"
+                  },
+                  "opening_amount": {
+                    "description": "The opening balance as decimal text in the account currency, e.g. `1250.00`.",
+                    "type": "string"
+                  },
+                  "opening_date": {
+                    "description": "The date of the opening balance, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "csv_mapping": {
+                    "description": "A CSV column mapping for this account's exports.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CsvMapping"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "iban",
+                  "currency",
+                  "ledger_account_number",
+                  "opening_amount",
+                  "opening_date"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "bank_accounts_list",
+        "description": "Execute command: bank.accounts.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsListOutput",
+                  "description": "Output of `bank.accounts.list`.",
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "description": "The accounts, by name.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccountView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts list",
+        "x-ledgers-mcp": "bank_accounts_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}": {
+      "get": {
+        "operationId": "bank_accounts_get",
+        "description": "Execute command: bank.accounts.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts get",
+        "x-ledgers-mcp": "bank_accounts_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}/reconciliation": {
+      "get": {
+        "operationId": "bank_accounts_reconcile",
+        "description": "Execute command: bank.accounts.reconcile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ReconciliationView",
+                  "description": "The reconciliation of an account as of a date.",
+                  "type": "object",
+                  "properties": {
+                    "account_id": {
+                      "description": "The account.",
+                      "type": "string"
+                    },
+                    "as_of": {
+                      "description": "The date the balances are compared at.",
+                      "type": "string"
+                    },
+                    "statement_balance": {
+                      "description": "The statement's closing balance at that date (the opening balance when no statement has been imported).",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "ledger_balance": {
+                      "description": "The ledger's balance of the linked account at that date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_total": {
+                      "description": "The part of the difference explained by unmatched lines.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "ignored_total": {
+                      "description": "The part explained by lines the person chose to ignore.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "residual": {
+                      "description": "The rest: entries on the account that no statement line explains.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "reconciled": {
+                      "description": "Whether nothing is left unexplained and no line is unmatched.",
+                      "type": "boolean"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines left out on purpose.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "account_id",
+                    "as_of",
+                    "statement_balance",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_total",
+                    "ignored_total",
+                    "residual",
+                    "reconciled",
+                    "unmatched_count",
+                    "ignored_count"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.reconcile",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts reconcile",
+        "x-ledgers-mcp": "bank_accounts_reconcile",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts/{id}/reconciliation\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}/update": {
+      "post": {
+        "operationId": "bank_accounts_update",
+        "description": "Execute command: bank.accounts.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsUpdateInput",
+                "description": "`bank.accounts.update`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The account id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bic": {
+                    "description": "A new BIC; an empty string clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "csv_mapping": {
+                    "description": "A new CSV column mapping.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CsvMapping"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/rules": {
+      "post": {
+        "operationId": "bank_rules_create",
+        "description": "Execute command: bank.rules.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RulesCreateRequest",
+                "description": "The public request of `bank.rules.create`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "The name.",
+                    "type": "string"
+                  },
+                  "conditions": {
+                    "description": "The conditions; at least one.",
+                    "$ref": "#/components/schemas/RuleConditions"
+                  },
+                  "account_number": {
+                    "description": "The account the rule posts to (postable, not a bank account).",
+                    "type": "string"
+                  },
+                  "tax_code": {
+                    "description": "The tax code to set.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "description": "The unit to set.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "conditions",
+                  "account_number"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RuleView",
+                  "description": "A bank rule as the app shows it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The rule id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "conditions": {
+                      "description": "The conditions.",
+                      "$ref": "#/components/schemas/RuleConditions"
+                    },
+                    "account_number": {
+                      "description": "The account the rule posts to.",
+                      "type": "string"
+                    },
+                    "tax_code": {
+                      "description": "The tax code it sets.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "unit": {
+                      "description": "The unit it sets.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "description": "Whether it applies. An agent's rule waits here until a person enables it.",
+                      "type": "boolean"
+                    },
+                    "proposed_by": {
+                      "description": "Who proposed it.",
+                      "type": "string"
+                    },
+                    "enabled_by": {
+                      "description": "Who enabled it, once enabled.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When it was created.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "conditions",
+                    "account_number",
+                    "enabled",
+                    "proposed_by",
+                    "created_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank rules create",
+        "x-ledgers-mcp": "bank_rules_create",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/rules\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      },
+      "get": {
+        "operationId": "bank_rules_list",
+        "description": "Execute command: bank.rules.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RulesListOutput",
+                  "description": "Output of `bank.rules.list`.",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "The rules, oldest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RuleView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank rules list",
+        "x-ledgers-mcp": "bank_rules_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/rules\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/rules/{id}/enable": {
+      "post": {
+        "operationId": "bank_rules_enable",
+        "description": "Execute command: bank.rules.enable",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RulesEnableInput",
+                "description": "`bank.rules.enable`, a person only.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The rule id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RulesEnableOutput",
+                  "description": "Output of `bank.rules.enable`.",
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "description": "The rule, now enabled.",
+                      "$ref": "#/components/schemas/RuleView"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.enable",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank rules enable",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/rules/{id}/enable\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/statements/import": {
+      "post": {
+        "operationId": "bank_statements_import",
+        "description": "Execute command: bank.statements.import",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "StatementsImportRequest",
+                "description": "The public request of `bank.statements.import`: the document is read by\nthe server, which parses it and fills the command's statements itself.",
+                "type": "object",
+                "properties": {
+                  "account_id": {
+                    "description": "The bank account the statement is for.",
+                    "type": "string"
+                  },
+                  "document_id": {
+                    "description": "The uploaded document (its id from `documents.register`).",
+                    "type": "string"
+                  },
+                  "format": {
+                    "description": "The format; detected from the bytes when omitted.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Format"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "account_id",
+                  "document_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "StatementsImportOutput",
+                  "description": "Output of `bank.statements.import`.",
+                  "type": "object",
+                  "properties": {
+                    "account_id": {
+                      "description": "The account.",
+                      "type": "string"
+                    },
+                    "document_id": {
+                      "description": "The document.",
+                      "type": "string"
+                    },
+                    "statements": {
+                      "description": "One summary per statement in the file.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StatementSummary"
+                      }
+                    },
+                    "new_transactions": {
+                      "description": "Lines stored by this import, over all statements.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "duplicate_transactions": {
+                      "description": "Lines already stored, over all statements.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "account_id",
+                    "document_id",
+                    "statements",
+                    "new_transactions",
+                    "duplicate_transactions"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.statements.import",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank statements import",
+        "x-ledgers-mcp": "bank_statements_import",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/statements/import\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions/{id}/ignore": {
+      "post": {
+        "operationId": "bank_transactions_ignore",
+        "description": "Execute command: bank.transactions.ignore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsIgnoreInput",
+                "description": "`bank.transactions.ignore`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionStatusOutput",
+                  "description": "Output of link and ignore.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line id.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched` or `ignored`.",
+                      "type": "string"
+                    },
+                    "matched_entry_id": {
+                      "description": "The entry it is matched to, when linked.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.ignore",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank transactions ignore",
+        "x-ledgers-mcp": "bank_transactions_ignore",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/ignore\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions/{id}/link": {
+      "post": {
+        "operationId": "bank_transactions_link",
+        "description": "Execute command: bank.transactions.link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsLinkInput",
+                "description": "`bank.transactions.link`: match the line to an entry already posted.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  },
+                  "entry_id": {
+                    "description": "The posted entry, with one line on the bank's ledger account of the same amount.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "entry_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionStatusOutput",
+                  "description": "Output of link and ignore.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line id.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched` or `ignored`.",
+                      "type": "string"
+                    },
+                    "matched_entry_id": {
+                      "description": "The entry it is matched to, when linked.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.link",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank transactions link",
+        "x-ledgers-mcp": "bank_transactions_link",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/link\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions": {
+      "get": {
+        "operationId": "bank_transactions_list",
+        "description": "Execute command: bank.transactions.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionsListOutput",
+                  "description": "Output of `bank.transactions.list`.",
+                  "type": "object",
+                  "properties": {
+                    "transactions": {
+                      "description": "The lines, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TransactionView"
+                      }
+                    },
+                    "next": {
+                      "description": "The cursor for the next page, when there is one.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transactions"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank transactions list",
+        "x-ledgers-mcp": "bank_transactions_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/transactions\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/transactions/{id}/post": {
+      "post": {
+        "operationId": "bank_transactions_post",
+        "description": "Execute command: bank.transactions.post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsPostInput",
+                "description": "`bank.transactions.post`: post the line as a journal entry.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  },
+                  "counterparty_account": {
+                    "description": "The account the other side of the entry goes to. Give this or `bill_id`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bill_id": {
+                    "description": "An open bill this line pays. Give this or `counterparty_account`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tax_code": {
+                    "description": "The tax code on the counterparty line.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "description": "The unit (dimension) on the counterparty line.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "journal_id": {
+                    "description": "The journal; the general journal `GN` when omitted.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "fiscal_year": {
+                    "description": "The fiscal year; the booking date's year when omitted.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionsPostOutput",
+                  "description": "Output of `bank.transactions.post`.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched`.",
+                      "type": "string"
+                    },
+                    "entry": {
+                      "description": "The entry it posted.",
+                      "$ref": "#/components/schemas/PostedBankEntry"
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status",
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.post",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers bank transactions post",
+        "x-ledgers-mcp": "bank_transactions_post",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/post\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
     "/v1/bills/{id}/confirm": {
@@ -1090,6 +3314,14 @@
                     "description": "The caller, recorded on the bill (filled by the server).",
                     "type": "string",
                     "default": ""
+                  },
+                  "unit": {
+                    "description": "The business unit the bill's expense lines belong to. Required to post\nonce the company has units; ignored while it has none.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
                   }
                 }
               }
@@ -1755,6 +3987,14 @@
                     "description": "The caller, recorded on the bill (filled by the server).",
                     "type": "string",
                     "default": ""
+                  },
+                  "unit": {
+                    "description": "The business unit the bill's expense lines belong to. Required to post\nonce the company has units; ignored while it has none.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
                   }
                 },
                 "required": [
@@ -1820,6 +4060,203 @@
         "x-ledgers-cli": "ledgers bills update",
         "x-ledgers-mcp": "bills_update",
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/company": {
+      "get": {
+        "operationId": "company_get",
+        "description": "Execute command: company.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "company"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CompanyGetOutput",
+                  "description": "The output of `company.get`.",
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "description": "The company's name.",
+                      "type": "string"
+                    },
+                    "base_currency": {
+                      "description": "The base currency, ISO 4217.",
+                      "type": "string"
+                    },
+                    "base_currency_locked": {
+                      "description": "True once the company has an entry: the base currency can no longer change.",
+                      "type": "boolean"
+                    },
+                    "profile": {
+                      "description": "The profile fields.",
+                      "$ref": "#/components/schemas/CompanyProfile"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "base_currency",
+                    "base_currency_locked",
+                    "profile"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "company.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers company get",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/company\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      },
+      "post": {
+        "operationId": "company_update",
+        "description": "Execute command: company.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "company"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "CompanyUpdateInput",
+                "description": "The input of `company.update`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "The company's name.",
+                    "type": "string"
+                  },
+                  "profile": {
+                    "description": "The profile fields.",
+                    "$ref": "#/components/schemas/CompanyProfile"
+                  }
+                },
+                "required": [
+                  "name",
+                  "profile"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CompanyGetOutput",
+                  "description": "The output of `company.get`.",
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "description": "The company's name.",
+                      "type": "string"
+                    },
+                    "base_currency": {
+                      "description": "The base currency, ISO 4217.",
+                      "type": "string"
+                    },
+                    "base_currency_locked": {
+                      "description": "True once the company has an entry: the base currency can no longer change.",
+                      "type": "boolean"
+                    },
+                    "profile": {
+                      "description": "The profile fields.",
+                      "$ref": "#/components/schemas/CompanyProfile"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "base_currency",
+                    "base_currency_locked",
+                    "profile"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "company.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers company update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/company\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
       }
     },
     "/v1/documents/{id}/url": {
@@ -2464,6 +4901,447 @@
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/entries/{external_id}/reverse\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
+    "/v1/transfers": {
+      "post": {
+        "operationId": "entries_transfer",
+        "description": "Execute command: entries.transfer",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "transfers"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "EntriesTransferInput",
+                "description": "The input of `entries.transfer`: a shared-cost recharge from one unit to\nanother. Amounts are in the company's base currency.",
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "description": "The journal; defaults to the general journal `GN`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "from_unit": {
+                    "description": "The unit that paid the shared cost and recovers it.",
+                    "type": "string"
+                  },
+                  "to_unit": {
+                    "description": "The unit the cost is recharged to.",
+                    "type": "string"
+                  },
+                  "amount": {
+                    "description": "The amount, positive, in the base currency.",
+                    "$ref": "#/components/schemas/SerializableAmount"
+                  },
+                  "document_date": {
+                    "description": "The document date, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "posting_date": {
+                    "description": "The posting date, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "tax_point_date": {
+                    "description": "The tax point date; defaults to the posting date.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "description": {
+                    "description": "The description.",
+                    "type": "string"
+                  },
+                  "recovery_account": {
+                    "description": "The income account on the paying unit that books the recovery.",
+                    "type": "string"
+                  },
+                  "cost_account": {
+                    "description": "The expense account on the receiving unit that books the cost.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from_unit",
+                  "to_unit",
+                  "amount",
+                  "document_date",
+                  "posting_date",
+                  "description",
+                  "recovery_account",
+                  "cost_account"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PostEntryOutput",
+                  "description": "Output for `journal.post_entry` command.",
+                  "type": "object",
+                  "properties": {
+                    "entry": {
+                      "description": "The posted entry with its assigned number.",
+                      "$ref": "#/components/schemas/SerializablePostedEntry"
+                    }
+                  },
+                  "required": [
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "entries.transfer",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers entries transfer",
+        "x-ledgers-mcp": "entries_transfer",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/transfers\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/fiscal-years/close": {
+      "post": {
+        "operationId": "fiscal_years_close",
+        "description": "Execute command: fiscal_years.close",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "fiscal-years"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "FiscalYearCloseInput",
+                "description": "The input of `fiscal_years.close`.",
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "description": "The year to close.",
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "FiscalYearCloseOutput",
+                  "description": "The output of `fiscal_years.close`.",
+                  "type": "object",
+                  "properties": {
+                    "year": {
+                      "description": "The closed year.",
+                      "$ref": "#/components/schemas/FiscalYearView"
+                    },
+                    "closing_entry_id": {
+                      "description": "The closing entry the year-end close posted, when there was a result to close.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "year"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "fiscal_years.close",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers fiscal-years close",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/fiscal-years/close\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/fiscal-years": {
+      "post": {
+        "operationId": "fiscal_years_create",
+        "description": "Execute command: fiscal_years.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "fiscal-years"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "FiscalYearCreateInput",
+                "description": "The input of `fiscal_years.create`.",
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "description": "The calendar year to open (January to December).",
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "FiscalYearView",
+                  "description": "One fiscal year.",
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "description": "The year's label (its calendar year, for a January start).",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "starts_on": {
+                      "description": "The first day of the year.",
+                      "type": "string"
+                    },
+                    "ends_on": {
+                      "description": "The last day of the year.",
+                      "type": "string"
+                    },
+                    "closed": {
+                      "description": "True once the year-end close has run.",
+                      "type": "boolean"
+                    },
+                    "closed_at": {
+                      "description": "When the year-end close ran.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "periods": {
+                      "description": "The year's months, in order.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeriodView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "starts_on",
+                    "ends_on",
+                    "closed",
+                    "periods"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "fiscal_years.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers fiscal-years create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/fiscal-years\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "fiscal_years_list",
+        "description": "Execute command: fiscal_years.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "fiscal-years"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "FiscalYearsListOutput",
+                  "description": "The output of `fiscal_years.list`.",
+                  "type": "object",
+                  "properties": {
+                    "years": {
+                      "description": "Fiscal years, oldest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FiscalYearView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "years"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "fiscal_years.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers fiscal-years list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/fiscal-years\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/keys": {
       "post": {
         "operationId": "keys_create",
@@ -2500,6 +5378,14 @@
                     "additionalProperties": {
                       "$ref": "#/components/schemas/LimitAmounts"
                     }
+                  },
+                  "unit": {
+                    "description": "Pin the key to one business unit: its entries carry that unit, and it\nmay post to no other. Absent means all units.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
                   }
                 },
                 "required": [
@@ -2740,6 +5626,197 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/numbering": {
+      "get": {
+        "operationId": "numbering_list",
+        "description": "Execute command: numbering.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "numbering"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "NumberingListOutput",
+                  "description": "The output of `numbering.list`.",
+                  "type": "object",
+                  "properties": {
+                    "journals": {
+                      "description": "Every journal of the company.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/JournalNumberingView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "journals"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "numbering.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers numbering list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/numbering\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/numbering/next": {
+      "post": {
+        "operationId": "numbering_set_next",
+        "description": "Execute command: numbering.set_next",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "numbering"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "NumberingSetNextInput",
+                "description": "The input of `numbering.set_next`.",
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "description": "The journal's id.",
+                    "type": "string"
+                  },
+                  "fiscal_year": {
+                    "description": "The fiscal year.",
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "next_number": {
+                    "description": "The number the next entry receives. Must be above the current next number.",
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "journal_id",
+                  "fiscal_year",
+                  "next_number"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "NumberingSetNextInput",
+                  "description": "The input of `numbering.set_next`.",
+                  "type": "object",
+                  "properties": {
+                    "journal_id": {
+                      "description": "The journal's id.",
+                      "type": "string"
+                    },
+                    "fiscal_year": {
+                      "description": "The fiscal year.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "next_number": {
+                      "description": "The number the next entry receives. Must be above the current next number.",
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "journal_id",
+                    "fiscal_year",
+                    "next_number"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "numbering.set_next",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers numbering set-next",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/numbering/next\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/parties/{id}/merge": {
       "post": {
         "operationId": "parties_merge",
@@ -2866,7 +5943,7 @@
                     "type": "string"
                   },
                   "iban": {
-                    "description": "The new IBAN.",
+                    "description": "The new IBAN; checked for country length and mod-97.",
                     "type": "string"
                   },
                   "bic": {
@@ -2878,7 +5955,7 @@
                     "default": null
                   },
                   "reason": {
-                    "description": "Reason for the change.",
+                    "description": "Why the details changed (kept in the history).",
                     "type": "string"
                   }
                 },
@@ -2904,7 +5981,7 @@
                   "type": "object",
                   "properties": {
                     "party": {
-                      "description": "The updated party.",
+                      "description": "The party with its new bank details.",
                       "$ref": "#/components/schemas/PartyView"
                     }
                   },
@@ -2948,6 +6025,207 @@
         "x-ledgers-cli": "ledgers parties set-bank",
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/set-bank\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/periods/close": {
+      "post": {
+        "operationId": "periods_close",
+        "description": "Execute command: periods.close",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "periods"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "PeriodCloseInput",
+                "description": "The input of `periods.close`.",
+                "type": "object",
+                "properties": {
+                  "period": {
+                    "description": "The month to lock, `YYYY-MM`.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "period"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PeriodView",
+                  "description": "One period of a fiscal year and its state.",
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "description": "`YYYY-MM`.",
+                      "type": "string"
+                    },
+                    "state": {
+                      "description": "`open`, `soft_closed` or `closed`.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "state"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "periods.close",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers periods close",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/periods/close\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/periods/reopen": {
+      "post": {
+        "operationId": "periods_reopen",
+        "description": "Execute command: periods.reopen",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "periods"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "PeriodReopenInput",
+                "description": "The input of `periods.reopen`.",
+                "type": "object",
+                "properties": {
+                  "period": {
+                    "description": "The month to reopen, `YYYY-MM`.",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "Why the month is reopened. Written to the audit trail.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "period",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PeriodView",
+                  "description": "One period of a fiscal year and its state.",
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "description": "`YYYY-MM`.",
+                      "type": "string"
+                    },
+                    "state": {
+                      "description": "`open`, `soft_closed` or `closed`.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "state"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "periods.reopen",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers periods reopen",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/periods/reopen\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
         "x-ledgers-human-only": true
       }
     },
@@ -3229,6 +6507,125 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/p-and-l\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/reports/trends": {
+      "get": {
+        "operationId": "reports_trends",
+        "description": "Execute command: reports.trends",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TrendsOutput",
+                  "description": "The output of `reports.trends`.",
+                  "type": "object",
+                  "properties": {
+                    "currency": {
+                      "description": "The company's base currency code.",
+                      "type": "string"
+                    },
+                    "from": {
+                      "description": "The first month reported.",
+                      "type": "string"
+                    },
+                    "to": {
+                      "description": "The last month reported.",
+                      "type": "string"
+                    },
+                    "months": {
+                      "description": "One row per month, in order.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrendMonthView"
+                      }
+                    },
+                    "top_expense_accounts": {
+                      "description": "The largest expense accounts in the range.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ExpenseAccountView"
+                      }
+                    },
+                    "dimension": {
+                      "description": "The dimension kind the split is by, when one was asked for.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "by_dimension": {
+                      "description": "Revenue and expenses per dimension value; empty without a dimension.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DimensionShareView"
+                      }
+                    },
+                    "activity": {
+                      "description": "Entries posted per month by actor; months with none are left out.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ActivityMonthView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "currency",
+                    "from",
+                    "to",
+                    "months",
+                    "top_expense_accounts",
+                    "by_dimension",
+                    "activity"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.trends",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports trends",
+        "x-ledgers-mcp": "reports_trends",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/trends\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/reports/trial-balance": {
       "get": {
         "operationId": "reports_trial_balance",
@@ -3306,83 +6703,950 @@
         "x-ledgers-mcp": "reports_trial_balance",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/trial-balance\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
+    },
+    "/v1/reports/units-summary": {
+      "get": {
+        "operationId": "reports_units_summary",
+        "description": "Execute command: reports.units_summary",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UnitsSummaryOutput",
+                  "description": "The output of `reports.units_summary`.",
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "description": "The period, `YYYY-MM`.",
+                      "type": "string"
+                    },
+                    "units": {
+                      "description": "One row per unit, by code.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnitSummaryRowView"
+                      }
+                    },
+                    "consolidated": {
+                      "description": "Company totals with intercompany entries eliminated.",
+                      "$ref": "#/components/schemas/UnitSummaryRowView"
+                    },
+                    "eliminations": {
+                      "description": "What the intercompany entries add to the units and take away again.",
+                      "$ref": "#/components/schemas/UnitSummaryRowView"
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "units",
+                    "consolidated",
+                    "eliminations"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.units_summary",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports units-summary",
+        "x-ledgers-mcp": "reports_units_summary",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/units-summary\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/tax-settings": {
+      "get": {
+        "operationId": "tax_settings_get",
+        "description": "Execute command: tax_settings.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "tax-settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TaxSettingsOutput",
+                  "description": "The output of `tax_settings.get`.",
+                  "type": "object",
+                  "properties": {
+                    "small_business": {
+                      "description": "Small-business exemption in effect.",
+                      "type": "boolean"
+                    },
+                    "vat_basis": {
+                      "description": "The VAT reporting method in effect.",
+                      "type": "string"
+                    },
+                    "country": {
+                      "description": "The company's country (from the profile), empty when not set.",
+                      "type": "string"
+                    },
+                    "rate_table": {
+                      "description": "True when the platform carries a rate table for the country.",
+                      "type": "boolean"
+                    },
+                    "rates": {
+                      "description": "The rates in force today; empty when there is no table.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxRateView"
+                      }
+                    },
+                    "pack": {
+                      "description": "The pack id that applies (`sg`, `de`, `generic`); empty without a country.",
+                      "type": "string"
+                    },
+                    "pack_name": {
+                      "description": "The pack's English name.",
+                      "type": "string"
+                    },
+                    "regime": {
+                      "description": "`vat`, `gst`, `sales_tax` or `none`.",
+                      "type": "string"
+                    },
+                    "user_rates_allowed": {
+                      "description": "True when the company defines its own rates for this pack.",
+                      "type": "boolean"
+                    },
+                    "rates_status": {
+                      "description": "`complete`, or `pending` while some statutory rates are still unverified.",
+                      "type": "string"
+                    },
+                    "registration_label": {
+                      "description": "The registration number's name (`UEN`, `NPWP`, `USt-IdNr.`).",
+                      "type": "string"
+                    },
+                    "registration_note": {
+                      "description": "What the registration check covers.",
+                      "type": "string"
+                    },
+                    "returns": {
+                      "description": "The returns the pack can draft, generic first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReturnView"
+                      }
+                    },
+                    "tax_codes": {
+                      "description": "The tax codes entries and bills use.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxCodeView"
+                      }
+                    },
+                    "user_rates": {
+                      "description": "The company's own rates as stored.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserRate"
+                      }
+                    }
+                  },
+                  "required": [
+                    "small_business",
+                    "vat_basis",
+                    "country",
+                    "rate_table",
+                    "rates",
+                    "pack",
+                    "pack_name",
+                    "regime",
+                    "user_rates_allowed",
+                    "rates_status",
+                    "registration_label",
+                    "registration_note",
+                    "returns",
+                    "tax_codes",
+                    "user_rates"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "tax_settings.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers tax-settings get",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/tax-settings\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      },
+      "post": {
+        "operationId": "tax_settings_update",
+        "description": "Execute command: tax_settings.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "tax-settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TaxSettingsInput",
+                "description": "The input of `tax_settings.update`.",
+                "type": "object",
+                "properties": {
+                  "small_business": {
+                    "description": "Small-business exemption (Kleinunternehmer): no VAT is charged.",
+                    "type": "boolean"
+                  },
+                  "vat_basis": {
+                    "description": "The VAT reporting method: `accrual` or `cash`.",
+                    "type": "string"
+                  },
+                  "user_rates": {
+                    "description": "The company's own rates. Only for packs that allow them (generic and\nUS sales tax); omitted leaves the stored rates as they are.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/UserRate"
+                    },
+                    "default": null
+                  }
+                },
+                "required": [
+                  "small_business",
+                  "vat_basis"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TaxSettingsOutput",
+                  "description": "The output of `tax_settings.get`.",
+                  "type": "object",
+                  "properties": {
+                    "small_business": {
+                      "description": "Small-business exemption in effect.",
+                      "type": "boolean"
+                    },
+                    "vat_basis": {
+                      "description": "The VAT reporting method in effect.",
+                      "type": "string"
+                    },
+                    "country": {
+                      "description": "The company's country (from the profile), empty when not set.",
+                      "type": "string"
+                    },
+                    "rate_table": {
+                      "description": "True when the platform carries a rate table for the country.",
+                      "type": "boolean"
+                    },
+                    "rates": {
+                      "description": "The rates in force today; empty when there is no table.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxRateView"
+                      }
+                    },
+                    "pack": {
+                      "description": "The pack id that applies (`sg`, `de`, `generic`); empty without a country.",
+                      "type": "string"
+                    },
+                    "pack_name": {
+                      "description": "The pack's English name.",
+                      "type": "string"
+                    },
+                    "regime": {
+                      "description": "`vat`, `gst`, `sales_tax` or `none`.",
+                      "type": "string"
+                    },
+                    "user_rates_allowed": {
+                      "description": "True when the company defines its own rates for this pack.",
+                      "type": "boolean"
+                    },
+                    "rates_status": {
+                      "description": "`complete`, or `pending` while some statutory rates are still unverified.",
+                      "type": "string"
+                    },
+                    "registration_label": {
+                      "description": "The registration number's name (`UEN`, `NPWP`, `USt-IdNr.`).",
+                      "type": "string"
+                    },
+                    "registration_note": {
+                      "description": "What the registration check covers.",
+                      "type": "string"
+                    },
+                    "returns": {
+                      "description": "The returns the pack can draft, generic first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReturnView"
+                      }
+                    },
+                    "tax_codes": {
+                      "description": "The tax codes entries and bills use.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxCodeView"
+                      }
+                    },
+                    "user_rates": {
+                      "description": "The company's own rates as stored.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserRate"
+                      }
+                    }
+                  },
+                  "required": [
+                    "small_business",
+                    "vat_basis",
+                    "country",
+                    "rate_table",
+                    "rates",
+                    "pack",
+                    "pack_name",
+                    "regime",
+                    "user_rates_allowed",
+                    "rates_status",
+                    "registration_label",
+                    "registration_note",
+                    "returns",
+                    "tax_codes",
+                    "user_rates"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "tax_settings.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers tax-settings update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/tax-settings\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/units/{code}/archive": {
+      "post": {
+        "operationId": "units_archive",
+        "description": "Execute command: units.archive",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "units"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UnitsCodeInput",
+                "description": "The input of `units.archive`: the code (from the path).",
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "description": "The unit's code (from the path).",
+                    "type": "string",
+                    "default": ""
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UnitsChangedOutput",
+                  "description": "The output of the three unit writes: the unit after the change.",
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "description": "The unit.",
+                      "$ref": "#/components/schemas/UnitView"
+                    }
+                  },
+                  "required": [
+                    "unit"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "units.archive",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers units archive",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/units/{code}/archive\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/units": {
+      "post": {
+        "operationId": "units_create",
+        "description": "Execute command: units.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "units"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UnitsCreateInput",
+                "description": "The input of `units.create`.",
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "description": "The short code: 2 to 16 letters or digits. Upper-cased on save.",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "name": {
+                    "description": "The name: 1 to 80 characters.",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "colour": {
+                    "description": "The colour, `#RRGGBB`; absent takes the default blue.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "logo_document_id": {
+                    "description": "A stored document to use as the logo.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UnitsChangedOutput",
+                  "description": "The output of the three unit writes: the unit after the change.",
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "description": "The unit.",
+                      "$ref": "#/components/schemas/UnitView"
+                    }
+                  },
+                  "required": [
+                    "unit"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "units.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers units create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/units\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "units_list",
+        "description": "Execute command: units.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "units"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UnitsListOutput",
+                  "description": "The output of `units.list`: every unit, archived ones included.",
+                  "type": "object",
+                  "properties": {
+                    "units": {
+                      "description": "The units, by code.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnitView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "units"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "units.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers units list",
+        "x-ledgers-mcp": "units_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/units\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/units/{code}/rename": {
+      "post": {
+        "operationId": "units_rename",
+        "description": "Execute command: units.rename",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "units"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UnitsRenameInput",
+                "description": "The input of `units.rename`: the code (from the path) and the fields to\nchange. Absent fields keep their value; `clear_logo` removes the logo.",
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "description": "The unit's code (from the path).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "colour": {
+                    "description": "A new colour, `#RRGGBB`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "logo_document_id": {
+                    "description": "A new logo document.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "clear_logo": {
+                    "description": "Remove the logo.",
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UnitsChangedOutput",
+                  "description": "The output of the three unit writes: the unit after the change.",
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "description": "The unit.",
+                      "$ref": "#/components/schemas/UnitView"
+                    }
+                  },
+                  "required": [
+                    "unit"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "units.rename",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers units rename",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/units/{code}/rename\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
     }
   },
   "components": {
     "schemas": {
       "AccountView": {
-        "description": "One account of the chart, as the app's `Account` types it, plus its balances.",
+        "description": "A bank account as the app shows it, with its reconciliation summary.",
         "type": "object",
         "properties": {
-          "number": {
-            "description": "The account number.",
+          "id": {
+            "description": "The account id.",
             "type": "string"
           },
-          "name_key": {
-            "description": "The translatable name key.",
+          "name": {
+            "description": "The name a person gave it.",
             "type": "string"
           },
-          "display_name": {
-            "description": "The custom name a person gave the account, or `null` to show the\ntranslated `name_key`.",
+          "iban": {
+            "description": "The IBAN, normalised.",
+            "type": "string"
+          },
+          "bic": {
+            "description": "The BIC, when given.",
             "type": [
               "string",
               "null"
             ]
-          },
-          "account_type": {
-            "description": "The account class: asset, liability, equity, income, expense.",
-            "type": "string"
-          },
-          "normal_balance": {
-            "description": "The normal balance side.",
-            "type": "string"
           },
           "currency": {
-            "description": "The account currency, or `null` for the company base currency.",
-            "type": [
-              "string",
-              "null"
+            "description": "The account currency.",
+            "type": "string"
+          },
+          "ledger_account_number": {
+            "description": "The linked ledger account (chart tag `bank`).",
+            "type": "string"
+          },
+          "opening": {
+            "description": "The opening balance the account was set up with.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "opening_date": {
+            "description": "The date of the opening balance.",
+            "type": "string"
+          },
+          "csv_mapping": {
+            "description": "The saved CSV column mapping, when one is set.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CsvMapping"
+              },
+              {
+                "type": "null"
+              }
             ]
-          },
-          "parent": {
-            "description": "The parent account number, if any.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tags": {
-            "description": "The chart tags of the account.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "is_postable": {
-            "description": "Whether the account accepts postings (a leaf of the chart).",
-            "type": "boolean"
           },
           "archived": {
-            "description": "Whether the account is archived: kept for history, no new postings.",
+            "description": "Whether the account is archived (no more imports or postings).",
             "type": "boolean"
           },
-          "balances": {
-            "description": "The balance per base currency, debit-positive (empty when no postings).",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SerializableAmount"
-            }
+          "statement_balance": {
+            "description": "The closing balance of the latest imported statement, when there is one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ledger_balance": {
+            "description": "The balance of the linked ledger account, as of the statement date.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "difference": {
+            "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "unmatched_count": {
+            "description": "Lines not matched yet.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "matched_count": {
+            "description": "Lines matched to a journal entry or a bill.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ignored_count": {
+            "description": "Lines a person chose to leave out of the books.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "created_at": {
+            "description": "When the account was created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the account last changed.",
+            "type": "string"
           }
         },
         "required": [
-          "number",
-          "name_key",
-          "account_type",
-          "normal_balance",
-          "tags",
-          "is_postable",
+          "id",
+          "name",
+          "iban",
+          "currency",
+          "ledger_account_number",
+          "opening",
+          "opening_date",
           "archived",
-          "balances"
+          "ledger_balance",
+          "difference",
+          "unmatched_count",
+          "matched_count",
+          "ignored_count",
+          "created_at",
+          "updated_at"
         ]
       },
       "SerializableAmount": {
@@ -3451,6 +7715,652 @@
           "description",
           "minor",
           "currency"
+        ]
+      },
+      "AuditEventView": {
+        "description": "One audit event as the Settings read returns it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The event id.",
+            "type": "string"
+          },
+          "seq": {
+            "description": "The position in the company's chain.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "description": "When it was recorded (RFC 3339, UTC).",
+            "type": "string"
+          },
+          "actor_kind": {
+            "description": "`person` or `agent`.",
+            "type": "string"
+          },
+          "actor_id": {
+            "description": "The person's id, or the agent key's id.",
+            "type": "string"
+          },
+          "command": {
+            "description": "The command the event records.",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "`allowed`, `needs-approval`, `denied` or `error`.",
+            "type": "string"
+          },
+          "objects": {
+            "description": "The objects the command touched.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "description": "The reason a denial or an override gave, when there is one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "description": "The request that caused the event.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "at",
+          "actor_kind",
+          "actor_id",
+          "command",
+          "outcome",
+          "objects",
+          "request_id"
+        ]
+      },
+      "CsvMapping": {
+        "description": "The mapping a bank account saves for its CSV exports.",
+        "type": "object",
+        "properties": {
+          "delimiter": {
+            "description": "The field delimiter: `;`, `,` or a tab.",
+            "type": "string"
+          },
+          "skip_rows": {
+            "description": "Lines before the header (or the first record when there is none).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "has_header": {
+            "description": "Whether the first record after `skip_rows` names the columns.",
+            "type": "boolean"
+          },
+          "decimal": {
+            "description": "The decimal separator: `.` or `,`.",
+            "type": "string"
+          },
+          "date_format": {
+            "description": "The date format: `YYYY-MM-DD`, `DD.MM.YYYY`, `DD/MM/YYYY` or `MM/DD/YYYY`.",
+            "type": "string"
+          },
+          "booking_date": {
+            "description": "The booking date column.",
+            "type": "string"
+          },
+          "value_date": {
+            "description": "The value date column, when the export has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "description": "A single signed amount column (negative is an outflow).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "debit": {
+            "description": "Outflows as positive numbers, when debits and credits are separate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credit": {
+            "description": "Inflows as positive numbers, when debits and credits are separate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "A currency column; without one the account's currency is used.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_name": {
+            "description": "The counterparty's name column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remittance": {
+            "description": "Remittance columns, joined with a space in the order given.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bank_reference": {
+            "description": "The bank's reference column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "delimiter",
+          "skip_rows",
+          "has_header",
+          "decimal",
+          "date_format",
+          "booking_date",
+          "remittance"
+        ]
+      },
+      "BalanceView": {
+        "description": "A balance on a date.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "The date.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "The amount.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "date",
+          "amount"
+        ]
+      },
+      "RuleConditions": {
+        "description": "The conditions of a rule. Unset conditions do not restrict the match.",
+        "type": "object",
+        "properties": {
+          "contains": {
+            "description": "Text the remittance or the counterparty name contains (case-insensitive).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN, normalised.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount_min": {
+            "description": "The smallest signed amount in minor units (inclusive).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "amount_max": {
+            "description": "The largest signed amount in minor units (inclusive).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "RuleView": {
+        "description": "A bank rule as the app shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The rule id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name a person gave it.",
+            "type": "string"
+          },
+          "conditions": {
+            "description": "The conditions.",
+            "$ref": "#/components/schemas/RuleConditions"
+          },
+          "account_number": {
+            "description": "The account the rule posts to.",
+            "type": "string"
+          },
+          "tax_code": {
+            "description": "The tax code it sets.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "description": "The unit it sets.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "description": "Whether it applies. An agent's rule waits here until a person enables it.",
+            "type": "boolean"
+          },
+          "proposed_by": {
+            "description": "Who proposed it.",
+            "type": "string"
+          },
+          "enabled_by": {
+            "description": "Who enabled it, once enabled.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When it was created.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "conditions",
+          "account_number",
+          "enabled",
+          "proposed_by",
+          "created_at"
+        ]
+      },
+      "Format": {
+        "description": "The file formats the import reads.",
+        "oneOf": [
+          {
+            "description": "ISO 20022 `camt.053` bank-to-customer statement (XML).",
+            "type": "string",
+            "const": "camt053"
+          },
+          {
+            "description": "SWIFT MT940 customer statement message.",
+            "type": "string",
+            "const": "mt940"
+          },
+          {
+            "description": "A delimited text export with a saved column mapping.",
+            "type": "string",
+            "const": "csv"
+          }
+        ]
+      },
+      "StatementSummary": {
+        "description": "One statement of an import, as the summary reports it.",
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "description": "The statement's place in the file, from 0.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "format": {
+            "description": "The format it was read as.",
+            "$ref": "#/components/schemas/Format"
+          },
+          "reference": {
+            "description": "The statement's own reference, when it has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opening": {
+            "description": "The opening balance, when the file gives one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closing": {
+            "description": "The closing balance, when the file gives one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "balance_checked": {
+            "description": "Whether opening plus lines was checked against the closing balance.",
+            "type": "boolean"
+          },
+          "lines": {
+            "description": "Lines in the statement.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "new_transactions": {
+            "description": "Lines stored by this import.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "duplicate_transactions": {
+            "description": "Lines already stored, so skipped.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "already_imported": {
+            "description": "True when this file was already imported for this account.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ordinal",
+          "format",
+          "balance_checked",
+          "lines",
+          "new_transactions",
+          "duplicate_transactions",
+          "already_imported"
+        ]
+      },
+      "BalanceRow": {
+        "description": "An opening or closing balance on a date.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "`YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "minor": {
+            "description": "Signed minor units.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "date",
+          "minor"
+        ]
+      },
+      "TransactionView": {
+        "description": "One bank line as the app shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The line id.",
+            "type": "string"
+          },
+          "account_id": {
+            "description": "The bank account.",
+            "type": "string"
+          },
+          "statement_id": {
+            "description": "The statement it came from.",
+            "type": "string"
+          },
+          "booking_date": {
+            "description": "The booking date.",
+            "type": "string"
+          },
+          "value_date": {
+            "description": "The value date, when the file gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "description": "The signed amount (inflow positive).",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "counterparty_name": {
+            "description": "The counterparty's name. Data, never instructions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remittance": {
+            "description": "The remittance text. Data, never instructions.",
+            "type": "string"
+          },
+          "bank_reference": {
+            "description": "The bank's reference, when the file gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`unmatched`, `suggested` (unmatched with suggestions), `matched` or `ignored`.",
+            "type": "string"
+          },
+          "matched": {
+            "description": "What the line is matched to, once matched.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MatchedView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suggestions": {
+            "description": "Ranked suggestions for an unmatched line, at most three.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            }
+          },
+          "flags": {
+            "description": "Warnings: the remittance reads like an instruction. Shown, never acted on.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "party": {
+            "description": "The party whose IBAN is the counterparty's, when one is on file.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PartyRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "account_id",
+          "statement_id",
+          "booking_date",
+          "amount",
+          "remittance",
+          "status",
+          "suggestions",
+          "flags"
+        ]
+      },
+      "MatchedView": {
+        "description": "What a line was matched to.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "`entry` (a journal entry) or `bill`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The entry or bill id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "Suggestion": {
+        "description": "What a suggestion would do if a person accepted it.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of target.",
+            "$ref": "#/components/schemas/SuggestionKind"
+          },
+          "target_id": {
+            "description": "The target's id: the rule, bill or entry id.",
+            "type": "string"
+          },
+          "score": {
+            "description": "The score, 0 to 100.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "reasons": {
+            "description": "The reasons the score is what it is, as stable codes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "account_number": {
+            "description": "The account a rule names, when it names one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "target_id",
+          "score",
+          "reasons"
+        ]
+      },
+      "SuggestionKind": {
+        "description": "The kind of thing a suggestion points at.",
+        "oneOf": [
+          {
+            "description": "A bank rule matched: it names the account.",
+            "type": "string",
+            "const": "rule"
+          },
+          {
+            "description": "An open vendor bill the payment settles.",
+            "type": "string",
+            "const": "bill"
+          },
+          {
+            "description": "A posted journal entry on the bank's ledger account.",
+            "type": "string",
+            "const": "entry"
+          }
+        ]
+      },
+      "PartyRef": {
+        "description": "The party a counterparty is: the unmerged party whose IBAN is the line's.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The party id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The party's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PostedBankEntry": {
+        "description": "The entry a bank line posted.",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year of the number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_at": {
+            "description": "When it was recorded.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "recorded_at"
         ]
       },
       "BillView": {
@@ -3559,6 +8469,13 @@
           },
           "reader": {
             "description": "Which reader produced the fields, when one did (see `BillInput::reader`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "description": "The business unit the bill's expense lines carry, when one is named.",
             "type": [
               "string",
               "null"
@@ -3915,6 +8832,52 @@
           "recorded_at"
         ]
       },
+      "CompanyProfile": {
+        "description": "The company profile fields the Settings screen edits. Name and base\ncurrency are on the company row itself, not here.",
+        "type": "object",
+        "properties": {
+          "legal_form": {
+            "description": "The legal form, free text (for example `GmbH`).",
+            "type": "string",
+            "default": ""
+          },
+          "vat_id": {
+            "description": "The VAT identifier, with its country prefix. Empty when not registered.",
+            "type": "string",
+            "default": ""
+          },
+          "registration_number": {
+            "description": "The commercial register number or equivalent.",
+            "type": "string",
+            "default": ""
+          },
+          "address_line": {
+            "description": "The street address, one line.",
+            "type": "string",
+            "default": ""
+          },
+          "postal_code": {
+            "description": "The postal code.",
+            "type": "string",
+            "default": ""
+          },
+          "city": {
+            "description": "The city.",
+            "type": "string",
+            "default": ""
+          },
+          "country": {
+            "description": "The country, as an ISO 3166-1 alpha-2 code.",
+            "type": "string",
+            "default": ""
+          },
+          "contact_email": {
+            "description": "The address for invoices and notices from the company.",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
       "EntryLineRecordView": {
         "description": "One entry line, as the app's `EntryLineRecord` types it.",
         "type": "object",
@@ -4220,6 +9183,68 @@
           "recorded_at"
         ]
       },
+      "FiscalYearView": {
+        "description": "One fiscal year.",
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "The year's label (its calendar year, for a January start).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "starts_on": {
+            "description": "The first day of the year.",
+            "type": "string"
+          },
+          "ends_on": {
+            "description": "The last day of the year.",
+            "type": "string"
+          },
+          "closed": {
+            "description": "True once the year-end close has run.",
+            "type": "boolean"
+          },
+          "closed_at": {
+            "description": "When the year-end close ran.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "periods": {
+            "description": "The year's months, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PeriodView"
+            }
+          }
+        },
+        "required": [
+          "label",
+          "starts_on",
+          "ends_on",
+          "closed",
+          "periods"
+        ]
+      },
+      "PeriodView": {
+        "description": "One period of a fiscal year and its state.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "`YYYY-MM`.",
+            "type": "string"
+          },
+          "state": {
+            "description": "`open`, `soft_closed` or `closed`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "state"
+        ]
+      },
       "LimitAmounts": {
         "description": "One currency's limits, as canonical decimal strings in major units\n(`\"1000.00\"` for EUR is 100000 minor units).",
         "type": "object",
@@ -4249,6 +9274,13 @@
           "name": {
             "description": "The label the key was created with.",
             "type": "string"
+          },
+          "unit": {
+            "description": "The business unit the key is pinned to; absent means all units.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "prefix": {
             "description": "The public prefix, `lk_live_<id>`. The secret part is never shown again.",
@@ -4300,8 +9332,75 @@
           "created_by"
         ]
       },
+      "JournalNumberingView": {
+        "description": "One journal and its sequences.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The journal's id.",
+            "type": "string"
+          },
+          "code": {
+            "description": "The journal code, for example `GN`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The journal's name.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The journal kind (`general`, `sales`, ...).",
+            "type": "string"
+          },
+          "sequences": {
+            "description": "One sequence per fiscal year.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SequenceView"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "kind",
+          "sequences"
+        ]
+      },
+      "SequenceView": {
+        "description": "One number sequence: a journal in one fiscal year.",
+        "type": "object",
+        "properties": {
+          "fiscal_year": {
+            "description": "The fiscal year.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_number": {
+            "description": "The number the next entry in this journal and year receives.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "entries": {
+            "description": "Entries already posted in this journal and year.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "editable": {
+            "description": "True while no number has been issued, so the next number may be set.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fiscal_year",
+          "next_number",
+          "entries",
+          "editable"
+        ]
+      },
       "PartyView": {
-        "description": "A party with latest VIES result.",
+        "description": "A party, with its latest VIES result.",
         "type": "object",
         "properties": {
           "id": {
@@ -4338,7 +9437,7 @@
             "type": "string"
           },
           "merged_into": {
-            "description": "Whether merged away (null if not merged).",
+            "description": "The party this one was merged into, when it was.",
             "type": [
               "string",
               "null"
@@ -4360,7 +9459,7 @@
             "type": "boolean"
           },
           "possible_duplicates": {
-            "description": "IDs of other unmerged parties with possible duplicates (same VAT id, IBAN, or name).",
+            "description": "Other unmerged parties with the same VAT ID, IBAN or name.",
             "type": "array",
             "items": {
               "type": "string"
@@ -4418,6 +9517,131 @@
           "balance"
         ]
       },
+      "TrendMonthView": {
+        "description": "One month of `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The month, `YYYY-MM`.",
+            "type": "string"
+          },
+          "revenue": {
+            "description": "Income for the month.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "expenses": {
+            "description": "Expenses for the month.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "net_result": {
+            "description": "Revenue minus expenses.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "cash": {
+            "description": "Cash and bank balance at month end.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "receivables": {
+            "description": "Receivables balance at month end.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "payables": {
+            "description": "Payables balance at month end, as a positive amount owed.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "period",
+          "revenue",
+          "expenses",
+          "net_result",
+          "cash",
+          "receivables",
+          "payables"
+        ]
+      },
+      "ExpenseAccountView": {
+        "description": "One ranked expense account of `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "account": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "name_key": {
+            "description": "The account's name key.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "The account's expenses in the range.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "share_bps": {
+            "description": "Share of the range's expenses in basis points (1/100 of a percent).",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "account",
+          "name_key",
+          "amount",
+          "share_bps"
+        ]
+      },
+      "DimensionShareView": {
+        "description": "Revenue and expenses of one dimension value in `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The dimension value's code.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The dimension value's name.",
+            "type": "string"
+          },
+          "revenue": {
+            "description": "Income tagged with the value.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "expenses": {
+            "description": "Expenses tagged with the value.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "revenue",
+          "expenses"
+        ]
+      },
+      "ActivityMonthView": {
+        "description": "One month of entries posted, by actor, in `reports.trends`.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The month, `YYYY-MM`.",
+            "type": "string"
+          },
+          "agent": {
+            "description": "Entries posted by an agent key.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "human": {
+            "description": "Entries posted by a person.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "agent",
+          "human"
+        ]
+      },
       "TrialBalanceRowView": {
         "description": "One trial-balance row.",
         "type": "object",
@@ -4444,6 +9668,183 @@
           "debit",
           "credit",
           "balance"
+        ]
+      },
+      "UnitSummaryRowView": {
+        "description": "One row of the units comparison, as the API returns it.",
+        "type": "object",
+        "properties": {
+          "unit": {
+            "description": "The unit code; absent on the consolidated and elimination rows.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revenue": {
+            "description": "Income for the period.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "expenses": {
+            "description": "Expenses for the period.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "result": {
+            "description": "Revenue minus expenses.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "cash": {
+            "description": "Cash and bank balance through the period (debit positive).",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "revenue",
+          "expenses",
+          "result",
+          "cash"
+        ]
+      },
+      "TaxRateView": {
+        "description": "One rate the company's country has on the given day.",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "`standard`, `reduced` or `zero`.",
+            "type": "string"
+          },
+          "percent": {
+            "description": "The rate as a percentage, for example `19`.",
+            "type": "string"
+          },
+          "valid_from": {
+            "description": "The day the rate took effect, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "source": {
+            "description": "The statute the rate comes from, or the company's own note.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "percent",
+          "valid_from",
+          "source"
+        ]
+      },
+      "ReturnView": {
+        "description": "One return the pack can draft.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The layout id (`generic`, `sg-gst-f5`, `ustva`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The English title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "TaxCodeView": {
+        "description": "One tax code entries use, as the company's pack defines it.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The stable id (`SG-GST-SR-9`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The English label.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`output_vat`, `input_vat`, `reverse_charge`, `exempt`, `zero` or `import_vat`.",
+            "type": "string"
+          },
+          "category": {
+            "description": "`standard`, `reduced`, `zero` or `exempt`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "kind",
+          "category"
+        ]
+      },
+      "UserRate": {
+        "description": "A rate the company defines for a pack that allows it.",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "`standard`, `reduced` or `zero`.",
+            "type": "string"
+          },
+          "percent": {
+            "description": "The rate as a percentage, for example `8.25`.",
+            "type": "string"
+          },
+          "valid_from": {
+            "description": "The first day the rate applies, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "source": {
+            "description": "What the company says the rate is based on (free text, required).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "percent",
+          "valid_from",
+          "source"
+        ]
+      },
+      "UnitView": {
+        "description": "One business unit as the app and the CLI see it.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The short code entry lines name the unit by.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name shown to people.",
+            "type": "string"
+          },
+          "colour": {
+            "description": "The colour, `#RRGGBB`.",
+            "type": "string"
+          },
+          "logo_document_id": {
+            "description": "The logo document, when one is set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived": {
+            "description": "Whether the unit is archived.",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "When the unit was created (RFC 3339, UTC).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "colour",
+          "archived",
+          "created_at"
         ]
       }
     },

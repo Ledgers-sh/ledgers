@@ -168,12 +168,15 @@ fn the_fixture_names_its_company_and_currency() {
 #[test]
 fn vat_is_the_german_standard_rate_from_the_tax_crate_and_money_rounding() {
     use ledgers_money::{Amount, Currency, Rate, Rounding};
-    use ledgers_tax::rate::{Jurisdiction, RateCategory, germany_rates};
+    use ledgers_tax::rate::{Jurisdiction, RateCategory};
 
     let date = time::Date::from_calendar_date(2026, time::Month::June, 1).expect("a date");
-    let table = germany_rates().expect("the German rates");
+    let table = ledgers_tax::pack_by_id("de")
+        .expect("the German pack")
+        .rate_table(&[])
+        .expect("the German rates");
     let standard = table
-        .rate_on(Jurisdiction::Germany, RateCategory::Standard, date)
+        .rate_on(&Jurisdiction::new("DE"), RateCategory::Standard, date)
         .expect("a standard rate in 2026")
         .rate;
     assert_eq!(standard, Rate::parse("0.19").expect("a rate"));

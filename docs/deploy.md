@@ -77,12 +77,26 @@ npx wrangler@4.148.0 secret put LEDGERS_MINIMAX_API_KEY --env staging
 - `LEDGERS_EXTRACT_PROVIDER` chooses the reader: `anthropic`, `minimax` or
   `rules`. Unset, it is `anthropic` when `LEDGERS_EXTRACT_API_KEY` is set,
   `minimax` when only `LEDGERS_MINIMAX_API_KEY` is set, and the rules otherwise.
-  Naming a provider whose key is missing is a configuration error at startup,
-  never a silent fallback. `LEDGERS_MINIMAX_MODEL` overrides the MiniMax model
-  id (default `MiniMax-M3`).
+  Naming a provider whose key is missing, or a name that is not a provider,
+  does not stop the server: invoice reading falls back to the rules reader,
+  the server logs one warning at startup, and `GET /v1/status` reports
+  `extraction: {provider: "rules", configured: "minimax", reason: "missing_key"}`
+  so the app can say invoice reading for photos is not set up.
+  `LEDGERS_MINIMAX_MODEL` overrides the MiniMax model id (default `MiniMax-M3`).
 
-Staging sets `LEDGERS_EXTRACT_PROVIDER = "minimax"` in `[env.staging.vars]`;
-production sets no provider and keeps the default.
+**Set `LEDGERS_EXTRACT_PROVIDER` only after its key secret exists.** Staging
+keeps it at `"rules"` in `[env.staging.vars]` until `LEDGERS_MINIMAX_API_KEY`
+is set; then set it to `"minimax"` and redeploy. Production sets no provider
+and keeps the default.
+
+Other optional settings never stop the server either. A wrong
+`LEDGERS_AUTH_ISSUER` turns people sign-in off (its routes answer 503 and
+`GET /v1/status` names the reason). A missing or short
+`LEDGERS_DOCUMENT_SIGNING_KEY` turns document download links off (the download
+routes answer 503; uploads still work). An invalid `LEDGERS_RATE_LIMIT_PER_MIN`
+uses the default of 100. Required configuration still fails startup: a missing
+company id outside `LEDGERS_DEV=1`, or a `HARNESS_SECRET` the harness rejects.
+On Workers those answer every request with a 503 whose body names the variable.
 
 ## 4. Apply the migrations
 

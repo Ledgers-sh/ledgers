@@ -93,6 +93,10 @@ fn reads() -> Vec<(&'static str, Value)> {
         ("entries.list", json!({"limit": 50})),
         ("entries.get", json!({"external_id": "ext-0"})),
         ("reports.trial_balance", json!({"period": "2026-10"})),
+        (
+            "reports.trends",
+            json!({"from": "2026-01", "to": "2026-10", "dimension": "cost_centre"}),
+        ),
     ]
 }
 
@@ -174,6 +178,7 @@ fn authenticated_reads_stay_within_their_statement_budget() {
         ("entries.list", 6),
         ("entries.get", 8),
         ("reports.trial_balance", 4),
+        ("reports.trends", 9),
     ]);
     let fx = fixture();
     let posted = fx.post("ext-0", "5010", "4000", "100");
@@ -363,5 +368,60 @@ fn the_server_timing_value_names_the_three_database_metrics() {
             p.timing.snapshot().statements
         )),
         "{value}"
+    );
+}
+
+#[test]
+fn a_trend_report_runs_the_same_statements_for_one_month_and_for_twelve() {
+    let fx = fixture();
+    let posted = fx.post("ext-0", "5010", "4000", "100");
+    assert_eq!(posted.status.as_u16(), 200, "{}", posted.json());
+    let one = json!({"from": "2026-10", "to": "2026-10", "dimension": "project"});
+    let twelve = json!({"from": "2026-01", "to": "2026-12", "dimension": "project"});
+    let short = statements_of(&fx, "reports.trends", &one);
+    let long = statements_of(&fx, "reports.trends", &twelve);
+    assert_eq!(short, long, "a month ran {short} statements, a year {long}");
+}
+
+#[test]
+fn the_units_summary_costs_the_same_statements_however_many_units_it_compares() {
+    // The side-by-side comparison is a fixed set of statements: one per
+    // aggregate, whatever the number of business units.
+    let fx = fixture();
+    let person = ledgers_audit::AuditContext::new(
+        ledgers_audit::Actor::Person {
+            person_id: "person-owner".to_owned(),
+        },
+        "req-units",
+        "01UNITSCOST000000000000000A".to_owned(),
+    );
+    let mut next = 0u32;
+    let mut make = |count: u32| {
+        for _ in 0..count {
+            next += 1;
+            let code = format!("U{next:03}");
+            pollster::block_on(ledgers_ledger::units::create_unit(
+                fx.deps.db.as_ref(),
+                common::COMPANY,
+                ledgers_ledger::units::UnitDraft {
+                    code: code.clone(),
+                    name: format!("Unit {code}"),
+                    colour: None,
+                    logo_document_id: None,
+                },
+                "2026-10-22T10:00:00Z".to_owned(),
+                &person,
+            ))
+            .expect("the unit is created");
+        }
+    };
+    make(2);
+    let input = json!({"period": "2026-10"});
+    let two = statements_of(&fx, "reports.units_summary", &input);
+    make(6);
+    let eight = statements_of(&fx, "reports.units_summary", &input);
+    assert_eq!(
+        two, eight,
+        "the statement count grows with the units: {two} vs {eight}"
     );
 }

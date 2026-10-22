@@ -78,7 +78,10 @@ fn code(kind: TaxKind, cat: RateCategory, out: Option<&str>, inp: Option<&str>) 
 
 #[test]
 fn test_net_standard_19() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -95,6 +98,7 @@ fn test_net_standard_19() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -110,7 +114,10 @@ fn test_net_standard_19() {
 
 #[test]
 fn test_net_reduced_7() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Reduced,
@@ -127,6 +134,7 @@ fn test_net_reduced_7() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -142,7 +150,10 @@ fn test_net_reduced_7() {
 
 #[test]
 fn test_temporary_rate() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -159,6 +170,7 @@ fn test_temporary_rate() {
         lines: &[line],
         date: Date::from_calendar_date(2020, time::Month::July, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -172,7 +184,10 @@ fn test_temporary_rate() {
 
 #[test]
 fn test_gross_based() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -189,6 +204,7 @@ fn test_gross_based() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Gross,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -204,7 +220,10 @@ fn test_gross_based() {
 
 #[test]
 fn test_reverse_charge() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::ReverseCharge,
         RateCategory::Standard,
@@ -221,6 +240,7 @@ fn test_reverse_charge() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -235,7 +255,10 @@ fn test_reverse_charge() {
 
 #[test]
 fn test_small_business() {
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -252,6 +275,7 @@ fn test_small_business() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -268,7 +292,7 @@ fn test_small_business() {
 fn test_rate_gaps() {
     let dates = vec![
         DatedRate {
-            jurisdiction: Jurisdiction::Germany,
+            jurisdiction: Jurisdiction::new("DE"),
             category: RateCategory::Standard,
             rate: "0.19".parse().unwrap(),
             valid_from: Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
@@ -276,7 +300,7 @@ fn test_rate_gaps() {
             source: "Test".to_string(),
         },
         DatedRate {
-            jurisdiction: Jurisdiction::Germany,
+            jurisdiction: Jurisdiction::new("DE"),
             category: RateCategory::Standard,
             rate: "0.19".parse().unwrap(),
             valid_from: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
@@ -291,7 +315,7 @@ fn test_rate_gaps() {
 fn test_rate_overlaps() {
     let dates = vec![
         DatedRate {
-            jurisdiction: Jurisdiction::Germany,
+            jurisdiction: Jurisdiction::new("DE"),
             category: RateCategory::Standard,
             rate: "0.19".parse().unwrap(),
             valid_from: Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
@@ -299,7 +323,7 @@ fn test_rate_overlaps() {
             source: "Test".to_string(),
         },
         DatedRate {
-            jurisdiction: Jurisdiction::Germany,
+            jurisdiction: Jurisdiction::new("DE"),
             category: RateCategory::Standard,
             rate: "0.16".parse().unwrap(),
             valid_from: Date::from_calendar_date(2020, time::Month::July, 1).unwrap(),
@@ -321,7 +345,10 @@ fn test_half_even_vs_half_up_tie_at_7_percent() {
     // Quotient: 10 (even), remainder: 500_000_000_000 (exactly half)
     // HalfEven: don't bump (quotient even) → 0.10 EUR
     // HalfUp: bump → 0.11 EUR
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Reduced,
@@ -339,6 +366,7 @@ fn test_half_even_vs_half_up_tie_at_7_percent() {
         lines: std::slice::from_ref(&line),
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -353,6 +381,7 @@ fn test_half_even_vs_half_up_tie_at_7_percent() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -368,7 +397,10 @@ fn test_per_document_rounding_differs_from_per_line() {
     // Three lines of 0.03 EUR at 7%, per-line vs per-document
     // Per-line: 0.03 × 7% = 0.0021 → rounds to 0.00 each; total 0.00 tax
     // Per-document: 0.09 × 7% = 0.0063 → rounds to 0.01 tax (allocated to lines)
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Reduced,
@@ -396,6 +428,7 @@ fn test_per_document_rounding_differs_from_per_line() {
         lines: &lines,
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -410,6 +443,7 @@ fn test_per_document_rounding_differs_from_per_line() {
         lines: &lines,
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Net,
         scope: ledgers_tax::RoundingScope::PerDocument,
@@ -430,7 +464,10 @@ fn test_per_document_rounding_differs_from_per_line() {
 #[test]
 fn test_gross_based_net_plus_tax_equals_gross() {
     // Verify that for gross-based calculations, net + tax == gross exactly
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -449,6 +486,7 @@ fn test_gross_based_net_plus_tax_equals_gross() {
         lines: &[line_10],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Gross,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -466,7 +504,10 @@ fn test_gross_based_net_plus_tax_equals_gross() {
 #[test]
 fn test_gross_based_small_amounts() {
     // Test gross-based with amounts that don't divide evenly
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -484,6 +525,7 @@ fn test_gross_based_small_amounts() {
         lines: &[line_001],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Gross,
         scope: ledgers_tax::RoundingScope::PerLine,
@@ -503,7 +545,10 @@ fn test_gross_based_small_amounts() {
 #[test]
 fn test_gross_based_1_19() {
     // 1.19 EUR gross at 19% should give tax = 0.19, net = 1.00 exactly
-    let rates = ledgers_tax::rate::germany_rates().unwrap();
+    let rates = ledgers_tax::pack_by_id("de")
+        .unwrap()
+        .rate_table(&[])
+        .unwrap();
     let test_code = code(
         TaxKind::OutputVat,
         RateCategory::Standard,
@@ -520,6 +565,7 @@ fn test_gross_based_1_19() {
         lines: &[line],
         date: Date::from_calendar_date(2021, time::Month::January, 1).unwrap(),
         table: &rates,
+        jurisdiction: &Jurisdiction::new("DE"),
         code_lookup: &|_| Ok(test_code.clone()),
         basis: Basis::Gross,
         scope: ledgers_tax::RoundingScope::PerLine,

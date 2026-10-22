@@ -46,7 +46,7 @@ test.describe('agent keys', () => {
     await expect(shown.locator('pre').nth(1)).toContainText(`Bearer ${token}`);
 
     await shown.getByRole('button', { name: 'Copy key' }).click();
-    await expect(shown.getByRole('button', { name: 'Copied' })).toBeVisible();
+    await expect(shown.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(token);
 
     await shown.getByRole('button', { name: "I've copied the key" }).click();

@@ -1,0 +1,75 @@
+# Indonesia: Pajak Pertambahan Nilai (PPN, VAT).
+#
+# Sources:
+#   PMK 131/2024 (Pasal 2 ayat 2, Pasal 3, Pasal 5), summary at DJP,
+#     https://www.pajak.go.id/en/node/113453 ; full text
+#     https://jdih.kemenkeu.go.id/api/download/ad276b82-94bd-4197-b409-af33e2842cd6/2024pmkeuangan131.pdf
+#     Statutory PPN 12% (Pasal 8A jo. 16G UU PPN as amended by UU HPP 7/2021).
+#     Non-luxury goods and services are charged at 11% from 2025-01-01 through the
+#     DPP nilai lain of 11/12 (Pasal 3). The 11% effective rate is the one stored.
+#   NPWP: PMK 112/2022 (NIK as NPWP for resident individuals; full implementation
+#     from 2024-01-01); other taxpayers use 16 digits. Source: DDTC news and DJP
+#     (search snippets; the DJP node was not fetched in full).
+#
+# TODO (rates left out, not verified): the 11% rate from 2022-04-01 (UU HPP) before
+#   2025; the luxury goods (PPnBM) rate of 12% from 2025-02-01 (Pasal 5) is a
+#   separate category and is not modelled yet; exports (0%) have no dated row.
+# TODO: the PPN return (SPT Masa PPN) layout is not drafted; the generic return only.
+
+id = "id"
+iso = "ID"
+covers = ["ID"]
+name = "Indonesia"
+native_name = "Indonesia"
+currency = "IDR"
+fiscal_year_start_month = 1
+decimal_separator = ","
+thousands_separator = "."
+date_format = "DD/MM/YYYY"
+chart = "generic-sme"
+regime = "vat"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "NPWP"
+validator = "id-npwp"
+note = "15 digits (legacy) or 16 digits (NIK-based, required for Coretax). Separators are ignored. Existence is not checked."
+
+[[rates]]
+jurisdiction = "ID"
+category = "standard"
+percent = "11"
+valid_from = "2025-01-01"
+source = "PMK 131/2024 Pasal 3: general PPN effective 11% (DPP nilai lain 11/12 of 12%)"
+
+[[tax_codes]]
+code = "ID-PPN-11"
+label = "Output PPN 11%"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "ID-PPN-MS"
+label = "Input PPN (masukan)"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "ID-PPN-0"
+label = "Export supply (0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "ID-PPN-BEB"
+label = "Exempt supply (bebas PPN)"
+kind = "exempt"
+category = "exempt"
+
+[[returns]]
+id = "generic"
+label = "PPN return (generic)"
+kind = "generic"

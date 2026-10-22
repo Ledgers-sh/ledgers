@@ -11,6 +11,7 @@
 //! an extraction on its own: posting is always a command.
 
 pub mod commands;
+pub mod iban;
 pub mod model;
 pub mod module;
 pub mod parties;
@@ -32,8 +33,13 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
     ),
     cratefield_core::SqlMigration::new(
         "0003",
+        "bill_unit",
+        include_str!("../migrations/sqlite/0003_bill_unit.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0004",
         "parties",
-        include_str!("../migrations/sqlite/0003_parties.sql"),
+        include_str!("../migrations/sqlite/0004_parties.sql"),
     ),
 ];
 
@@ -51,8 +57,13 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
     ),
     cratefield_core::SqlMigration::new(
         "0003",
+        "bill_unit",
+        include_str!("../migrations/postgres/0003_bill_unit.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0004",
         "parties",
-        include_str!("../migrations/postgres/0003_parties.sql"),
+        include_str!("../migrations/postgres/0004_parties.sql"),
     ),
 ];
 

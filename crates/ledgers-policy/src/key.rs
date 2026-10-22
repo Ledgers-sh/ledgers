@@ -92,6 +92,12 @@ pub struct AgentKey {
     /// stored policies reads as `false`.
     #[serde(default)]
     pub chart_changes: bool,
+    /// The business unit this key is pinned to, or `None` for all units.
+    /// A pinned key's entries carry its unit: a line with no unit takes it,
+    /// a line for another unit is refused (the server enforces both before
+    /// the command runs). Missing in stored policies reads as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 #[cfg(test)]
@@ -159,6 +165,7 @@ mod tests {
             last_used_at: None,
             revoked_at: None,
             chart_changes: false,
+            unit: None,
         };
 
         let json = serde_json::to_string(&key).expect("serialize");

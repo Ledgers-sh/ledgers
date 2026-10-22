@@ -8,6 +8,8 @@ import { useContext } from 'preact/hooks';
 import type { ClientConfig } from './api/client';
 import { defaultServerUrl } from './api/config';
 import { currentPeriod, isPeriod } from './lib/period';
+import { normaliseRange, presetRange, type MonthRange } from './lib/trends';
+import type { Unit } from './api/types';
 
 /** The server origin the Connect screen starts from: VITE_LEDGERS_API at build time, else the local server. */
 export const DEFAULT_SERVER_URL = defaultServerUrl(import.meta.env.VITE_LEDGERS_API);
@@ -20,6 +22,7 @@ export interface Credentials {
 const KEY_URL = 'ledgers.baseUrl';
 const KEY_API = 'ledgers.apiKey';
 const KEY_PERIOD = 'ledgers.period';
+const KEY_RANGE = 'ledgers.range';
 const KEY_CURRENCY = 'ledgers.currency';
 const THEME_KEY = 'ledgers.theme';
 
@@ -55,6 +58,7 @@ export function clearCredentials(): void {
   writeSession(KEY_API, null);
   writeSession(KEY_URL, null);
   writeSession(KEY_PERIOD, null);
+  writeSession(KEY_RANGE, null);
 }
 
 export function loadPeriod(): string {
@@ -64,6 +68,18 @@ export function loadPeriod(): string {
 
 export function savePeriod(period: string): void {
   writeSession(KEY_PERIOD, period);
+}
+
+/** The period range the reports and Overview cover. Defaults to this year to date. */
+export function loadRange(now: Date = new Date()): MonthRange {
+  const stored = readSession(KEY_RANGE);
+  const [from, to] = stored ? stored.split('/') : [];
+  if (from && to && isPeriod(from) && isPeriod(to)) return normaliseRange({ from, to });
+  return presetRange('thisYear', now);
+}
+
+export function saveRange(range: MonthRange): void {
+  writeSession(KEY_RANGE, `${range.from}/${range.to}`);
 }
 
 export function loadCurrency(): string {
@@ -97,8 +113,12 @@ export type ToastKind = 'ok' | 'error';
 
 export interface Session {
   client: ClientConfig;
+  /** The month the single-month pages (journal, new entry, statements) use: the end of the range. */
   period: string;
   setPeriod: (period: string) => void;
+  /** The period the Overview and the period picker cover. */
+  range: MonthRange;
+  setRange: (range: MonthRange) => void;
   currency: string;
   setCurrency: (currency: string) => void;
   online: boolean;
@@ -108,6 +128,12 @@ export interface Session {
   approvalCount: number | null;
   /** Re-reads the approvals count (after a decision). */
   refreshApprovals: () => void;
+  /** The unit scope every screen reads: a unit code from the URL (`?unit=`), or null for the whole company. */
+  unit: string | null;
+  /** The active business units, in code order. Empty when the company has none, which hides the switcher. */
+  units: Unit[];
+  /** Re-reads the business units (after a unit is added, renamed or archived). */
+  refreshUnits: () => void;
 }
 
 export const SessionContext = createContext<Session | null>(null);

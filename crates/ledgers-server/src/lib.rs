@@ -4,6 +4,7 @@
 pub mod agent_keys;
 pub mod config;
 pub mod demo;
+pub mod demo_bank;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -12,8 +13,10 @@ pub mod mcp;
 pub mod native;
 pub mod openapi;
 pub mod people;
+pub mod query_input;
 pub mod rate_limiting;
 pub mod routes;
+pub mod status;
 pub mod timing;
 
 /// Cloudflare Workers entry point (wasm32 only)
@@ -24,6 +27,7 @@ pub use config::LedgersConfig;
 pub use dispatch::{Deps, ServerDispatch};
 pub use mcp::McpModule;
 pub use routes::Dispatch;
+pub use status::{Composition, Status, Unavailable};
 
 use cratefield_core::{Config, ConfigError, Harness, Runtime, Venture, VentureEnv};
 use ledgers_commands::Registry;
@@ -39,12 +43,42 @@ use std::sync::Arc;
 ///
 /// # Errors
 ///
-/// Returns `ConfigError` if configuration is invalid.
+/// Returns `ConfigError` only for required configuration (the company id
+/// outside development, and the harness's own keys). Optional features never
+/// stop the build: see [`compose`].
 pub fn harness(
     registry: &Registry,
     cfg: &dyn Config,
     runtime: impl Runtime + 'static,
 ) -> Result<Harness, ConfigError> {
+    compose(registry, cfg, runtime).map(|composition| composition.harness)
+}
+
+/// Builds the harness and reports what is degraded.
+///
+/// Optional features degrade instead of failing the build, so the rest of the
+/// API stays up:
+///
+/// - the invoice reader falls back to the rules reader when its provider has
+///   no key, or the provider name is unknown (see
+///   [`ledgers_extract::provider::select`]);
+/// - people sign-in is off when its issuer configuration is wrong; its routes
+///   answer 503;
+/// - document download links are off when the signing key is missing or
+///   shorter than 32 characters; the download routes answer 503.
+///
+/// Each degradation is listed in the composition's status (`GET /v1/status`)
+/// and in [`Composition::warnings`], which name variables and never values.
+///
+/// # Errors
+///
+/// Returns `ConfigError` for required configuration: the company id outside
+/// development, and anything the harness itself rejects.
+pub fn compose(
+    registry: &Registry,
+    cfg: &dyn Config,
+    runtime: impl Runtime + 'static,
+) -> Result<Composition, ConfigError> {
     // Create the venture
     let domain = cfg
         .get("LEDGERS_DOMAIN")
@@ -57,15 +91,7 @@ pub fn harness(
     // default port may call the API, and the dev bootstrap runs at start.
     let dev = is_dev(cfg);
     let cors_origins = app_origins(cfg);
-    // Cookie-authenticated (person) calls may come from these origins only.
-    let people_config =
-        people::PeopleConfig::from_config(cfg, &public_url, cors_origins.clone(), dev).map_err(
-            |e| {
-                let mut errors = ConfigError::default();
-                errors.push(e);
-                errors
-            },
-        )?;
+    let optional = optional_features(cfg, &public_url, cors_origins.clone(), dev);
 
     let company_id = match cfg.get("LEDGERS_COMPANY_ID") {
         Some(id) => id,
@@ -86,22 +112,9 @@ pub fn harness(
     // through the rate limiter before dispatch (`rate_limiting::admit`). The
     // limiter comes from the request's ports (`Deps`), so it is resolved per
     // request on Workers as well as natively; persons pass through.
-    let document_key = document_signing_key(cfg, dev).map_err(|e| {
-        let mut errors = ConfigError::default();
-        errors.push(e);
-        errors
-    })?;
-    let model_reader = ledgers_extract::provider::select(
-        cfg.get("LEDGERS_EXTRACT_PROVIDER").as_deref(),
-        cfg.get("LEDGERS_EXTRACT_API_KEY").as_deref(),
-        cfg.get("LEDGERS_MINIMAX_API_KEY").as_deref(),
-        cfg.get("LEDGERS_MINIMAX_MODEL").as_deref(),
-    )
-    .map_err(|e| {
-        let mut errors = ConfigError::default();
-        errors.push(e);
-        errors
-    })?;
+    //
+    let document_key = optional.document_key;
+    let extraction = optional.selection.status.clone();
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(
         dispatch::ServerDispatch::new(company_id.clone())
             .with_app_origins(cors_origins.clone())
@@ -110,7 +123,8 @@ pub fn harness(
                     .unwrap_or_else(|| public_url.clone()),
             )
             .with_document_key(document_key.clone())
-            .with_model_reader(model_reader),
+            .with_model_reader(optional.selection.settings)
+            .with_vies_enabled(cfg.get("LEDGERS_VIES").as_deref() == Some("1")),
     );
 
     // Generate domain modules
@@ -156,7 +170,7 @@ pub fn harness(
 
     // Last, so its migration follows every existing module's: the D1 files
     // are numbered in this order and staging has already applied them.
-    let builder = builder.module(people::PeopleModule::new(people_config));
+    let builder = builder.module(people::PeopleModule::new(optional.people));
     // The approval inbox columns come after every other module's migrations.
     let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
     // The notification outbox comes last of all, after the inbox.
@@ -165,8 +179,22 @@ pub fn harness(
     // module above, the same way the D1 files are numbered.
     let builder = builder.module(ledgers_documents::DocumentsStoreModule);
     let builder = builder.module(ledgers_bills::BillsModule);
+    // Bank accounts, statements and reconciliation: after the documents and the
+    // bills whose tables reconciliation reads.
+    let builder = builder.module(ledgers_bank::BankModule);
 
-    builder.build()
+    // The status read: which optional features are off and why. Mounted last;
+    // it has no migrations, so it does not renumber the D1 files.
+    let status = status::Status {
+        extraction,
+        unavailable: optional.unavailable,
+    };
+    let builder = builder.module(status::StatusModule::new(status.clone()));
+
+    Ok(Composition {
+        harness: builder.build()?,
+        status,
+    })
 }
 
 /// A value built once per isolate and shared by every request after that.
@@ -211,6 +239,66 @@ impl<T> Composed<T> {
     }
 }
 
+/// The optional features read from configuration. Each one degrades on its
+/// own; none of them stops the build.
+struct OptionalFeatures {
+    /// People sign-in, `None` when it is off.
+    people: Option<people::PeopleConfig>,
+    /// The document signing key, empty when download links are off.
+    document_key: Vec<u8>,
+    /// The invoice reader selection (the reader, or the rules).
+    selection: ledgers_extract::provider::Selection,
+    /// The features that are off, with their reasons.
+    unavailable: Vec<Unavailable>,
+}
+
+/// Reads every optional feature. A bad value turns that feature off and is
+/// recorded in `unavailable`; it never fails.
+fn optional_features(
+    cfg: &dyn Config,
+    public_url: &str,
+    cors_origins: Vec<String>,
+    dev: bool,
+) -> OptionalFeatures {
+    let mut unavailable = Vec::new();
+    // Cookie-authenticated (person) calls may come from these origins only.
+    // A wrong issuer setting turns sign-in off; it does not stop the server.
+    let people = match people::PeopleConfig::from_config(cfg, public_url, cors_origins, dev) {
+        Ok(config) => config,
+        Err(reason) => {
+            unavailable.push(Unavailable {
+                feature: "sign_in",
+                reason,
+            });
+            None
+        }
+    };
+    // A missing or short signing key leaves download links off (an empty key
+    // is never used: an HMAC with an empty key is forgeable).
+    let document_key = match document_signing_key(cfg, dev) {
+        Ok(key) => key,
+        Err(reason) => {
+            unavailable.push(Unavailable {
+                feature: "document_links",
+                reason,
+            });
+            Vec::new()
+        }
+    };
+    let selection = ledgers_extract::provider::select(
+        cfg.get("LEDGERS_EXTRACT_PROVIDER").as_deref(),
+        cfg.get("LEDGERS_EXTRACT_API_KEY").as_deref(),
+        cfg.get("LEDGERS_MINIMAX_API_KEY").as_deref(),
+        cfg.get("LEDGERS_MINIMAX_MODEL").as_deref(),
+    );
+    OptionalFeatures {
+        people,
+        document_key,
+        selection,
+        unavailable,
+    }
+}
+
 /// The origins the web app is served from, which the API allows for CORS and
 /// for cookie-authenticated calls: `LEDGERS_CORS_ORIGINS` (comma-separated), or
 /// the API's own origin, the local web origin and, in development, Vite's.
@@ -237,7 +325,8 @@ pub fn app_origins(cfg: &dyn Config) -> Vec<String> {
 /// fixed development key so local links work without setup.
 ///
 /// # Errors
-/// A message when the key is missing outside development or too short.
+/// A message naming the variable when the key is missing outside development
+/// or too short. The server then runs with download links off.
 pub fn document_signing_key(cfg: &dyn Config, dev: bool) -> Result<Vec<u8>, String> {
     match cfg.get("LEDGERS_DOCUMENT_SIGNING_KEY") {
         Some(key) if key.len() >= 32 => Ok(key.into_bytes()),

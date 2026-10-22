@@ -282,6 +282,7 @@ mod tests {
                 last_used_at: None,
                 revoked_at: None,
                 chart_changes: false,
+                unit: None,
             },
         );
 
@@ -324,6 +325,7 @@ mod tests {
                 last_used_at: None,
                 revoked_at: Some(now),
                 chart_changes: false,
+                unit: None,
             },
         );
 

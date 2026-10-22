@@ -56,6 +56,13 @@ name = "account.generic_sme.prepayments"
 type = "asset"
 parent = "1000"
 
+[[accounts]]
+number = "1070"
+name = "account.generic_sme.inter_unit_receivable"
+type = "asset"
+parent = "1000"
+tags = ["inter-unit-due-from"]
+
 # --- Fixed assets -----------------------------------------------------------
 
 [[accounts]]
@@ -111,6 +118,13 @@ type = "liability"
 parent = "2000"
 tags = ["suspense"]
 
+[[accounts]]
+number = "2050"
+name = "account.generic_sme.inter_unit_payable"
+type = "liability"
+parent = "2000"
+tags = ["inter-unit-due-to"]
+
 # --- Long-term liabilities --------------------------------------------------
 
 [[accounts]]
@@ -149,6 +163,13 @@ number = "3030"
 name = "account.generic_sme.current_year_result"
 type = "equity"
 parent = "3000"
+
+[[accounts]]
+number = "3040"
+name = "account.generic_sme.inter_unit_clearing"
+type = "equity"
+parent = "3000"
+tags = ["inter-unit-clearing"]
 
 # --- Income --------------------------------------------------------------------
 

@@ -6,6 +6,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { handleBills, resetBills, servedFile } from './mockBills';
+import { handleBank, handleStatementUpload, resetBank } from './mockBank';
+import { handleSettings, resetSettings } from './mockSettings';
+import { handleUnits, resetUnits } from './mockUnits';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -24,6 +27,8 @@ interface Line {
   side: Side;
   base: { minor: string; currency: string };
   memo: string | null;
+  /** Dimension tags by kind, as the journal stores them. */
+  dimensions?: Record<string, string>;
 }
 interface Entry {
   external_id: string | null;
@@ -55,6 +60,10 @@ export interface MockOptions {
    * has a hyphenated external id (like the demo book's), the second has none.
    */
   extraEntries?: number;
+  /** Seeds three business units (SQZ, LDG, FZ) so the unit switcher, the comparison and the units screens show. */
+  units?: boolean;
+  /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
+  bank?: boolean;
 }
 
 export const PERSON = {
@@ -144,7 +153,47 @@ function seedEntries(): Entry[] {
       reverses: null,
       reversed_by: null,
       recorded_at: `${p}-03T10:15:00Z`,
-      lines: [line('1200', 'debit', '119000', 'Invoice 2026-118'), line('4000', 'credit', '100000'), line('2000', 'credit', '19000')],
+      lines: [line('1200', 'debit', '119000', 'Invoice 2026-118'),
+        { ...line('4000', 'credit', '100000'), dimensions: { project: 'PRJ-1' } },
+        line('2000', 'credit', '19000')],
+    },
+    {
+      external_id: 'seed-3',
+      entry_id: 'entry-seed-3',
+      journal_id: 'general',
+      fiscal_year: Number(p.slice(0, 4)),
+      number: 3,
+      document_date: `${p}-05`,
+      posting_date: `${p}-05`,
+      base_currency: 'EUR',
+      description: 'Rent for the office',
+      posted_by: 'person',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${p}-05T09:30:00Z`,
+      lines: [
+        { ...line('6000', 'debit', '250000'), dimensions: { 'cost_centre': 'CC-ADMIN' } },
+        line('1000', 'credit', '250000'),
+      ],
+    },
+    {
+      external_id: 'seed-4',
+      entry_id: 'entry-seed-4',
+      journal_id: 'general',
+      fiscal_year: Number(p.slice(0, 4)),
+      number: 4,
+      document_date: `${p}-08`,
+      posting_date: `${p}-08`,
+      base_currency: 'EUR',
+      description: 'Supplier invoice: office supplies',
+      posted_by: 'agent',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${p}-08T11:00:00Z`,
+      lines: [
+        { ...line('6100', 'debit', '45000'), dimensions: { 'cost_centre': 'CC-SALES' } },
+        line('2000', 'credit', '45000'),
+      ],
     },
   ];
 }
@@ -540,6 +589,9 @@ function handle(method: string, url: URL, bodyText: string): Reply {
       body: { period: url.searchParams.get('period'), revenue: money(revenue), expenses: money(expenses), net_income: money(revenue - expenses) },
     };
   }
+  if (method === 'GET' && path === '/v1/reports/trends') {
+    return trendsReply(url);
+  }
   if (method === 'GET' && path === '/v1/reports/balance-sheet') {
     const assets = sum(state.entries, (n) => n.startsWith('1'), 'debit') - sum(state.entries, (n) => n.startsWith('1'), 'credit');
     const liabilities = sum(state.entries, (n) => n.startsWith('2'), 'credit') - sum(state.entries, (n) => n.startsWith('2'), 'debit');
@@ -638,7 +690,8 @@ function seedAccounts(): MockAccount[] {
     normal_balance: account.normal_balance,
     currency: null,
     parent: null,
-    tags: [],
+    // The cash account is the chart account a bank account links to (tag bank).
+    tags: account.number === '1000' ? ['bank'] : [],
     archived: false,
   }));
   return [
@@ -772,6 +825,123 @@ function handleAccounts(method: string, path: string, bodyText: string): Reply |
   return { status: 200, body: { account: accountView(account) } };
 }
 
+/** The months from `from` to `to` (both YYYY-MM), in order. */
+function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  let year = Number(from.slice(0, 4));
+  let month = Number(from.slice(5, 7));
+  const end = Number(to.slice(0, 4)) * 12 + Number(to.slice(5, 7));
+  while (year * 12 + month <= end) {
+    out.push(`${year}-${String(month).padStart(2, '0')}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return out;
+}
+
+const DIMENSION_NAMES: Record<string, string> = { 'PRJ-1': 'Website relaunch', 'CC-ADMIN': 'Administration', 'CC-SALES': 'Sales' };
+const PERIOD_KEY = /^\d{4}-\d{2}$/;
+
+/**
+ * GET /v1/reports/trends: the shape the server answers. Flows are a posting
+ * month's income and expense; balances are the position at each month end.
+ */
+function trendsReply(url: URL): Reply {
+  const from = url.searchParams.get('from') ?? '';
+  const to = url.searchParams.get('to') ?? '';
+  const dimension = url.searchParams.get('dimension');
+  if (!PERIOD_KEY.test(from) || !PERIOD_KEY.test(to) || from > to) {
+    return problem(422, 'Validation failed', 'from must not be after to');
+  }
+  const months = monthsBetween(from, to);
+  const monthOf = (entry: Entry) => entry.posting_date.slice(0, 7);
+  const typeOf = (number: string) => findAccount(number)?.account_type;
+  // Signed sum of the lines that pass `keep`: debits minus credits.
+  const net = (entries: Entry[], keep: (line: Line) => boolean) =>
+    entries.reduce(
+      (total, entry) =>
+        total + entry.lines.filter(keep).reduce((acc, line) => acc + (line.side === 'debit' ? 1n : -1n) * BigInt(line.base.minor), 0n),
+      0n,
+    );
+  const flow = (period: string, type: 'income' | 'expense') => {
+    const posted = state.entries.filter((entry) => monthOf(entry) === period);
+    const debitMinusCredit = net(posted, (line) => typeOf(line.account_number) === type);
+    return type === 'income' ? -debitMinusCredit : debitMinusCredit;
+  };
+  const balanceAt = (period: string, accounts: string[]) =>
+    net(
+      state.entries.filter((entry) => monthOf(entry) <= period),
+      (line) => accounts.includes(line.account_number),
+    );
+  const rows = months.map((period) => {
+    const revenue = flow(period, 'income');
+    const expenses = flow(period, 'expense');
+    return {
+      period,
+      revenue: money(revenue),
+      expenses: money(expenses),
+      net_result: money(revenue - expenses),
+      cash: money(balanceAt(period, ['1000'])),
+      receivables: money(balanceAt(period, ['1200'])),
+      payables: money(-balanceAt(period, ['2000'])),
+    };
+  });
+
+  const inRange = state.entries.filter((entry) => monthOf(entry) >= from && monthOf(entry) <= to);
+  const expenseTotals = new Map<string, bigint>();
+  for (const entry of inRange) {
+    for (const line of entry.lines) {
+      if (typeOf(line.account_number) !== 'expense' || line.side !== 'debit') continue;
+      expenseTotals.set(line.account_number, (expenseTotals.get(line.account_number) ?? 0n) + BigInt(line.base.minor));
+    }
+  }
+  const totalExpenses = rows.reduce((total, row) => total + BigInt(row.expenses.minor), 0n);
+  const top = [...expenseTotals.entries()]
+    .sort((a, b) => (a[1] === b[1] ? (a[0] < b[0] ? -1 : 1) : a[1] > b[1] ? -1 : 1))
+    .slice(0, 8)
+    .map(([account, amount]) => ({
+      account,
+      name_key: findAccount(account)?.name_key ?? account,
+      amount: money(amount),
+      share_bps: totalExpenses > 0n ? Number((amount * 10_000n) / totalExpenses) : 0,
+    }));
+
+  const by_dimension: { code: string; name: string; revenue: { minor: string; currency: string }; expenses: { minor: string; currency: string } }[] = [];
+  if (dimension) {
+    const split = new Map<string, { revenue: bigint; expenses: bigint }>();
+    for (const entry of inRange) {
+      for (const line of entry.lines) {
+        const code = line.dimensions?.[dimension];
+        const type = typeOf(line.account_number);
+        if (!code || (type !== 'income' && type !== 'expense')) continue;
+        const slot = split.get(code) ?? { revenue: 0n, expenses: 0n };
+        const signed = (line.side === 'debit' ? 1n : -1n) * BigInt(line.base.minor);
+        if (type === 'income') slot.revenue -= signed;
+        else slot.expenses += signed;
+        split.set(code, slot);
+      }
+    }
+    for (const [code, slot] of [...split.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      by_dimension.push({ code, name: DIMENSION_NAMES[code] ?? code, revenue: money(slot.revenue), expenses: money(slot.expenses) });
+    }
+  }
+
+  const activity = months
+    .map((period) => {
+      const posted = state.entries.filter((entry) => monthOf(entry) === period);
+      return { period, agent: posted.filter((entry) => entry.posted_by === 'agent').length, human: posted.filter((entry) => entry.posted_by !== 'agent').length };
+    })
+    .filter((row) => row.agent + row.human > 0);
+
+  return {
+    status: 200,
+    body: { currency: 'EUR', from, to, months: rows, top_expense_accounts: top, dimension: dimension ?? null, by_dimension, activity },
+  };
+}
+
 function netIncome(entries: Entry[]): bigint {
   const revenue = sum(entries, (n) => n.startsWith('4'), 'credit') - sum(entries, (n) => n.startsWith('4'), 'debit');
   const expenses = sum(entries, (n) => n.startsWith('6'), 'debit') - sum(entries, (n) => n.startsWith('6'), 'credit');
@@ -802,11 +972,14 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.reversals = [];
   state.person = options.person ?? false;
   resetBills();
+  resetBank(options.bank === true);
   state.approvals = options.person ? approvalSeed() : [];
   state.decisions = [];
   state.bulk = [];
   keyState.keys = [];
   keyCounter = 0;
+  resetSettings();
+  resetUnits(options.units ?? false);
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -865,6 +1038,22 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
         }
+        if (path.startsWith('/v1/bank')) {
+          const bankReply = handleBank(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
+          if (bankReply) {
+            res.writeHead(bankReply.status, { ...headers, 'Content-Type': bankReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(bankReply.body));
+            return;
+          }
+        }
+        if (req.method === 'POST' && path === '/v1/documents/upload') {
+          const statement = handleStatementUpload(raw, decodeURIComponent(String(req.headers['x-file-name'] ?? 'document')));
+          if (statement) {
+            res.writeHead(statement.status, { ...headers, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(statement.body));
+            return;
+          }
+        }
         if (path.startsWith('/v1/documents') || path.startsWith('/v1/bills')) {
           const billsReply = handleBills(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, raw, req.headers);
           if (billsReply) {
@@ -872,6 +1061,25 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
             res.end(JSON.stringify(billsReply.body));
             return;
           }
+        }
+        // Business units (the writes are a person's; an agent key gets 403 on them).
+        const unitsReply = handleUnits(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, req.headers.authorization === `Bearer ${API_KEY}`);
+        if (unitsReply) {
+          res.writeHead(unitsReply.status, { ...headers, 'Content-Type': unitsReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(unitsReply.body));
+          return;
+        }
+        // Settings routes (person only; an agent key gets 403 on them).
+        const settingsReply = handleSettings(
+          req.method ?? 'GET',
+          new URL(req.url ?? '/', API_ORIGIN),
+          text,
+          req.headers.authorization === `Bearer ${API_KEY}`,
+        );
+        if (settingsReply) {
+          res.writeHead(settingsReply.status, { ...headers, 'Content-Type': settingsReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(settingsReply.body));
+          return;
         }
         const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
         res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });

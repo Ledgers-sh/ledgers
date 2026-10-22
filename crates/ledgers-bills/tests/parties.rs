@@ -1,31 +1,27 @@
-//! Integration tests for parties commands (issue #44).
-//!
-//! Tests cover:
-//! - Human-only enforcement (`set_bank`, `merge`)
-//! - Bank change history with correct `person_id`
-//! - VIES checking with mocked transport
-//! - Duplicate detection
-//! - Append-only enforcement on `vendor_bank_change` and `vies_check` tables
-#![allow(clippy::unreadable_literal)]
+//! Parties (issue #44) on the real migrations, on every dialect the harness
+//! offers. VIES is always a fake port: no test reaches the network.
 
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
+use ledgers_bills::BillsModule;
 use ledgers_bills::parties::*;
 use ledgers_commands::auth::{Authenticator, Credential, Limits, Principal, Tier};
 use ledgers_commands::*;
 use ledgers_db::DbModule;
 use sea_query::Value;
-use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const COMPANY_ID: &str = "01TESTCOMPANY0000000000000A";
 const NOW: &str = "2026-01-15T09:30:00Z";
 const OWNER_ID: &str = "owner-acme";
 const AGENT_ID: &str = "agent-key-draft";
+const OWNER_TOKEN: &str = "bearer-owner";
+const AGENT_TOKEN: &str = "bearer-draft-agent";
 
 // ============================================================================
-// Test Authenticator
+// Authentication, the fake VIES port, and the harness
 // ============================================================================
 
 struct TestAuthenticator {
@@ -35,25 +31,20 @@ struct TestAuthenticator {
 impl TestAuthenticator {
     fn new() -> Self {
         let mut credentials = BTreeMap::new();
-
-        // Owner (person)
         credentials.insert(
-            "bearer-owner".to_string(),
+            OWNER_TOKEN.to_string(),
             Principal::Person {
                 person_id: OWNER_ID.to_string(),
             },
         );
-
-        // Draft agent
         credentials.insert(
-            "bearer-draft-agent".to_string(),
+            AGENT_TOKEN.to_string(),
             Principal::Agent {
                 key_id: AGENT_ID.to_string(),
                 tier: Tier::Draft,
                 limits: Limits::new(),
             },
         );
-
         TestAuthenticator { credentials }
     }
 }
@@ -68,174 +59,45 @@ impl Authenticator for TestAuthenticator {
     }
 }
 
-// ============================================================================
-// Mock Transport for VIES testing
-// ============================================================================
-
-struct MockViesTransport {
-    response: serde_json::Value,
-    should_fail: bool,
+/// A VIES port that answers with a canned result and counts its calls.
+struct FakeVies {
+    answer: Result<ViesResponse, String>,
+    calls: AtomicUsize,
 }
 
-impl MockViesTransport {
-    fn valid_response(_vat_number: &str, name: &str) -> Self {
-        Self {
-            response: json!({
-                "valid": true,
-                "name": name,
-                "address": "Some Address, Country",
-                "requestIdentifier": "consultation-123",
-                "requestDate": "2026-01-15"
-            }),
-            should_fail: false,
-        }
+impl FakeVies {
+    fn answering(answer: Result<ViesResponse, String>) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            calls: AtomicUsize::new(0),
+        })
     }
 
-    fn invalid_response() -> Self {
-        Self {
-            response: json!({
-                "valid": false,
-            }),
-            should_fail: false,
-        }
+    fn valid() -> Arc<Self> {
+        Self::answering(Ok(ViesResponse {
+            valid: true,
+            name: Some("Acme GmbH".to_string()),
+            address: Some("Musterstrasse 1, Berlin".to_string()),
+            consultation_number: Some("consultation-123".to_string()),
+            request_date: Some("2026-01-15".to_string()),
+        }))
     }
 
-    fn error_response() -> Self {
-        Self {
-            response: json!({}),
-            should_fail: true,
-        }
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait::async_trait]
-impl ledgers_extract::llm::Transport for MockViesTransport {
-    async fn post_json(
-        &self,
-        _url: &str,
-        _headers: &[(&str, String)],
-        _body: &serde_json::Value,
-    ) -> Result<(u16, serde_json::Value), String> {
-        if self.should_fail {
-            Ok((500, json!({})))
-        } else {
-            Ok((200, self.response.clone()))
-        }
+impl ViesPort for FakeVies {
+    async fn check(&self, _country_code: &str, _vat_number: &str) -> Result<ViesResponse, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.answer.clone()
     }
 }
 
-// ============================================================================
-// Database setup
-// ============================================================================
-
-async fn setup_parties_tables(db: &dyn Database) {
-    // The migrations should create these tables, but ensure they exist
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TABLE IF NOT EXISTS bill (\
-                id TEXT PRIMARY KEY, \
-                company_id TEXT NOT NULL, \
-                document_id TEXT, \
-                vendor_id TEXT NOT NULL, \
-                posted_entry_id TEXT, \
-                discarded_at TEXT, \
-                iban_changed INTEGER DEFAULT 0, \
-                created_at TEXT, \
-                updated_at TEXT\
-            )",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TABLE IF NOT EXISTS vendor (\
-                id TEXT PRIMARY KEY, \
-                company_id TEXT NOT NULL, \
-                name TEXT NOT NULL, \
-                vat_id TEXT, \
-                iban TEXT, \
-                bic TEXT, \
-                roles TEXT DEFAULT 'vendor', \
-                merged_into TEXT, \
-                personal_data INTEGER DEFAULT 0, \
-                created_at TEXT, \
-                updated_at TEXT\
-            )",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TABLE IF NOT EXISTS vendor_bank_change (\
-                id TEXT PRIMARY KEY, \
-                company_id TEXT NOT NULL, \
-                vendor_id TEXT NOT NULL, \
-                before_iban TEXT, \
-                before_bic TEXT, \
-                after_iban TEXT, \
-                after_bic TEXT, \
-                changed_by TEXT NOT NULL, \
-                changed_at TEXT NOT NULL, \
-                reason TEXT, \
-                created_at TEXT\
-            )",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TABLE IF NOT EXISTS vies_check (\
-                id TEXT PRIMARY KEY, \
-                company_id TEXT NOT NULL, \
-                vendor_id TEXT NOT NULL, \
-                country_code TEXT NOT NULL, \
-                vat_number TEXT NOT NULL, \
-                valid INTEGER NOT NULL, \
-                name TEXT, \
-                address TEXT, \
-                consultation_number TEXT, \
-                request_date TEXT, \
-                checked_at TEXT\
-            )",
-        ))
-        .await;
-
-    // Add triggers for append-only enforcement on SQLite
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TRIGGER IF NOT EXISTS vendor_bank_change_no_update \
-            BEFORE UPDATE ON vendor_bank_change \
-            BEGIN SELECT RAISE(ABORT, 'vendor_bank_change is append-only'); END",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TRIGGER IF NOT EXISTS vendor_bank_change_no_delete \
-            BEFORE DELETE ON vendor_bank_change \
-            BEGIN SELECT RAISE(ABORT, 'vendor_bank_change is append-only'); END",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TRIGGER IF NOT EXISTS vies_check_no_update \
-            BEFORE UPDATE ON vies_check \
-            BEGIN SELECT RAISE(ABORT, 'vies_check is append-only'); END",
-        ))
-        .await;
-
-    let _ = db
-        .execute(&Statement::new(
-            "CREATE TRIGGER IF NOT EXISTS vies_check_no_delete \
-            BEFORE DELETE ON vies_check \
-            BEGIN SELECT RAISE(ABORT, 'vies_check is append-only'); END",
-        ))
-        .await;
-}
-
 fn modules() -> Vec<Box<dyn cratefield_core::Module>> {
-    vec![Box::new(DbModule)]
+    vec![Box::new(DbModule), Box::new(BillsModule)]
 }
 
 fn context(request_id: &str) -> CommandContext {
@@ -247,1217 +109,164 @@ fn context(request_id: &str) -> CommandContext {
     }
 }
 
-async fn create_test_party(
+/// Runs a command as `token` and returns its output; any refusal is an error.
+async fn run<C: Command>(
     db: &dyn Database,
-    id: &str,
-    name: &str,
-    vat_id: Option<&str>,
-    iban: Option<&str>,
-) {
-    let _ = db
-        .execute(&Statement::with_values(
-            "INSERT INTO vendor (id, company_id, name, vat_id, iban, roles, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, 'vendor', ?, ?)"
-                .to_string(),
-            vec![
-                Value::from(id),
-                Value::from(COMPANY_ID),
-                Value::from(name),
-                vat_id.map_or(Value::String(None), Value::from),
-                iban.map_or(Value::String(None), Value::from),
-                Value::from(NOW),
-                Value::from(NOW),
-            ],
-        ))
-        .await;
+    cmd: &C,
+    token: &str,
+    request_id: &str,
+    input: &C::Input,
+) -> Result<C::Output, CommandError> {
+    let executor = Executor::new(db, TestAuthenticator::new(), DefaultPolicy);
+    match executor
+        .run(
+            cmd,
+            token.to_string(),
+            context(request_id),
+            input,
+            Execute::Run,
+        )
+        .await?
+    {
+        Executed::Done(output) => Ok(output),
+        _ => panic!("expected the command to run to completion"),
+    }
+}
+
+async fn exec(db: &dyn Database, sql: &str, values: Vec<Value>) {
+    db.execute(&Statement::with_values(sql.to_string(), values))
+        .await
+        .unwrap_or_else(|err| panic!("setup statement failed: {err}\n{sql}"));
+}
+
+/// A vendor row written the way parties and bills write one.
+async fn party(db: &dyn Database, id: &str, name: &str, vat_id: Option<&str>, iban: Option<&str>) {
+    exec(
+        db,
+        "INSERT INTO vendor (id, company_id, name, vat_id, iban, source, needs_review, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, 'manual', 0, ?, ?)",
+        vec![
+            Value::from(id),
+            Value::from(COMPANY_ID),
+            Value::from(name),
+            vat_id.map_or(Value::String(None), Value::from),
+            iban.map_or(Value::String(None), Value::from),
+            Value::from(NOW),
+            Value::from(NOW),
+        ],
+    )
+    .await;
+}
+
+/// An open (or posted) bill from `vendor_id`.
+async fn bill(db: &dyn Database, id: &str, vendor_id: &str, invoice: &str, posted: bool) {
+    exec(
+        db,
+        "INSERT INTO bill (id, company_id, document_id, vendor_id, invoice_number, currency, lines_json, \
+         checks_json, instruction_flags, iban_changed, source, posted_entry_id, created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, 'EUR', '[]', '[]', '[]', 0, 'manual', ?, 'test', ?, ?)",
+        vec![
+            Value::from(id),
+            Value::from(COMPANY_ID),
+            Value::from(format!("doc-{id}").as_str()),
+            Value::from(vendor_id),
+            Value::from(invoice),
+            if posted {
+                Value::from("entry-1")
+            } else {
+                Value::String(None)
+            },
+            Value::from(NOW),
+            Value::from(NOW),
+        ],
+    )
+    .await;
+}
+
+async fn scalar_i64(db: &dyn Database, sql: &str) -> i64 {
+    let rows = db
+        .query(&Statement::new(sql.to_string()))
+        .await
+        .unwrap_or_else(|err| panic!("query failed: {err}\n{sql}"));
+    rows.rows
+        .first()
+        .and_then(|row| row.get::<i64>("n"))
+        .unwrap_or_else(|| panic!("no count from {sql}"))
+}
+
+async fn text_of(db: &dyn Database, sql: &str, column: &str) -> Option<String> {
+    let rows = db
+        .query(&Statement::new(sql.to_string()))
+        .await
+        .unwrap_or_else(|err| panic!("query failed: {err}\n{sql}"));
+    rows.rows
+        .first()
+        .and_then(|row| row.get::<Option<String>>(column))
+        .flatten()
+}
+
+fn check_vat_input(id: &str, country: &str, number: &str) -> CheckVatInput {
+    CheckVatInput {
+        id: id.to_string(),
+        country_code: country.to_string(),
+        vat_number: number.to_string(),
+    }
 }
 
 // ============================================================================
-// Tests
+// Master data: create and update validate through the country packs
 // ============================================================================
 
 #[test]
-fn parties_list_reads_parties_and_latest_vies() {
+fn a_vendor_row_from_before_parties_is_a_vendor_and_its_bills_still_link() {
     for kit in TestHarness::all_dialects(modules) {
         pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create a test party
-            create_test_party(
+            // The row shape bills wrote before migration 0004: no party columns.
+            party(
                 &*kit.db,
-                "vendor-1",
-                "Acme GmbH",
-                Some("DE123456789"),
-                Some("DE89370400440532013000"),
-            )
-            .await;
-
-            // Create a VIES check record
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "INSERT INTO vies_check (id, company_id, vendor_id, country_code, vat_number, valid, \
-                     consultation_number, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-                        .to_string(),
-                    vec![
-                        Value::from("vies-1"),
-                        Value::from(COMPANY_ID),
-                        Value::from("vendor-1"),
-                        Value::from("DE"),
-                        Value::from("123456789"),
-                        Value::from(1i64),
-                        Value::from("req-123"),
-                        Value::from(NOW),
-                    ],
-                ))
-                .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesList;
-            let input = ListInput {
-                limit: None,
-                offset: None,
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("list-test-1"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("list should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    assert_eq!(output.parties.len(), 1);
-                    let party = &output.parties[0];
-                    assert_eq!(party.id, "vendor-1");
-                    assert_eq!(party.name, "Acme GmbH");
-                    assert_eq!(party.vat_id, Some("DE123456789".to_string()));
-                    assert!(party.latest_vies.is_some());
-                    let vies = party.latest_vies.as_ref().unwrap();
-                    assert!(vies.valid);
-                    assert_eq!(vies.consultation_number, Some("req-123".to_string()));
-                }
-                _ => panic!("expected Done"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_set_bank_refused_to_agent() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-2", "Halden Works GmbH", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesSetBank::new(None);
-            let input = SetBankInput {
-                id: "vendor-2".to_string(),
-                iban: "GB82WEST12345698765432".to_string(),
-                bic: Some("WESTGB2L".to_string()),
-                reason: "test change".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("set-bank-agent-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            assert!(result.is_err());
-            assert!(matches!(result, Err(CommandError::HumanOnly)));
-        });
-    }
-}
-
-#[test]
-fn parties_set_bank_succeeds_for_owner_and_records_change() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-3", "Halden Works GmbH", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesSetBank::new(Some(OWNER_ID.to_string()));
-            let input = SetBankInput {
-                id: "vendor-3".to_string(),
-                iban: "DE89370400440532013000".to_string(),
-                bic: Some("COBADE".to_string()),
-                reason: "bank account update".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("set-bank-owner-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("set_bank should succeed for owner");
-
-            match result {
-                Executed::Done(output) => {
-                    assert_eq!(output.party.id, "vendor-3");
-                    assert_eq!(
-                        output.party.iban,
-                        Some("DE89370400440532013000".to_string())
-                    );
-                    assert_eq!(output.party.bic, Some("COBADE".to_string()));
-                }
-                _ => panic!("expected Done"),
-            }
-
-            // Verify the bank change record was created with correct person_id
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT changed_by, before_iban, after_iban, reason FROM vendor_bank_change \
-                     WHERE vendor_id = 'vendor-3'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            assert_eq!(rows.rows.len(), 1);
-            let change = &rows.rows[0];
-            assert_eq!(
-                change.get::<String>("changed_by"),
-                Some(OWNER_ID.to_string()),
-                "changed_by should store person_id"
-            );
-            assert_eq!(change.get::<Option<String>>("before_iban"), Some(None));
-            assert_eq!(
-                change.get::<String>("after_iban"),
-                Some("DE89370400440532013000".to_string())
-            );
-            assert_eq!(
-                change.get::<String>("reason"),
-                Some("bank account update".to_string())
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_set_bank_fails_without_person_id() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-3b", "Halden Works GmbH", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            // Create command with None person_id (missing principal)
-            let cmd = PartiesSetBank::new(None);
-            let input = SetBankInput {
-                id: "vendor-3b".to_string(),
-                iban: "DE89370400440532013000".to_string(),
-                bic: Some("COBADE".to_string()),
-                reason: "bank account update".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("set-bank-no-person-id-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            // Should fail with Unauthenticated because person_id is None
-            assert!(result.is_err());
-            assert!(matches!(result, Err(CommandError::Unauthenticated)));
-
-            // Verify no bank change record was written
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT COUNT(*) as cnt FROM vendor_bank_change WHERE vendor_id = 'vendor-3b'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            assert_eq!(rows.rows.len(), 1);
-            let cnt = rows.rows[0].get::<i64>("cnt").unwrap_or(0);
-            assert_eq!(
-                cnt, 0,
-                "no bank change record should be written without person_id"
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_merge_refused_to_agent() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-4a", "Old Acme", None, None).await;
-            create_test_party(&*kit.db, "vendor-4b", "New Acme", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesMerge::new(None);
-            let input = MergeInput {
-                id: "vendor-4b".to_string(),
-                from: "vendor-4a".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("merge-agent-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            assert!(result.is_err());
-            assert!(matches!(result, Err(CommandError::HumanOnly)));
-        });
-    }
-}
-
-#[test]
-fn parties_merge_succeeds_for_owner_and_repoints_bills() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create vendor table and bill table for this test
-            let _ = kit
-                .db
-                .execute(&Statement::new(
-                    "CREATE TABLE IF NOT EXISTS bill (\
-                        id TEXT PRIMARY KEY, \
-                        company_id TEXT NOT NULL, \
-                        document_id TEXT, \
-                        vendor_id TEXT NOT NULL, \
-                        posted_entry_id TEXT, \
-                        discarded_at TEXT, \
-                        iban_changed INTEGER DEFAULT 0, \
-                        created_at TEXT, \
-                        updated_at TEXT\
-                    )",
-                ))
-                .await;
-
-            create_test_party(&*kit.db, "vendor-5a", "To Merge", None, None).await;
-            create_test_party(&*kit.db, "vendor-5b", "Survivor", None, None).await;
-
-            // Create a bill for the source party
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "INSERT INTO bill (id, company_id, vendor_id, created_at, updated_at) \
-                     VALUES (?, ?, ?, ?, ?)"
-                        .to_string(),
-                    vec![
-                        Value::from("bill-1"),
-                        Value::from(COMPANY_ID),
-                        Value::from("vendor-5a"),
-                        Value::from(NOW),
-                        Value::from(NOW),
-                    ],
-                ))
-                .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesMerge::new(Some(OWNER_ID.to_string()));
-            let input = MergeInput {
-                id: "vendor-5b".to_string(),
-                from: "vendor-5a".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("merge-owner-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("merge should succeed for owner");
-
-            match result {
-                Executed::Done(_) => {
-                    // Verify the source party is marked as merged
-                    let rows = kit
-                        .db
-                        .query(&Statement::new(
-                            "SELECT merged_into FROM vendor WHERE id = 'vendor-5a'",
-                        ))
-                        .await
-                        .expect("query should succeed");
-
-                    assert_eq!(rows.rows.len(), 1);
-                    assert_eq!(
-                        rows.rows[0].get::<Option<String>>("merged_into"),
-                        Some(Some("vendor-5b".to_string())),
-                        "source party should be marked merged_into survivor"
-                    );
-
-                    // Verify the bill was repointed to the survivor
-                    let bill_rows = kit
-                        .db
-                        .query(&Statement::new(
-                            "SELECT vendor_id FROM bill WHERE id = 'bill-1'",
-                        ))
-                        .await
-                        .expect("query should succeed");
-
-                    assert_eq!(bill_rows.rows.len(), 1);
-                    assert_eq!(
-                        bill_rows.rows[0].get::<String>("vendor_id"),
-                        Some("vendor-5b".to_string()),
-                        "bill should be repointed to survivor"
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_check_vat_with_valid_eu_number_stores_result() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-6", "German Corp", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let mock_transport =
-                Arc::new(MockViesTransport::valid_response("123456789", "Acme GmbH"));
-            let cmd = PartiesCheckVat::new(Some(mock_transport));
-            let input = CheckVatInput {
-                id: "vendor-6".to_string(),
-                country_code: "DE".to_string(),
-                vat_number: "123456789".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("check-vat-valid"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("check_vat should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    assert!(output.vies_result.valid);
-                    assert_eq!(output.vies_result.name, Some("Acme GmbH".to_string()));
-                    assert_eq!(
-                        output.vies_result.consultation_number,
-                        Some("consultation-123".to_string())
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
-
-            // Verify vies_check record was created
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT valid, consultation_number FROM vies_check WHERE vendor_id = 'vendor-6'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            assert_eq!(rows.rows.len(), 1);
-            assert_eq!(rows.rows[0].get::<i64>("valid"), Some(1));
-            assert_eq!(
-                rows.rows[0].get::<Option<String>>("consultation_number"),
-                Some(Some("consultation-123".to_string()))
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_check_vat_with_non_eu_country_rejected() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-7", "US Corp", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let mock_transport =
-                Arc::new(MockViesTransport::valid_response("123456789", "US Corp"));
-            let cmd = PartiesCheckVat::new(Some(mock_transport));
-            let input = CheckVatInput {
-                id: "vendor-7".to_string(),
-                country_code: "US".to_string(),
-                vat_number: "123456789".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("check-vat-non-eu"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            assert!(result.is_err(), "non-EU country should be rejected");
-            assert!(matches!(result, Err(CommandError::InvalidInput(_))));
-
-            // Verify no vies_check record was created
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT COUNT(*) as cnt FROM vies_check WHERE vendor_id = 'vendor-7'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            let count = rows.rows[0].get::<i64>("cnt").unwrap_or(0);
-            assert_eq!(
-                count, 0,
-                "no vies_check should be created for non-EU country"
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_check_vat_with_error_response_fails() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-8", "Company X", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let mock_transport = Arc::new(MockViesTransport::error_response());
-            let cmd = PartiesCheckVat::new(Some(mock_transport));
-            let input = CheckVatInput {
-                id: "vendor-8".to_string(),
-                country_code: "DE".to_string(),
-                vat_number: "999999999".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("check-vat-error"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            assert!(
-                result.is_err(),
-                "check_vat should fail when VIES returns non-200 response"
-            );
-
-            // Verify no vies_check record was created
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT COUNT(*) as cnt FROM vies_check WHERE vendor_id = 'vendor-8'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            let count = rows.rows[0].get::<i64>("cnt").unwrap_or(0);
-            assert_eq!(
-                count, 0,
-                "no vies_check should be created when VIES returns non-200"
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_check_vat_with_invalid_response_fails() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-            create_test_party(&*kit.db, "vendor-9", "Company Y", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let mock_transport = Arc::new(MockViesTransport::invalid_response());
-            let cmd = PartiesCheckVat::new(Some(mock_transport));
-            let input = CheckVatInput {
-                id: "vendor-9".to_string(),
-                country_code: "DE".to_string(),
-                vat_number: "111111111".to_string(),
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-draft-agent".to_string(),
-                    context("check-vat-invalid"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("check_vat should succeed even with invalid VAT");
-
-            match result {
-                Executed::Done(output) => {
-                    assert!(
-                        !output.vies_result.valid,
-                        "VIES result should indicate invalid VAT"
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
-
-            // Verify vies_check record was still created to track the check
-            let rows = kit
-                .db
-                .query(&Statement::new(
-                    "SELECT valid FROM vies_check WHERE vendor_id = 'vendor-9'",
-                ))
-                .await
-                .expect("query should succeed");
-
-            assert_eq!(rows.rows.len(), 1);
-            assert_eq!(
-                rows.rows[0].get::<i64>("valid"),
-                Some(0),
-                "vies_check should record invalid result"
-            );
-        });
-    }
-}
-
-#[test]
-fn vendor_bank_change_is_append_only() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Try to insert a record
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "INSERT INTO vendor_bank_change (id, company_id, vendor_id, after_iban, \
-                     changed_by, changed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-                        .to_string(),
-                    vec![
-                        Value::from("change-1"),
-                        Value::from(COMPANY_ID),
-                        Value::from("vendor-test"),
-                        Value::from("DE89370400440532013000"),
-                        Value::from("owner-1"),
-                        Value::from(NOW),
-                        Value::from(NOW),
-                    ],
-                ))
-                .await;
-
-            // Try to UPDATE - should fail
-            let update_result = kit
-                .db
-                .execute(&Statement::new(
-                    "UPDATE vendor_bank_change SET changed_by = 'other' WHERE id = 'change-1'",
-                ))
-                .await;
-
-            assert!(
-                update_result.is_err(),
-                "vendor_bank_change should not allow updates"
-            );
-
-            // Try to DELETE - should fail
-            let delete_result = kit
-                .db
-                .execute(&Statement::new(
-                    "DELETE FROM vendor_bank_change WHERE id = 'change-1'",
-                ))
-                .await;
-
-            assert!(
-                delete_result.is_err(),
-                "vendor_bank_change should not allow deletes"
-            );
-        });
-    }
-}
-
-#[test]
-fn vies_check_is_append_only() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Try to insert a record
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "INSERT INTO vies_check (id, company_id, vendor_id, country_code, \
-                     vat_number, valid, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-                        .to_string(),
-                    vec![
-                        Value::from("vies-1"),
-                        Value::from(COMPANY_ID),
-                        Value::from("vendor-test"),
-                        Value::from("DE"),
-                        Value::from("123456789"),
-                        Value::from(1i64),
-                        Value::from(NOW),
-                    ],
-                ))
-                .await;
-
-            // Try to UPDATE - should fail
-            let update_result = kit
-                .db
-                .execute(&Statement::new(
-                    "UPDATE vies_check SET valid = 0 WHERE id = 'vies-1'",
-                ))
-                .await;
-
-            assert!(
-                update_result.is_err(),
-                "vies_check should not allow updates"
-            );
-
-            // Try to DELETE - should fail
-            let delete_result = kit
-                .db
-                .execute(&Statement::new(
-                    "DELETE FROM vies_check WHERE id = 'vies-1'",
-                ))
-                .await;
-
-            assert!(
-                delete_result.is_err(),
-                "vies_check should not allow deletes"
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_create_and_update_reject_bank_fields() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let _executor = Executor::new(&*kit.db, auth, policy);
-
-            // Try to create with iban field (should be rejected due to deny_unknown_fields)
-            let invalid_input = json!({
-                "id": "vendor-bad",
-                "name": "Test Corp",
-                "iban": "DE89370400440532013000"
-            });
-
-            let input_str = serde_json::to_string(&invalid_input).unwrap();
-            let parsed: Result<CreateInput, _> = serde_json::from_str(&input_str);
-            assert!(
-                parsed.is_err(),
-                "CreateInput should reject unknown iban field"
-            );
-
-            // Try to update with bic field (should be rejected)
-            let invalid_update = json!({
-                "id": "vendor-update-bad",
-                "bic": "COBADE"
-            });
-
-            let input_str = serde_json::to_string(&invalid_update).unwrap();
-            let parsed: Result<UpdateInput, _> = serde_json::from_str(&input_str);
-            assert!(
-                parsed.is_err(),
-                "UpdateInput should reject unknown bic field"
-            );
-        });
-    }
-}
-
-#[test]
-fn parties_list_detects_duplicates_by_vat_id() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create two parties with the same VAT id (different cases/spaces)
-            create_test_party(
-                &*kit.db,
-                "vendor-dup-1",
-                "Company A",
-                Some("DE 123456789"),
+                "ven-old",
+                "Halden Supplies GmbH",
+                Some("DE136695976"),
                 None,
             )
             .await;
-            create_test_party(
+            bill(&*kit.db, "bill-old", "ven-old", "INV-1", false).await;
+
+            let list = run(
                 &*kit.db,
-                "vendor-dup-2",
-                "Company B",
-                Some("de123456789"),
-                None,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-old",
+                &ListInput {
+                    limit: None,
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list");
+            assert_eq!(list.total, 1);
+            assert_eq!(list.parties[0].roles, "vendor");
+            assert!(!list.parties[0].personal_data);
+
+            let joined = text_of(
+                &*kit.db,
+                "SELECT v.name AS name FROM bill b JOIN vendor v ON v.id = b.vendor_id WHERE b.id = 'bill-old'",
+                "name",
             )
             .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesList;
-            let input = ListInput {
-                limit: None,
-                offset: None,
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("dup-vat-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("list should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    assert_eq!(output.parties.len(), 2);
-
-                    let party1 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-dup-1")
-                        .unwrap();
-                    let party2 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-dup-2")
-                        .unwrap();
-
-                    // Both should detect each other as duplicates
-                    assert!(
-                        party1
-                            .possible_duplicates
-                            .contains(&"vendor-dup-2".to_string())
-                    );
-                    assert!(
-                        party2
-                            .possible_duplicates
-                            .contains(&"vendor-dup-1".to_string())
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
+            assert_eq!(joined.as_deref(), Some("Halden Supplies GmbH"));
         });
     }
 }
 
 #[test]
-fn parties_list_detects_duplicates_by_iban() {
+fn create_checks_the_vat_id_with_its_country_pack_and_refuses_duplicates() {
     for kit in TestHarness::all_dialects(modules) {
         pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create two parties with the same IBAN (different spacing)
-            create_test_party(
-                &*kit.db,
-                "vendor-iban-1",
-                "Company C",
-                None,
-                Some("DE89 3704 0044 0532 0130 00"),
-            )
-            .await;
-            create_test_party(
-                &*kit.db,
-                "vendor-iban-2",
-                "Company D",
-                None,
-                Some("de893704004405320130 00"),
-            )
-            .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesList;
-            let input = ListInput {
-                limit: None,
-                offset: None,
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("dup-iban-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("list should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    assert_eq!(output.parties.len(), 2);
-
-                    let party1 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-iban-1")
-                        .unwrap();
-                    let party2 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-iban-2")
-                        .unwrap();
-
-                    // Both should detect each other as duplicates
-                    assert!(
-                        party1
-                            .possible_duplicates
-                            .contains(&"vendor-iban-2".to_string())
-                    );
-                    assert!(
-                        party2
-                            .possible_duplicates
-                            .contains(&"vendor-iban-1".to_string())
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_list_detects_duplicates_by_normalized_name() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create two parties with the same normalized name
-            create_test_party(&*kit.db, "vendor-name-1", "Halden Works GmbH", None, None).await;
-            create_test_party(&*kit.db, "vendor-name-2", "HALDENWORKSGMBH", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesList;
-            let input = ListInput {
-                limit: None,
-                offset: None,
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("dup-name-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("list should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    assert_eq!(output.parties.len(), 2);
-
-                    let party1 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-name-1")
-                        .unwrap();
-                    let party2 = output
-                        .parties
-                        .iter()
-                        .find(|p| p.id == "vendor-name-2")
-                        .unwrap();
-
-                    // Both should detect each other as duplicates
-                    assert!(
-                        party1
-                            .possible_duplicates
-                            .contains(&"vendor-name-2".to_string())
-                    );
-                    assert!(
-                        party2
-                            .possible_duplicates
-                            .contains(&"vendor-name-1".to_string())
-                    );
-                }
-                _ => panic!("expected Done"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_list_does_not_detect_merged_parties_as_duplicates() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create two parties with the same VAT id, then merge one
-            create_test_party(
-                &*kit.db,
-                "vendor-merge-1",
-                "Company E",
-                Some("FR 987654321"),
-                None,
-            )
-            .await;
-            create_test_party(
-                &*kit.db,
-                "vendor-merge-2",
-                "Company F",
-                Some("fr987654321"),
-                None,
-            )
-            .await;
-
-            // Mark one as merged
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "UPDATE vendor SET merged_into = ? WHERE id = ?".to_string(),
-                    vec![Value::from("vendor-merge-1"), Value::from("vendor-merge-2")],
-                ))
-                .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            let cmd = PartiesList;
-            let input = ListInput {
-                limit: None,
-                offset: None,
-            };
-
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("dup-merged-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await
-                .expect("list should succeed");
-
-            match result {
-                Executed::Done(output) => {
-                    // Only unmerged parties are returned
-                    assert_eq!(output.parties.len(), 1);
-                    let party = &output.parties[0];
-                    assert_eq!(party.id, "vendor-merge-1");
-                    // No duplicates since merged parties are not in the list
-                    assert!(party.possible_duplicates.is_empty());
-                }
-                _ => panic!("expected Done"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_merge_guard_fails_when_source_already_merged() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create vendor table and bill table for this test
-            let _ = kit
-                .db
-                .execute(&Statement::new(
-                    "CREATE TABLE IF NOT EXISTS bill (\
-                        id TEXT PRIMARY KEY, \
-                        company_id TEXT NOT NULL, \
-                        document_id TEXT, \
-                        vendor_id TEXT NOT NULL, \
-                        posted_entry_id TEXT, \
-                        discarded_at TEXT, \
-                        iban_changed INTEGER DEFAULT 0, \
-                        created_at TEXT, \
-                        updated_at TEXT\
-                    )",
-                ))
-                .await;
-
-            // Create three parties: A (to merge), B (initial survivor), and C (final survivor)
-            create_test_party(&*kit.db, "vendor-guard-a", "Party A", None, None).await;
-            create_test_party(&*kit.db, "vendor-guard-b", "Party B", None, None).await;
-            create_test_party(&*kit.db, "vendor-guard-c", "Party C", None, None).await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            // First merge: A into B
-            let cmd1 = PartiesMerge::new(Some(OWNER_ID.to_string()));
-            let input1 = MergeInput {
-                id: "vendor-guard-b".to_string(),
-                from: "vendor-guard-a".to_string(),
-            };
-
-            let result1 = executor
-                .run(
-                    &cmd1,
-                    "bearer-owner".to_string(),
-                    context("merge-guard-test-1"),
-                    &input1,
-                    Execute::Run,
-                )
-                .await
-                .expect("first merge should succeed");
-
-            match result1 {
-                Executed::Done(_) => {
-                    // Verify A is marked as merged into B
-                    let rows = kit
-                        .db
-                        .query(&Statement::new(
-                            "SELECT merged_into FROM vendor WHERE id = 'vendor-guard-a'",
-                        ))
-                        .await
-                        .expect("query should succeed");
-
-                    assert_eq!(rows.rows.len(), 1);
-                    assert_eq!(
-                        rows.rows[0].get::<Option<String>>("merged_into"),
-                        Some(Some("vendor-guard-b".to_string())),
-                        "party A should be marked merged_into B"
-                    );
-
-                    // Now try to merge A again (which is now merged) into C
-                    // This should fail because A's guard statement will fail at write time
-                    let cmd2 = PartiesMerge::new(Some(OWNER_ID.to_string()));
-                    let input2 = MergeInput {
-                        id: "vendor-guard-c".to_string(),
-                        from: "vendor-guard-a".to_string(),
-                    };
-
-                    let result2 = executor
-                        .run(
-                            &cmd2,
-                            "bearer-owner".to_string(),
-                            context("merge-guard-test-2"),
-                            &input2,
-                            Execute::Run,
-                        )
-                        .await;
-
-                    // This should fail due to the guard statement
-                    assert!(
-                        result2.is_err(),
-                        "merge should fail when source is already merged (guard violation)"
-                    );
-
-                    // Verify A is still marked as merged into B (unchanged by failed merge)
-                    let rows_after = kit
-                        .db
-                        .query(&Statement::new(
-                            "SELECT merged_into FROM vendor WHERE id = 'vendor-guard-a'",
-                        ))
-                        .await
-                        .expect("query should succeed");
-
-                    assert_eq!(rows_after.rows.len(), 1);
-                    assert_eq!(
-                        rows_after.rows[0].get::<Option<String>>("merged_into"),
-                        Some(Some("vendor-guard-b".to_string())),
-                        "party A should still be marked merged_into B (unchanged by failed merge)"
-                    );
-                }
-                _ => panic!("expected Done for first merge"),
-            }
-        });
-    }
-}
-
-#[test]
-fn parties_update_guard_fails_when_party_already_merged() {
-    for kit in TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_parties_tables(&*kit.db).await;
-
-            // Create a party and merge it
-            create_test_party(&*kit.db, "vendor-update-a", "Party A", None, None).await;
-            create_test_party(&*kit.db, "vendor-update-b", "Party B", None, None).await;
-
-            // Mark party A as merged into B
-            let _ = kit
-                .db
-                .execute(&Statement::with_values(
-                    "UPDATE vendor SET merged_into = ? WHERE id = ?".to_string(),
-                    vec![
-                        Value::from("vendor-update-b"),
-                        Value::from("vendor-update-a"),
-                    ],
-                ))
-                .await;
-
-            let auth = TestAuthenticator::new();
-            let policy = DefaultPolicy;
-            let executor = Executor::new(&*kit.db, auth, policy);
-
-            // Try to update the merged party
-            let cmd = PartiesUpdate;
-            let input = UpdateInput {
-                id: "vendor-update-a".to_string(),
-                name: Some("Updated Name".to_string()),
-                vat_id: None,
+            let create = |id: &str, vat: &str| CreateInput {
+                id: Some(id.to_string()),
+                name: "Acme GmbH".to_string(),
+                vat_id: Some(vat.to_string()),
                 roles: None,
                 tax_number: None,
                 language: None,
@@ -1468,37 +277,862 @@ fn parties_update_guard_fails_when_party_already_merged() {
                 default_tax_code: None,
             };
 
-            let result = executor
-                .run(
-                    &cmd,
-                    "bearer-owner".to_string(),
-                    context("update-guard-test"),
-                    &input,
-                    Execute::Run,
-                )
-                .await;
-
-            // This should fail due to the guard statement
+            // A DE number with a wrong check digit is refused before any write.
+            let refused = run(
+                &*kit.db,
+                &PartiesCreate,
+                OWNER_TOKEN,
+                "create-bad",
+                &create("p-bad", "DE123456789"),
+            )
+            .await;
             assert!(
-                result.is_err(),
-                "update should fail when party is already merged (guard violation)"
+                matches!(refused, Err(CommandError::InvalidInput(_))),
+                "DE check digit"
+            );
+            assert_eq!(
+                scalar_i64(
+                    &*kit.db,
+                    "SELECT COUNT(*) AS n FROM vendor WHERE id = 'p-bad'"
+                )
+                .await,
+                0
             );
 
-            // Verify the party name is unchanged
-            let rows = kit
+            // A valid DE number is stored normalised.
+            let made = run(
+                &*kit.db,
+                &PartiesCreate,
+                OWNER_TOKEN,
+                "create-ok",
+                &create("p-acme", "de 136.695.976"),
+            )
+            .await
+            .expect("valid DE VAT ID");
+            assert_eq!(made.party.vat_id.as_deref(), Some("DE136695976"));
+
+            // The same VAT ID again names the party that holds it.
+            let duplicate = run(
+                &*kit.db,
+                &PartiesCreate,
+                OWNER_TOKEN,
+                "create-dup",
+                &create("p-dup", "DE136695976"),
+            )
+            .await;
+            match duplicate {
+                Err(CommandError::InvalidInput(message)) => {
+                    assert!(message.contains("p-acme"), "{message}");
+                }
+                other => panic!("expected a refusal naming p-acme, got {other:?}"),
+            }
+        });
+    }
+}
+
+#[test]
+fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-1", "Acme GmbH", None, None).await;
+
+            let blank_name = run(
+                &*kit.db,
+                &PartiesCreate,
+                OWNER_TOKEN,
+                "blank",
+                &CreateInput {
+                    id: Some("p-blank".to_string()),
+                    name: "   ".to_string(),
+                    vat_id: None,
+                    roles: None,
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: None,
+                    default_account: None,
+                    default_tax_code: None,
+                },
+            )
+            .await;
+            assert!(matches!(blank_name, Err(CommandError::InvalidInput(_))));
+
+            let bad_role = run(
+                &*kit.db,
+                &PartiesUpdate,
+                AGENT_TOKEN,
+                "role",
+                &UpdateInput {
+                    id: "p-1".to_string(),
+                    name: None,
+                    vat_id: None,
+                    roles: Some("supplier".to_string()),
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: None,
+                    default_account: None,
+                    default_tax_code: None,
+                },
+            )
+            .await;
+            assert!(matches!(bad_role, Err(CommandError::InvalidInput(_))));
+
+            let bad_vat = run(
+                &*kit.db,
+                &PartiesUpdate,
+                AGENT_TOKEN,
+                "vat",
+                &UpdateInput {
+                    id: "p-1".to_string(),
+                    name: None,
+                    vat_id: Some("NL123456789B1".to_string()),
+                    roles: None,
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: None,
+                    default_account: None,
+                    default_tax_code: None,
+                },
+            )
+            .await;
+            assert!(
+                matches!(bad_vat, Err(CommandError::InvalidInput(_))),
+                "NL needs two digits after B"
+            );
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT vat_id AS v FROM vendor WHERE id = 'p-1'",
+                    "v"
+                )
+                .await,
+                None
+            );
+        });
+    }
+}
+
+#[test]
+fn a_merged_party_cannot_be_updated() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-keep", "Acme GmbH", None, None).await;
+            party(&*kit.db, "p-gone", "Acme Holding", None, None).await;
+            run(
+                &*kit.db,
+                &PartiesMerge::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "merge-1",
+                &MergeInput {
+                    id: "p-keep".to_string(),
+                    from: "p-gone".to_string(),
+                },
+            )
+            .await
+            .expect("merge");
+
+            let result = run(
+                &*kit.db,
+                &PartiesUpdate,
+                OWNER_TOKEN,
+                "update-gone",
+                &UpdateInput {
+                    id: "p-gone".to_string(),
+                    name: Some("Renamed".to_string()),
+                    vat_id: None,
+                    roles: None,
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: None,
+                    default_account: None,
+                    default_tax_code: None,
+                },
+            )
+            .await;
+            assert!(matches!(result, Err(CommandError::InvalidInput(_))));
+        });
+    }
+}
+
+// ============================================================================
+// Bank details: human only, history kept, bills flagged on a real change
+// ============================================================================
+
+fn bank_input(id: &str, iban: &str) -> SetBankInput {
+    SetBankInput {
+        id: id.to_string(),
+        iban: iban.to_string(),
+        bic: Some("cobadeff".to_string()),
+        reason: "bank letter received by post".to_string(),
+    }
+}
+
+#[test]
+fn set_bank_is_refused_to_an_agent() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-bank", "Acme GmbH", None, None).await;
+            let result = run(
+                &*kit.db,
+                &PartiesSetBank::new(None),
+                AGENT_TOKEN,
+                "bank-agent",
+                &bank_input("p-bank", "DE89370400440532013000"),
+            )
+            .await;
+            assert!(matches!(result, Err(CommandError::HumanOnly)));
+            assert_eq!(
+                scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vendor_bank_change").await,
+                0
+            );
+        });
+    }
+}
+
+#[test]
+fn set_bank_needs_the_acting_person() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-bank", "Acme GmbH", None, None).await;
+            let result = run(
+                &*kit.db,
+                &PartiesSetBank::new(None),
+                OWNER_TOKEN,
+                "bank-nobody",
+                &bank_input("p-bank", "DE89370400440532013000"),
+            )
+            .await;
+            assert!(matches!(result, Err(CommandError::Unauthenticated)));
+        });
+    }
+}
+
+#[test]
+fn set_bank_records_before_and_after_and_returns_the_real_party() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(
+                &*kit.db,
+                "p-bank",
+                "Acme GmbH",
+                Some("DE136695976"),
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            let out = run(
+                &*kit.db,
+                &PartiesSetBank::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "bank-owner",
+                &bank_input("p-bank", "de89 3704 0044 0532 0130 00"),
+            )
+            .await
+            .expect("set_bank");
+
+            assert_eq!(out.party.name, "Acme GmbH", "the output names the party");
+            assert_eq!(out.party.iban.as_deref(), Some("DE89370400440532013000"));
+            assert_eq!(out.party.bic.as_deref(), Some("COBADEFF"));
+
+            let history = kit
                 .db
                 .query(&Statement::new(
-                    "SELECT name FROM vendor WHERE id = 'vendor-update-a'",
+                    "SELECT before_iban, after_iban, changed_by, reason FROM vendor_bank_change WHERE vendor_id = 'p-bank'"
+                        .to_string(),
                 ))
                 .await
-                .expect("query should succeed");
-
-            assert_eq!(rows.rows.len(), 1);
+                .expect("history");
+            assert_eq!(history.rows.len(), 1);
+            let row = &history.rows[0];
             assert_eq!(
-                rows.rows[0].get::<String>("name"),
-                Some("Party A".to_string()),
-                "party name should be unchanged by failed update"
+                row.get::<Option<String>>("before_iban")
+                    .flatten()
+                    .as_deref(),
+                Some("DE89370400440532013000")
             );
+            assert_eq!(
+                row.get::<Option<String>>("after_iban").flatten().as_deref(),
+                Some("DE89370400440532013000")
+            );
+            assert_eq!(row.get::<String>("changed_by").as_deref(), Some(OWNER_ID));
+        });
+    }
+}
+
+#[test]
+fn set_bank_refuses_a_bad_iban_and_writes_nothing() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(
+                &*kit.db,
+                "p-bank",
+                "Acme GmbH",
+                None,
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            let result = run(
+                &*kit.db,
+                &PartiesSetBank::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "bank-bad",
+                &bank_input("p-bank", "DE89370400440532013001"),
+            )
+            .await;
+            assert!(
+                matches!(result, Err(CommandError::InvalidInput(_))),
+                "mod-97 check"
+            );
+            assert_eq!(
+                scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vendor_bank_change").await,
+                0
+            );
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT iban AS i FROM vendor WHERE id = 'p-bank'",
+                    "i"
+                )
+                .await
+                .as_deref(),
+                Some("DE89370400440532013000")
+            );
+        });
+    }
+}
+
+#[test]
+fn set_bank_flags_open_bills_only_when_the_iban_really_changes() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(
+                &*kit.db,
+                "p-bank",
+                "Acme GmbH",
+                None,
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            bill(&*kit.db, "bill-open", "p-bank", "INV-7", false).await;
+            bill(&*kit.db, "bill-paid", "p-bank", "INV-8", true).await;
+            let owner = PartiesSetBank::new(Some(OWNER_ID.to_string()));
+
+            // The same IBAN again is not a change of payee.
+            run(
+                &*kit.db,
+                &owner,
+                OWNER_TOKEN,
+                "bank-same",
+                &bank_input("p-bank", "DE89370400440532013000"),
+            )
+            .await
+            .expect("same IBAN");
+            assert_eq!(
+                scalar_i64(
+                    &*kit.db,
+                    "SELECT iban_changed AS n FROM bill WHERE id = 'bill-open'"
+                )
+                .await,
+                0
+            );
+
+            // A different IBAN flags the open bill, and not the posted one.
+            run(
+                &*kit.db,
+                &owner,
+                OWNER_TOKEN,
+                "bank-new",
+                &bank_input("p-bank", "GB82WEST12345698765432"),
+            )
+            .await
+            .expect("new IBAN");
+            assert_eq!(
+                scalar_i64(
+                    &*kit.db,
+                    "SELECT iban_changed AS n FROM bill WHERE id = 'bill-open'"
+                )
+                .await,
+                1
+            );
+            assert_eq!(
+                scalar_i64(
+                    &*kit.db,
+                    "SELECT iban_changed AS n FROM bill WHERE id = 'bill-paid'"
+                )
+                .await,
+                0
+            );
+        });
+    }
+}
+
+#[test]
+fn vendor_bank_change_history_is_append_only() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(
+                &*kit.db,
+                "p-bank",
+                "Acme GmbH",
+                None,
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            run(
+                &*kit.db,
+                &PartiesSetBank::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "bank-hist",
+                &bank_input("p-bank", "GB82WEST12345698765432"),
+            )
+            .await
+            .expect("set_bank");
+
+            let update = kit
+                .db
+                .execute(&Statement::new(
+                    "UPDATE vendor_bank_change SET reason = 'edited'".to_string(),
+                ))
+                .await;
+            assert!(update.is_err(), "history rows cannot be updated");
+            let delete = kit
+                .db
+                .execute(&Statement::new(
+                    "DELETE FROM vendor_bank_change".to_string(),
+                ))
+                .await;
+            assert!(delete.is_err(), "history rows cannot be deleted");
+        });
+    }
+}
+
+// ============================================================================
+// VIES: behind the port, refused when off, recorded per VAT ID
+// ============================================================================
+
+const ACME_VAT: &str = "DE136695976";
+
+#[test]
+fn check_vat_records_a_valid_answer_for_the_partys_vat_id() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-vies", "Acme GmbH", Some(ACME_VAT), None).await;
+            let vies = FakeVies::valid();
+            let cmd = PartiesCheckVat::new(Some(vies.clone()));
+            let out = run(
+                &*kit.db,
+                &cmd,
+                AGENT_TOKEN,
+                "vies-ok",
+                &check_vat_input("p-vies", "de", "136695976"),
+            )
+            .await
+            .expect("check_vat");
+            assert!(out.vies_result.valid);
+            assert_eq!(out.vies_result.name.as_deref(), Some("Acme GmbH"));
+            assert_eq!(vies.calls(), 1);
+
+            let stored = kit
+                .db
+                .query(&Statement::new(
+                    "SELECT country_code, vat_number, valid, consultation_number FROM vies_check WHERE vendor_id = 'p-vies'"
+                        .to_string(),
+                ))
+                .await
+                .expect("stored check");
+            assert_eq!(stored.rows.len(), 1);
+            assert_eq!(
+                stored.rows[0].get::<String>("country_code").as_deref(),
+                Some("DE")
+            );
+            assert_eq!(
+                stored.rows[0].get::<String>("vat_number").as_deref(),
+                Some(ACME_VAT)
+            );
+            assert_eq!(stored.rows[0].get::<i64>("valid"), Some(1));
+            assert_eq!(
+                stored.rows[0]
+                    .get::<Option<String>>("consultation_number")
+                    .flatten()
+                    .as_deref(),
+                Some("consultation-123")
+            );
+        });
+    }
+}
+
+#[test]
+fn check_vat_records_an_invalid_answer_as_invalid() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-inv", "Acme GmbH", Some(ACME_VAT), None).await;
+            let vies = FakeVies::answering(Ok(ViesResponse {
+                valid: false,
+                name: None,
+                address: None,
+                consultation_number: None,
+                request_date: None,
+            }));
+            let out = run(
+                &*kit.db,
+                &PartiesCheckVat::new(Some(vies)),
+                AGENT_TOKEN,
+                "vies-inv",
+                &check_vat_input("p-inv", "DE", "136695976"),
+            )
+            .await
+            .expect("check_vat");
+            assert!(!out.vies_result.valid);
+            assert_eq!(
+                scalar_i64(
+                    &*kit.db,
+                    "SELECT valid AS n FROM vies_check WHERE vendor_id = 'p-inv'"
+                )
+                .await,
+                0
+            );
+        });
+    }
+}
+
+#[test]
+fn check_vat_writes_nothing_when_vies_does_not_answer() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-err", "Acme GmbH", Some(ACME_VAT), None).await;
+            let vies = FakeVies::answering(Err("VIES answered with status 500".to_string()));
+            let result = run(
+                &*kit.db,
+                &PartiesCheckVat::new(Some(vies)),
+                AGENT_TOKEN,
+                "vies-err",
+                &check_vat_input("p-err", "DE", "136695976"),
+            )
+            .await;
+            assert!(matches!(result, Err(CommandError::InvalidInput(_))));
+            assert_eq!(
+                scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vies_check").await,
+                0
+            );
+        });
+    }
+}
+
+#[test]
+fn check_vat_is_refused_when_vies_is_off_on_this_server() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-off", "Acme GmbH", Some(ACME_VAT), None).await;
+            let result = run(
+                &*kit.db,
+                &PartiesCheckVat::new(None),
+                AGENT_TOKEN,
+                "vies-off",
+                &check_vat_input("p-off", "DE", "136695976"),
+            )
+            .await;
+            match result {
+                Err(CommandError::InvalidInput(message)) => {
+                    assert!(message.contains("LEDGERS_VIES"), "{message}");
+                }
+                other => panic!("expected the off message, got {other:?}"),
+            }
+            assert_eq!(
+                scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vies_check").await,
+                0
+            );
+        });
+    }
+}
+
+#[test]
+fn check_vat_never_calls_vies_for_a_non_eu_country_a_bad_number_or_another_vat_id() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-vat", "Acme GmbH", Some(ACME_VAT), None).await;
+            let vies = FakeVies::valid();
+            let cmd = PartiesCheckVat::new(Some(vies.clone()));
+
+            let non_eu = run(
+                &*kit.db,
+                &cmd,
+                AGENT_TOKEN,
+                "vies-us",
+                &check_vat_input("p-vat", "US", "136695976"),
+            )
+            .await;
+            assert!(matches!(non_eu, Err(CommandError::InvalidInput(_))));
+
+            let bad_number = run(
+                &*kit.db,
+                &cmd,
+                AGENT_TOKEN,
+                "vies-check-digit",
+                &check_vat_input("p-vat", "DE", "123456789"),
+            )
+            .await;
+            assert!(matches!(bad_number, Err(CommandError::InvalidInput(_))));
+
+            let other = run(
+                &*kit.db,
+                &cmd,
+                AGENT_TOKEN,
+                "vies-other",
+                &check_vat_input("p-vat", "FR", "12345678901"),
+            )
+            .await;
+            assert!(
+                matches!(other, Err(CommandError::InvalidInput(_))),
+                "not the party's VAT ID"
+            );
+
+            assert_eq!(vies.calls(), 0, "no VAT number left the server");
+        });
+    }
+}
+
+/// The zero-rating guard: the latest check must be valid and for the VAT ID
+/// the party has now.
+#[test]
+fn the_zero_rating_guard_follows_the_latest_check_for_the_current_vat_id() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-zr", "Acme GmbH", Some(ACME_VAT), None).await;
+            let guard_sql = |company: &str| vies_valid_guard(company, "p-zr");
+
+            // No check yet: the guard refuses.
+            assert!(
+                kit.db.execute(&guard_sql(COMPANY_ID)).await.is_err(),
+                "no check on file"
+            );
+
+            run(
+                &*kit.db,
+                &PartiesCheckVat::new(Some(FakeVies::valid())),
+                AGENT_TOKEN,
+                "zr-check",
+                &check_vat_input("p-zr", "DE", "136695976"),
+            )
+            .await
+            .expect("check_vat");
+            kit.db
+                .execute(&guard_sql(COMPANY_ID))
+                .await
+                .expect("a valid check for the current VAT ID passes");
+            exec(
+                &*kit.db,
+                "DELETE FROM ledger_guard WHERE guard_key = 'vies_valid:p-zr'",
+                vec![],
+            )
+            .await;
+
+            // The party changes its VAT ID: the old check no longer counts.
+            run(
+                &*kit.db,
+                &PartiesUpdate,
+                OWNER_TOKEN,
+                "zr-vat",
+                &UpdateInput {
+                    id: "p-zr".to_string(),
+                    name: None,
+                    vat_id: Some("DE111111125".to_string()),
+                    roles: None,
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: None,
+                    default_account: None,
+                    default_tax_code: None,
+                },
+            )
+            .await
+            .expect("update VAT ID");
+            assert!(
+                kit.db.execute(&guard_sql(COMPANY_ID)).await.is_err(),
+                "the check is for the old VAT ID"
+            );
+        });
+    }
+}
+
+// ============================================================================
+// Merge and duplicates
+// ============================================================================
+
+#[test]
+fn merge_is_refused_to_an_agent_and_moves_the_bills_to_the_survivor() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "p-a", "Acme GmbH", None, None).await;
+            party(&*kit.db, "p-b", "Acme Holding", None, None).await;
+            bill(&*kit.db, "bill-b", "p-b", "INV-9", false).await;
+
+            let refused = run(
+                &*kit.db,
+                &PartiesMerge::new(None),
+                AGENT_TOKEN,
+                "merge-agent",
+                &MergeInput {
+                    id: "p-a".to_string(),
+                    from: "p-b".to_string(),
+                },
+            )
+            .await;
+            assert!(matches!(refused, Err(CommandError::HumanOnly)));
+
+            run(
+                &*kit.db,
+                &PartiesMerge::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "merge-owner",
+                &MergeInput {
+                    id: "p-a".to_string(),
+                    from: "p-b".to_string(),
+                },
+            )
+            .await
+            .expect("merge");
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT vendor_id AS v FROM bill WHERE id = 'bill-b'",
+                    "v"
+                )
+                .await
+                .as_deref(),
+                Some("p-a")
+            );
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT merged_into AS m FROM vendor WHERE id = 'p-b'",
+                    "m"
+                )
+                .await
+                .as_deref(),
+                Some("p-a")
+            );
+        });
+    }
+}
+
+#[test]
+fn list_marks_parties_that_may_be_duplicates_and_skips_merged_ones() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            // A VAT ID is unique per company, so duplicates here share an IBAN or a name.
+            party(
+                &*kit.db,
+                "d-iban-1",
+                "Gamma",
+                None,
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            party(
+                &*kit.db,
+                "d-iban-2",
+                "Delta",
+                None,
+                Some("de89 3704 0044 0532 0130 00"),
+            )
+            .await;
+            party(&*kit.db, "d-name-1", "Halden Works GmbH.", None, None).await;
+            party(&*kit.db, "d-name-2", "halden works gmbh", None, None).await;
+            party(&*kit.db, "d-solo", "Unrelated", None, None).await;
+
+            let list = run(
+                &*kit.db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "dups",
+                &ListInput {
+                    limit: Some(200),
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list");
+            let find = |id: &str| {
+                list.parties
+                    .iter()
+                    .find(|p| p.id == id)
+                    .expect("listed")
+                    .clone()
+            };
+            assert_eq!(
+                find("d-iban-1").possible_duplicates,
+                vec!["d-iban-2".to_string()]
+            );
+            assert_eq!(
+                find("d-name-1").possible_duplicates,
+                vec!["d-name-2".to_string()]
+            );
+            assert!(find("d-solo").possible_duplicates.is_empty());
+
+            run(
+                &*kit.db,
+                &PartiesMerge::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "dups-merge",
+                &MergeInput {
+                    id: "d-iban-1".to_string(),
+                    from: "d-iban-2".to_string(),
+                },
+            )
+            .await
+            .expect("merge");
+            let after = run(
+                &*kit.db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "dups-after",
+                &ListInput {
+                    limit: Some(200),
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list after merge");
+            assert!(
+                after.parties.iter().all(|p| p.id != "d-iban-2"),
+                "merged parties are not listed"
+            );
+            assert!(
+                after
+                    .parties
+                    .iter()
+                    .find(|p| p.id == "d-iban-1")
+                    .expect("survivor")
+                    .possible_duplicates
+                    .is_empty()
+            );
+        });
+    }
+}
+
+#[test]
+fn the_vendor_table_refuses_a_second_party_with_the_same_vat_id_even_when_it_is_merged() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(&*kit.db, "u-1", "Acme GmbH", Some(ACME_VAT), None).await;
+            // The constraint is the guard, whatever the command checked first.
+            let direct = kit
+                .db
+                .execute(&Statement::with_values(
+                    "INSERT INTO vendor (id, company_id, name, vat_id, source, needs_review, created_at, updated_at) VALUES ('u-2', ?, 'Other', ?, 'manual', 0, ?, ?)"
+                        .to_string(),
+                    vec![Value::from(COMPANY_ID), Value::from(ACME_VAT), Value::from(NOW), Value::from(NOW)],
+                ))
+                .await;
+            assert!(direct.is_err());
         });
     }
 }

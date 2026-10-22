@@ -791,6 +791,52 @@ fn guard_statements(
     ));
     statements.push(guard::release_statement(&dimension_balance_key));
 
+    // Business units (src/units.rs): once a company has an active unit,
+    // every profit-and-loss line and every line on an inter-unit account
+    // must carry a unit, so no unit's view can leak a line.
+    let unit_required_key = guard::guard_key(&["unit-required", entry_id]);
+    statements.push(guard::assert_statement(
+        &unit_required_key,
+        "(SELECT COUNT(*) FROM journal_line jl \
+         JOIN account a ON a.company_id = ? AND a.number = jl.account_number \
+         WHERE jl.entry_id = ? \
+         AND (a.account_type IN ('income', 'expense') OR a.tags LIKE '%inter-unit-due-%') \
+         AND NOT EXISTS (SELECT 1 FROM journal_line_dimension jld \
+                        WHERE jld.company_id = ? AND jld.entry_id = jl.entry_id \
+                        AND jld.line_no = jl.line_no AND jld.kind = 'unit')) = 0 \
+         OR NOT EXISTS (SELECT 1 FROM dimension_value dv \
+                        WHERE dv.company_id = ? AND dv.kind = 'unit' AND dv.archived = 0)",
+        vec![
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+            SeaValue::from(company),
+            SeaValue::from(company),
+        ],
+    ));
+    statements.push(guard::release_statement(&unit_required_key));
+
+    // An intercompany entry (one that touches an inter-unit due account)
+    // must net its profit and loss to zero. Consolidated reports drop such
+    // entries whole, so this is what keeps company totals exact.
+    let intercompany_key = guard::guard_key(&["intercompany-pl-zero", entry_id]);
+    statements.push(guard::assert_statement(
+        &intercompany_key,
+        "(SELECT CASE WHEN EXISTS (SELECT 1 FROM journal_line jl \
+           JOIN account a ON a.company_id = ? AND a.number = jl.account_number \
+           WHERE jl.entry_id = ? AND a.tags LIKE '%inter-unit-due-%') \
+         AND (SELECT COALESCE(SUM(jl2.base_minor), 0) FROM journal_line jl2 \
+           JOIN account a2 ON a2.company_id = ? AND a2.number = jl2.account_number \
+           WHERE jl2.entry_id = ? AND a2.account_type IN ('income', 'expense')) <> 0 \
+         THEN 1 ELSE 0 END) = 0",
+        vec![
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+            SeaValue::from(company),
+            SeaValue::from(entry_id),
+        ],
+    ));
+    statements.push(guard::release_statement(&intercompany_key));
+
     // Release all guards in order: journal, reversals, period, accounts, balance, dimensions
     statements.push(guard::release_statement(&journal_key));
     for key in reversal_release_keys {

@@ -1,0 +1,17 @@
+---
+source: crates/ledgers-cli/tests/cli_suite/help.rs
+expression: help_for(path)
+---
+Commands under `ledgers bank`
+
+Usage: bank <COMMAND>
+
+Commands:
+  accounts      Commands under `ledgers accounts`
+  rules         Commands under `ledgers rules`
+  statements    Commands under `ledgers statements`
+  transactions  Commands under `ledgers transactions`
+  help          Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

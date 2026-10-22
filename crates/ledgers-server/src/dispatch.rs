@@ -11,12 +11,16 @@
 
 mod accounts;
 mod approvals;
+mod bank;
 mod bills;
+mod settings;
+mod settings_rules;
+mod units;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
 use accounts::AccountsGet;
-use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
+use approvals::{ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use bills::PortTransport;
 use cratefield_core::{
@@ -32,7 +36,8 @@ use ledgers_bills::commands::{
     BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
 };
 use ledgers_bills::parties::{
-    PartiesCheckVat, PartiesCreate, PartiesList, PartiesMerge, PartiesSetBank, PartiesUpdate,
+    HttpVies, PartiesCheckVat, PartiesCreate, PartiesList, PartiesMerge, PartiesSetBank,
+    PartiesUpdate, ViesPort,
 };
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
@@ -55,10 +60,16 @@ use ledgers_policy::store::{deserialize_key, parse_keys, serialize_key};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
+use settings::{
+    ApprovalSettingsGet, ApprovalSettingsUpdate, AuditList, CompanyGet, CompanyUpdate,
+    FiscalYearsList, NumberingList, NumberingSetNext, TaxSettingsGet,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use time::format_description::well_known::Iso8601;
 use time::{Date, OffsetDateTime, UtcOffset};
+use units::{ReportsUnitsSummary, UnitsList, resolve_scope};
 
 /// The company the development bootstrap creates when `LEDGERS_COMPANY_ID`
 /// is unset. Invented fixture id, never a real company.
@@ -68,6 +79,12 @@ pub const DEV_COMPANY_ID: &str = "01DEVCOMPANY0000000000000A";
 pub const DEV_JOURNAL_ID: &str = "general";
 /// The owner recorded on dev bootstrap audit events and dev keys.
 const DEV_OWNER: &str = "dev-owner";
+/// The largest integer a D1 bind can take: 2^53 - 1, the JavaScript safe
+/// integer. The Cloudflare runtime binds an `i64` through `serde_wasm_bindgen`,
+/// which refuses anything outside this range ("wasm-bindgen serialization
+/// error"), so a query that binds `i64::MAX` fails on Workers while the same
+/// query runs under SQLite. Bind a value from this range or leave the clause out.
+pub const D1_SAFE_INTEGER_MAX: i64 = (1 << 53) - 1;
 /// The table the harness `ApiKeys` store keeps key hashes in.
 pub const API_KEYS_TABLE: &str = "api_keys";
 /// Chart tags whose accounts only a person may move money through: an
@@ -151,6 +168,9 @@ pub struct ServerDispatch {
     document_key: Vec<u8>,
     /// The model reader the configuration selected, when one is configured.
     model: Option<ModelSettings>,
+    /// Whether `parties.check_vat` may call VIES (`LEDGERS_VIES=1`). Off by
+    /// default: no VAT number leaves the server unless an operator turns it on.
+    vies_enabled: bool,
 }
 
 impl ServerDispatch {
@@ -164,6 +184,7 @@ impl ServerDispatch {
             app_url: String::new(),
             document_key: Vec::new(),
             model: None,
+            vies_enabled: false,
         }
     }
 
@@ -178,6 +199,13 @@ impl ServerDispatch {
     #[must_use]
     pub fn with_model_reader(mut self, settings: Option<ModelSettings>) -> Self {
         self.model = settings;
+        self
+    }
+
+    /// Turns VIES VAT checks on or off (`LEDGERS_VIES=1` turns them on).
+    #[must_use]
+    pub fn with_vies_enabled(mut self, enabled: bool) -> Self {
+        self.vies_enabled = enabled;
         self
     }
 
@@ -271,12 +299,15 @@ impl ServerDispatch {
 
         // A needs-approval outcome stores its request in the same guarded batch
         // as its audit row (docs/PLAN.md section 5).
+        let rules = settings::approval_rules_for::<C>(deps.db.as_ref(), &self.company_id)
+            .await
+            .map_err(|err| fail(CommandError::Database(err)))?;
+        let ttl = Duration::from_hours(u64::from(rules.ttl_hours));
         let approval_id = deps.id_gen.ulid();
         let raised: Mutex<Option<ApprovalRequest>> = Mutex::new(None);
         let persist = |pending: &PendingApproval| -> Result<Vec<Statement>, CommandError> {
             let preview = serde_json::to_value(&pending.preview)
                 .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
-            let limits = approvals::low_risk_limits();
             let (statement, request) = request_statement(&NewRequest {
                 id: &approval_id,
                 company_id: &self.company_id,
@@ -289,8 +320,8 @@ impl ServerDispatch {
                 requested_by: &pending.requested_by,
                 counterparty: None,
                 now: &now,
-                ttl: APPROVAL_TTL,
-                low_risk_limits: &limits,
+                ttl,
+                low_risk_limits: &rules.low_risk,
             })
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
             // The Created notice is enqueued in the same batch as the request.
@@ -505,7 +536,8 @@ impl ServerDispatch {
         self.execute(deps, &cmd, presented, request_id, input).await
     }
 
-    /// `parties.check_vat`: agent allowed, validates VAT via VIES.
+    /// `parties.check_vat`: agent allowed. The VIES port exists only when the
+    /// server enabled VAT checks and the runtime has an HTTP client.
     async fn parties_check_vat(
         &self,
         deps: &Deps,
@@ -513,11 +545,13 @@ impl ServerDispatch {
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        let transport = deps.http.clone().map(|http| {
-            std::sync::Arc::new(PortTransport(http))
-                as std::sync::Arc<dyn ledgers_extract::llm::Transport>
-        });
-        let cmd = PartiesCheckVat::new(transport);
+        let vies: Option<Arc<dyn ViesPort>> = match (self.vies_enabled, &deps.http) {
+            (true, Some(http)) => Some(Arc::new(HttpVies::new(Arc::new(PortTransport(
+                http.clone(),
+            ))))),
+            _ => None,
+        };
+        let cmd = PartiesCheckVat::new(vies);
         self.execute(deps, &cmd, presented, request_id, input).await
     }
 
@@ -567,8 +601,21 @@ impl Dispatch for ServerDispatch {
         presented: Option<Presented>,
     ) -> Result<Value, Problem> {
         match command {
-            "entries.post" => {
-                self.execute(deps, &EntriesPost, presented, request_id, input)
+            "entries.post" => self.entries_post(deps, presented, request_id, input).await,
+            "entries.transfer" => {
+                self.entries_transfer(deps, presented, request_id, input)
+                    .await
+            }
+            "units.list" => {
+                self.execute(deps, &UnitsList, presented, request_id, input)
+                    .await
+            }
+            "units.create" | "units.rename" | "units.archive" => {
+                self.units_write(deps, presented, request_id, command, input)
+                    .await
+            }
+            "reports.units_summary" => {
+                self.execute(deps, &ReportsUnitsSummary, presented, request_id, input)
                     .await
             }
             "entries.reverse" => {
@@ -613,6 +660,10 @@ impl Dispatch for ServerDispatch {
             }
             "reports.trial_balance" => {
                 self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
+                    .await
+            }
+            "reports.trends" => {
+                self.execute(deps, &ReportsTrends, presented, request_id, input)
                     .await
             }
             "reports.profit_and_loss" => {
@@ -693,9 +744,79 @@ impl Dispatch for ServerDispatch {
                     .await
             }
             "parties.merge" => self.parties_merge(deps, presented, request_id, input).await,
+            "bank.accounts.list"
+            | "bank.accounts.get"
+            | "bank.accounts.reconcile"
+            | "bank.accounts.create"
+            | "bank.accounts.update"
+            | "bank.accounts.archive"
+            | "bank.statements.import"
+            | "bank.transactions.list"
+            | "bank.transactions.post"
+            | "bank.transactions.link"
+            | "bank.transactions.ignore"
+            | "bank.rules.list"
+            | "bank.rules.create"
+            | "bank.rules.enable" => {
+                self.bank_command(deps, presented, request_id, command, input)
+                    .await
+            }
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
+            "company.get" => {
+                self.execute(deps, &CompanyGet, presented, request_id, input)
+                    .await
+            }
+            "company.update" => {
+                self.execute(deps, &CompanyUpdate, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.list" => {
+                self.execute(deps, &FiscalYearsList, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.create" => {
+                self.fiscal_years_create(deps, presented, request_id, input)
+                    .await
+            }
+            "fiscal_years.close" => {
+                self.fiscal_years_close(deps, presented, request_id, input)
+                    .await
+            }
+            "periods.close" => self.periods_close(deps, presented, request_id, input).await,
+            "periods.reopen" => {
+                self.periods_reopen(deps, presented, request_id, input)
+                    .await
+            }
+            "numbering.list" => {
+                self.execute(deps, &NumberingList, presented, request_id, input)
+                    .await
+            }
+            "numbering.set_next" => {
+                self.execute(deps, &NumberingSetNext, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.get" => {
+                self.execute(deps, &TaxSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "tax_settings.update" => {
+                self.tax_settings_update(deps, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.get" => {
+                self.execute(deps, &ApprovalSettingsGet, presented, request_id, input)
+                    .await
+            }
+            "approval_settings.update" => {
+                self.execute(deps, &ApprovalSettingsUpdate, presented, request_id, input)
+                    .await
+            }
+            "audit.list" => {
+                self.execute(deps, &AuditList, presented, request_id, input)
+                    .await
+            }
             other => Err(
                 Problem::validation_failed(format!("unknown command {other:?}"))
                     .instance(request_id),
@@ -771,6 +892,7 @@ fn internal_agent_policy(
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit: None,
     })
 }
 
@@ -960,7 +1082,7 @@ pub async fn issue_key(
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
-    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits)
+    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits, None)
         .await
         .map(|(_, token)| token)
 }
@@ -974,9 +1096,11 @@ pub(crate) async fn issue_key_as(
     owner: &str,
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
+    unit: Option<String>,
 ) -> Result<(String, String), String> {
     let key_id = deps.id_gen.ulid();
-    let policy = agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits)?;
+    let policy =
+        agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits, unit)?;
     deps.db
         .execute(&policy)
         .await
@@ -988,6 +1112,7 @@ pub(crate) async fn issue_key_as(
 /// The insert of an agent key's policy row, with the key's id and the time the
 /// row is stamped with. Built here so the bootstrap can run it inside its guarded
 /// batch; [`issue_key_as`] runs it on its own.
+#[allow(clippy::too_many_arguments)]
 fn agent_key_policy_statement(
     deps: &Deps,
     company_id: &str,
@@ -996,6 +1121,7 @@ fn agent_key_policy_statement(
     owner: &str,
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
+    unit: Option<String>,
 ) -> Result<Statement, String> {
     let now = deps.clock.now();
     let key = AgentKey {
@@ -1011,6 +1137,7 @@ fn agent_key_policy_statement(
         last_used_at: None,
         revoked_at: None,
         chart_changes: false,
+        unit,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
     Ok(Statement::with_values(
@@ -1059,6 +1186,20 @@ pub(crate) async fn mint_key(
 /// # Errors
 /// A message naming the failed step.
 pub async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<(), String> {
+    seed_company_with_journal(deps, company_id, owner, DEV_JOURNAL_ID).await
+}
+
+/// [`seed_company`] with the general journal's id given. Journal ids are
+/// global keys, so a second company in one database names its own.
+///
+/// # Errors
+/// As [`seed_company`].
+pub async fn seed_company_with_journal(
+    deps: &Deps,
+    company_id: &str,
+    owner: &str,
+    journal_id: &str,
+) -> Result<(), String> {
     let now = deps.clock.now();
     let stamp = rfc3339_utc(now);
     let db = deps.db.as_ref();
@@ -1087,7 +1228,7 @@ pub async fn seed_company(deps: &Deps, company_id: &str, owner: &str) -> Result<
                 kind: JournalKind::General,
                 name: "General journal".to_owned(),
             },
-            DEV_JOURNAL_ID,
+            journal_id,
             &stamp,
             &audit,
         )
@@ -1267,6 +1408,7 @@ pub async fn bootstrap_company(
         BOOTSTRAP_OWNER,
         Tier::PostWithinLimits,
         bootstrap_limits(&input.currency),
+        None,
     )
     .map_err(BootstrapError::Failed)?;
 
@@ -1348,6 +1490,104 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
         (
+            "bank.accounts.list",
+            (
+                schema_of::<ledgers_bank::model::AccountsListInput>(),
+                schema_of::<ledgers_bank::model::AccountsListOutput>(),
+            ),
+        ),
+        (
+            "bank.accounts.get",
+            (
+                schema_of::<ledgers_bank::model::AccountsGetInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.reconcile",
+            (
+                schema_of::<ledgers_bank::model::ReconcileInput>(),
+                schema_of::<ledgers_bank::model::ReconciliationView>(),
+            ),
+        ),
+        (
+            "bank.accounts.create",
+            (
+                schema_of::<ledgers_bank::model::AccountsCreateInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.update",
+            (
+                schema_of::<ledgers_bank::model::AccountsUpdateInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.archive",
+            (
+                schema_of::<ledgers_bank::model::AccountsArchiveInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.statements.import",
+            (
+                schema_of::<ledgers_bank::model::StatementsImportRequest>(),
+                schema_of::<ledgers_bank::model::StatementsImportOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.list",
+            (
+                schema_of::<ledgers_bank::model::TransactionsListInput>(),
+                schema_of::<ledgers_bank::model::TransactionsListOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.post",
+            (
+                schema_of::<ledgers_bank::model::TransactionsPostInput>(),
+                schema_of::<ledgers_bank::model::TransactionsPostOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.link",
+            (
+                schema_of::<ledgers_bank::model::TransactionsLinkInput>(),
+                schema_of::<ledgers_bank::model::TransactionStatusOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.ignore",
+            (
+                schema_of::<ledgers_bank::model::TransactionsIgnoreInput>(),
+                schema_of::<ledgers_bank::model::TransactionStatusOutput>(),
+            ),
+        ),
+        (
+            "bank.rules.list",
+            (
+                schema_of::<ledgers_bank::model::RulesListInput>(),
+                schema_of::<ledgers_bank::model::RulesListOutput>(),
+            ),
+        ),
+        (
+            "bank.rules.create",
+            (
+                schema_of::<ledgers_bank::model::RulesCreateRequest>(),
+                schema_of::<ledgers_bank::model::RuleView>(),
+            ),
+        ),
+        (
+            "bank.rules.enable",
+            (
+                schema_of::<ledgers_bank::model::RulesEnableInput>(),
+                schema_of::<ledgers_bank::model::RulesEnableOutput>(),
+            ),
+        ),
+        (
             "accounts.list",
             (
                 schema_of::<AccountsListInput>(),
@@ -1404,6 +1644,48 @@ pub fn registry() -> Registry {
             ),
         ),
         (
+            "entries.transfer",
+            (
+                schema_of::<units::EntriesTransferInput>(),
+                schema_of::<PostEntryOutput>(),
+            ),
+        ),
+        (
+            "units.list",
+            (
+                schema_of::<units::UnitsListInput>(),
+                schema_of::<units::UnitsListOutput>(),
+            ),
+        ),
+        (
+            "units.create",
+            (
+                schema_of::<units::UnitsCreateInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "units.rename",
+            (
+                schema_of::<units::UnitsRenameInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "units.archive",
+            (
+                schema_of::<units::UnitsCodeInput>(),
+                schema_of::<units::UnitsChangedOutput>(),
+            ),
+        ),
+        (
+            "reports.units_summary",
+            (
+                schema_of::<units::UnitsSummaryInput>(),
+                schema_of::<units::UnitsSummaryOutput>(),
+            ),
+        ),
+        (
             "entries.post",
             (
                 schema_of::<EntriesPostInput>(),
@@ -1444,6 +1726,10 @@ pub fn registry() -> Registry {
                 schema_of::<PeriodInput>(),
                 schema_of::<TrialBalanceOutput>(),
             ),
+        ),
+        (
+            "reports.trends",
+            (schema_of::<TrendsInput>(), schema_of::<TrendsOutput>()),
         ),
         (
             "keys.list",
@@ -1586,6 +1872,104 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::parties::MergeInput>(),
                 schema_of::<ledgers_bills::parties::MergeOutput>(),
+            ),
+        ),
+        (
+            "company.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "company.update",
+            (
+                schema_of::<settings::CompanyUpdateInput>(),
+                schema_of::<settings::CompanyGetOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::FiscalYearsListOutput>(),
+            ),
+        ),
+        (
+            "fiscal_years.create",
+            (
+                schema_of::<settings::FiscalYearCreateInput>(),
+                schema_of::<settings::FiscalYearView>(),
+            ),
+        ),
+        (
+            "fiscal_years.close",
+            (
+                schema_of::<settings::FiscalYearCloseInput>(),
+                schema_of::<settings::FiscalYearCloseOutput>(),
+            ),
+        ),
+        (
+            "periods.close",
+            (
+                schema_of::<settings::PeriodCloseInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "periods.reopen",
+            (
+                schema_of::<settings::PeriodReopenInput>(),
+                schema_of::<settings::PeriodView>(),
+            ),
+        ),
+        (
+            "numbering.list",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::NumberingListOutput>(),
+            ),
+        ),
+        (
+            "numbering.set_next",
+            (
+                schema_of::<settings::NumberingSetNextInput>(),
+                schema_of::<settings::NumberingSetNextInput>(),
+            ),
+        ),
+        (
+            "tax_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "tax_settings.update",
+            (
+                schema_of::<settings::TaxSettingsInput>(),
+                schema_of::<settings::TaxSettingsOutput>(),
+            ),
+        ),
+        (
+            "approval_settings.get",
+            (
+                schema_of::<Value>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "approval_settings.update",
+            (
+                schema_of::<settings::ApprovalSettingsInput>(),
+                schema_of::<settings::ApprovalSettingsView>(),
+            ),
+        ),
+        (
+            "audit.list",
+            (
+                schema_of::<settings::AuditListInput>(),
+                schema_of::<settings::AuditListOutput>(),
             ),
         ),
     ]);
@@ -2176,6 +2560,9 @@ impl Command for AccountsList {
 pub struct PeriodInput {
     /// The VAT period, `YYYY-MM`.
     pub period: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// One trial-balance row.
@@ -2230,7 +2617,8 @@ impl Command for ReportsTrialBalance {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let rows = report::trial_balance(db, &ctx.company_id, &input.period)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let rows = report::trial_balance_scoped(db, &ctx.company_id, &input.period, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(TrialBalanceOutput {
@@ -2291,7 +2679,8 @@ impl Command for ReportsProfitAndLoss {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let pnl = report::profit_and_loss(db, &ctx.company_id, &input.period)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let pnl = report::profit_and_loss_scoped(db, &ctx.company_id, &input.period, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(ProfitAndLossOutput {
@@ -2308,6 +2697,9 @@ impl Command for ReportsProfitAndLoss {
 pub struct BalanceSheetInput {
     /// The date the balance sheet is as of, `YYYY-MM-DD`.
     pub as_of: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// The output of `reports.balance_sheet`.
@@ -2362,7 +2754,8 @@ impl Command for ReportsBalanceSheet {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         parse_date(&input.as_of)?;
-        let sheet = report::balance_sheet(db, &ctx.company_id, &input.as_of)
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let sheet = report::balance_sheet_scoped(db, &ctx.company_id, &input.as_of, &scope)
             .await
             .map_err(|err| domain(&err))?;
         Ok(Plan::with_output(BalanceSheetOutput {
@@ -2387,6 +2780,9 @@ pub struct DimensionBalanceInput {
     pub dimension: String,
     /// The VAT period, `YYYY-MM`.
     pub period: String,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// One dimension value's balance.
@@ -2441,12 +2837,14 @@ impl Command for ReportsAccountBalanceByDimension {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         check_period(&input.period)?;
-        let rows = report::account_balance_by_dimension(
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let rows = report::account_balance_by_dimension_scoped(
             db,
             &ctx.company_id,
             &input.account,
             &input.dimension,
             &input.period,
+            &scope,
         )
         .await
         .map_err(|err| domain(&err))?;
@@ -2459,6 +2857,223 @@ impl Command for ReportsAccountBalanceByDimension {
                 .map(|row| DimensionValueView {
                     dimension_value: row.dimension_value,
                     balance: SerializableAmount::from(row.balance),
+                })
+                .collect(),
+        }))
+    }
+}
+
+/// The input of `reports.trends`: a month range and an optional dimension
+/// kind to split revenue and expenses by.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TrendsInput {
+    /// The first month, `YYYY-MM`.
+    pub from: String,
+    /// The last month, `YYYY-MM`, inclusive. At most 120 months after `from`.
+    pub to: String,
+    /// The dimension kind to split by: `cost_centre`, `project` or `unit`.
+    #[serde(default)]
+    pub dimension: Option<String>,
+    /// The reporting scope: a unit code, or `all` (the default: consolidated).
+    #[serde(default)]
+    pub unit: Option<String>,
+}
+
+/// One month of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrendMonthView {
+    /// The month, `YYYY-MM`.
+    pub period: String,
+    /// Income for the month.
+    pub revenue: SerializableAmount,
+    /// Expenses for the month.
+    pub expenses: SerializableAmount,
+    /// Revenue minus expenses.
+    pub net_result: SerializableAmount,
+    /// Cash and bank balance at month end.
+    pub cash: SerializableAmount,
+    /// Receivables balance at month end.
+    pub receivables: SerializableAmount,
+    /// Payables balance at month end, as a positive amount owed.
+    pub payables: SerializableAmount,
+}
+
+/// One ranked expense account of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ExpenseAccountView {
+    /// The account number.
+    pub account: String,
+    /// The account's name key.
+    pub name_key: String,
+    /// The account's expenses in the range.
+    pub amount: SerializableAmount,
+    /// Share of the range's expenses in basis points (1/100 of a percent).
+    pub share_bps: i64,
+}
+
+/// Revenue and expenses of one dimension value in `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DimensionShareView {
+    /// The dimension value's code.
+    pub code: String,
+    /// The dimension value's name.
+    pub name: String,
+    /// Income tagged with the value.
+    pub revenue: SerializableAmount,
+    /// Expenses tagged with the value.
+    pub expenses: SerializableAmount,
+}
+
+/// One month of entries posted, by actor, in `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ActivityMonthView {
+    /// The month, `YYYY-MM`.
+    pub period: String,
+    /// Entries posted by an agent key.
+    pub agent: i64,
+    /// Entries posted by a person.
+    pub human: i64,
+}
+
+/// The output of `reports.trends`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrendsOutput {
+    /// The company's base currency code.
+    pub currency: String,
+    /// The first month reported.
+    pub from: String,
+    /// The last month reported.
+    pub to: String,
+    /// One row per month, in order.
+    pub months: Vec<TrendMonthView>,
+    /// The largest expense accounts in the range.
+    pub top_expense_accounts: Vec<ExpenseAccountView>,
+    /// The dimension kind the split is by, when one was asked for.
+    pub dimension: Option<String>,
+    /// Revenue and expenses per dimension value; empty without a dimension.
+    pub by_dimension: Vec<DimensionShareView>,
+    /// Entries posted per month by actor; months with none are left out.
+    pub activity: Vec<ActivityMonthView>,
+}
+
+/// The longest range `reports.trends` answers, in months.
+pub const TRENDS_MAX_MONTHS: usize = 120;
+
+/// The dimension kinds a trend report can split by.
+const TREND_DIMENSIONS: [&str; 3] = ["cost_centre", "project", "unit"];
+
+/// `reports.trends`: monthly revenue, expenses, net result, cash, receivables
+/// and payables over a range, the top expense accounts, and an optional split
+/// by dimension (`GET /v1/reports/trends?from=YYYY-MM&to=YYYY-MM`).
+pub struct ReportsTrends;
+
+#[async_trait]
+impl Command for ReportsTrends {
+    const NAME: &'static str = "reports.trends";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = TrendsInput;
+    type Output = TrendsOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        check_period(&input.from)?;
+        check_period(&input.to)?;
+        let months = report::month_range(&input.from, &input.to).ok_or_else(|| {
+            CommandError::InvalidInput(format!(
+                "from {:?} must not be after to {:?}",
+                input.from, input.to
+            ))
+        })?;
+        if months.len() > TRENDS_MAX_MONTHS {
+            return Err(CommandError::InvalidInput(format!(
+                "a trend range covers at most {TRENDS_MAX_MONTHS} months"
+            )));
+        }
+        let dimension = input.dimension.as_deref().filter(|kind| !kind.is_empty());
+        if let Some(kind) = dimension
+            && !TREND_DIMENSIONS.contains(&kind)
+        {
+            return Err(CommandError::InvalidInput(format!(
+                "{kind:?} is not a dimension kind (cost_centre, project or unit)"
+            )));
+        }
+        let scope = resolve_scope(db, &ctx.company_id, input.unit.as_deref()).await?;
+        let trends = report::trends_scoped(
+            db,
+            &ctx.company_id,
+            &input.from,
+            &input.to,
+            dimension,
+            &scope,
+        )
+        .await
+        .map_err(|err| domain(&err))?;
+        let currency = trends
+            .months
+            .first()
+            .map(|month| SerializableAmount::from(month.revenue).currency)
+            .unwrap_or_default();
+        Ok(Plan::with_output(TrendsOutput {
+            currency,
+            from: trends.from,
+            to: trends.to,
+            months: trends
+                .months
+                .into_iter()
+                .map(|month| TrendMonthView {
+                    period: month.period,
+                    revenue: SerializableAmount::from(month.revenue),
+                    expenses: SerializableAmount::from(month.expenses),
+                    net_result: SerializableAmount::from(month.net_result),
+                    cash: SerializableAmount::from(month.cash),
+                    receivables: SerializableAmount::from(month.receivables),
+                    payables: SerializableAmount::from(month.payables),
+                })
+                .collect(),
+            top_expense_accounts: trends
+                .top_expense_accounts
+                .into_iter()
+                .map(|account| ExpenseAccountView {
+                    account: account.account_code,
+                    name_key: account.name_key,
+                    amount: SerializableAmount::from(account.amount),
+                    share_bps: account.share_bps,
+                })
+                .collect(),
+            dimension: trends.dimension,
+            by_dimension: trends
+                .by_dimension
+                .into_iter()
+                .map(|share| DimensionShareView {
+                    code: share.code,
+                    name: share.name,
+                    revenue: SerializableAmount::from(share.revenue),
+                    expenses: SerializableAmount::from(share.expenses),
+                })
+                .collect(),
+            activity: trends
+                .activity
+                .into_iter()
+                .map(|month| ActivityMonthView {
+                    period: month.period,
+                    agent: month.agent,
+                    human: month.human,
                 })
                 .collect(),
         }))

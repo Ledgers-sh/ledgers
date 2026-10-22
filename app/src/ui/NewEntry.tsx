@@ -7,19 +7,22 @@ import { formatMinor, parseMajorToMinor } from '../lib/money';
 import { todayIso, yearOf } from '../lib/period';
 import { useAsync } from '../hooks';
 import { loadCurrency, saveCurrency, useSession } from '../session';
+import { accountNeedsUnit, colourOf } from '../lib/units';
 import { Empty, ErrorBanner, PageHead, Skeleton } from './common';
-import { accountName, intlLocale, t, tRich } from '../i18n';
+import { accountName, intlLocale, t, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { entryRef } from './Journal';
+import { Select } from './Select';
 
 const DEFAULT_JOURNAL = 'general';
 
-function newLine(side: 'debit' | 'credit'): DraftLine {
-  return { account: '', side, amount: '', memo: '' };
+function newLine(side: 'debit' | 'credit', unit: string): DraftLine {
+  return { account: '', side, amount: '', memo: '', unit };
 }
 
 export function NewEntry() {
-  const { client, period, currency: sessionCurrency, setCurrency, online, toast } = useSession();
+  const { client, period, currency: sessionCurrency, setCurrency, online, toast, unit: scopeUnit, units } = useSession();
+  const unitsEnabled = units.length > 0;
   const accounts = useAsync(async () => (await accountsList(client)).accounts, [client.baseUrl, client.apiKey]);
   const postable = useMemo(
     () => (accounts.data ?? []).filter((account) => account.is_postable && !account.archived).sort((a, b) => a.number.localeCompare(b.number)),
@@ -31,7 +34,8 @@ export function NewEntry() {
   const [date, setDate] = useState(todayIso());
   const [description, setDescription] = useState('');
   const [currency, setCurrencyState] = useState(sessionCurrency || loadCurrency());
-  const [lines, setLines] = useState<DraftLine[]>([newLine('debit'), newLine('credit')]);
+  // New lines take the unit the switcher shows, so a unit's entries are posted from its own screen.
+  const [lines, setLines] = useState<DraftLine[]>(() => [newLine('debit', scopeUnit ?? ''), newLine('credit', scopeUnit ?? '')]);
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // One key per form instance: a retried submit reuses it, so the server can de-duplicate.
@@ -49,6 +53,12 @@ export function NewEntry() {
     if (minors[i] === 0n) return t('new.error_amount_zero');
     return null;
   });
+  // Once the company has units, income, expense and inter-unit lines must name one. The check runs on every
+  // render so a submit is never sent without it; the message shows once the person has tried to post.
+  const missingUnit = lines.map(
+    (line) => unitsEnabled && line.unit === '' && accountNeedsUnit(postable.find((account) => account.number === line.account)),
+  );
+  const unitErrors = lines.map((_, i) => (touched && missingUnit[i] ? t('units.err_line') : null));
   const descriptionError = touched && description.trim() === '' ? t('new.error_description') : null;
   const currencyError = touched && !currencyValid ? t('new.error_currency') : null;
   const fyError = touched && (!Number.isInteger(fiscalYear) || fiscalYear < 1900) ? t('new.error_fiscal_year') : null;
@@ -59,6 +69,7 @@ export function NewEntry() {
     currencyError === null &&
     fyError === null &&
     lineErrors.every((error) => error === null) &&
+    !missingUnit.some(Boolean) &&
     journalId.trim() !== '';
   const difference = balance.difference;
   const offBy = difference < 0n ? -difference : difference;
@@ -176,45 +187,48 @@ export function NewEntry() {
 
             <fieldset class="lines" style={{ border: 0, padding: 0, margin: 0 }}>
               <legend class="sr-only">{t('new.lines')}</legend>
-              <div class="line-head" aria-hidden="true">
+              <div class={`line-head${unitsEnabled ? ' with-units' : ''}`} aria-hidden="true">
                 <span>{t('new.line_account')}</span>
                 <span>{t('new.col_side')}</span>
                 <span>{t('term.amount')}</span>
+                {unitsEnabled && <span>{t('units.field')}</span>}
                 <span>{t('new.col_memo')}</span>
                 <span />
               </div>
               {lines.map((line, index) => (
-                <div class="line-row" key={index}>
-                  <label class="field account">
+                <div class={`line-row${unitsEnabled ? ' with-units' : ''}`} key={index}>
+                  <div class="field account">
                     <span class="label-sm">{t('new.line_account')}</span>
-                    <select
-                      class="input"
+                    <Select
+                      id={`line-account-${index}`}
+                      label={t('new.line_account_aria', { n: index + 1 })}
                       value={line.account}
-                      aria-label={t('new.line_account_aria', { n: index + 1 })}
-                      aria-invalid={touched && line.account === '' ? 'true' : undefined}
-                      onChange={(e) => update(index, { account: (e.target as HTMLSelectElement).value })}
-                    >
-                      <option value="">{t('new.choose_account')}</option>
-                      {postable.map((account) => (
-                        <option key={account.number} value={account.number}>
-                          {account.number} · {accountName(account.name_key)}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder={t('new.choose_account')}
+                      invalid={touched && line.account === ''}
+                      options={postable.map((account) => ({
+                        value: account.number,
+                        label: accountName(account.name_key),
+                        hint: account.number,
+                        group: t(`accountType.${account.account_type}` as MessageKey),
+                      }))}
+                      onChange={(value) => update(index, { account: value })}
+                    />
                     {lineErrors[index] && line.account === '' && <span class="field-error">{lineErrors[index]}</span>}
-                  </label>
-                  <label class="field side">
+                  </div>
+                  <div class="field side">
                     <span class="label-sm">{t('new.col_side')}</span>
-                    <select
-                      class="input"
+                    <Select
+                      id={`line-side-${index}`}
+                      label={t('new.line_side_aria', { n: index + 1 })}
                       value={line.side}
-                      aria-label={t('new.line_side_aria', { n: index + 1 })}
-                      onChange={(e) => update(index, { side: (e.target as HTMLSelectElement).value as 'debit' | 'credit' })}
-                    >
-                      <option value="debit">{t('new.side_debit')}</option>
-                      <option value="credit">{t('new.side_credit')}</option>
-                    </select>
-                  </label>
+                      searchable={false}
+                      options={[
+                        { value: 'debit', label: t('new.side_debit') },
+                        { value: 'credit', label: t('new.side_credit') },
+                      ]}
+                      onChange={(value) => update(index, { side: value as 'debit' | 'credit' })}
+                    />
+                  </div>
                   <label class="field amount">
                     <span class="label-sm">{t('term.amount')}</span>
                     <input
@@ -229,6 +243,22 @@ export function NewEntry() {
                     />
                     {lineErrors[index] && line.account !== '' && <span class="field-error">{lineErrors[index]}</span>}
                   </label>
+                  {unitsEnabled && (
+                    <div class="field unit">
+                      <span class="label-sm">{t('units.field')}</span>
+                      <Select
+                        id={`line-unit-${index}`}
+                        label={t('units.line_unit_aria', { n: index + 1 })}
+                        value={line.unit}
+                        placeholder={t('units.choose_unit')}
+                        invalid={unitErrors[index] !== null}
+                        options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                        searchable={false}
+                        onChange={(value) => update(index, { unit: value })}
+                      />
+                      {unitErrors[index] && <span class="field-error">{unitErrors[index]}</span>}
+                    </div>
+                  )}
                   <label class="field memo">
                     <span class="label-sm">{t('new.col_memo')}</span>
                     <input
@@ -251,7 +281,7 @@ export function NewEntry() {
                 </div>
               ))}
               <div>
-                <button type="button" class="btn btn-sm" onClick={() => setLines((prev) => [...prev, newLine('debit')])}>
+                <button type="button" class="btn btn-sm" onClick={() => setLines((prev) => [...prev, newLine('debit', scopeUnit ?? '')])}>
                   {t('new.add_line')}
                 </button>
               </div>

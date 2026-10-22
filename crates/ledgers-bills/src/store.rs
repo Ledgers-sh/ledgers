@@ -44,6 +44,8 @@ pub struct BillRow {
     pub source: String,
     /// The reader that produced the fields, when one did.
     pub reader: Option<String>,
+    /// The business unit the bill's expense lines carry, when one is named.
+    pub unit: Option<String>,
     /// The posted entry, once posted.
     pub posted_entry_id: Option<String>,
     /// When a person discarded the draft.
@@ -59,7 +61,7 @@ pub struct BillRow {
 /// The columns a bill read selects, with the vendor joined.
 pub const BILL_SELECT: &str = "SELECT b.id, b.document_id, b.vendor_id, b.invoice_number, b.invoice_date, \
      b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.lines_json, b.confidence_json, b.checks_json, \
-     b.instruction_flags, b.iban_changed, b.source, b.reader, b.posted_entry_id, b.discarded_at, b.created_by, \
+     b.instruction_flags, b.iban_changed, b.source, b.reader, b.unit_code, b.posted_entry_id, b.discarded_at, b.created_by, \
      b.created_at, b.updated_at, v.name AS vendor_name, v.vat_id AS vendor_vat_id, v.iban AS vendor_iban, \
      v.needs_review AS vendor_needs_review FROM bill b JOIN vendor v ON v.id = b.vendor_id";
 
@@ -100,6 +102,7 @@ fn from_row(row: &Row) -> Result<BillRow, DbError> {
         iban_changed: row.get::<i64>("iban_changed").unwrap_or(0) == 1,
         source: text(row, "source")?,
         reader: row.get::<Option<String>>("reader").flatten(),
+        unit: row.get::<Option<String>>("unit_code").flatten(),
         posted_entry_id: row.get::<Option<String>>("posted_entry_id").flatten(),
         discarded_at: row.get::<Option<String>>("discarded_at").flatten(),
         created_by: text(row, "created_by")?,
@@ -133,12 +136,21 @@ pub async fn list_bills(
     db: &dyn Database,
     company_id: &str,
     limit: u32,
+    unit: Option<&str>,
 ) -> Result<Vec<BillRow>, DbError> {
+    // A unit scope keeps the bills that carry that unit; consolidated keeps all.
+    let (condition, mut values) = match unit {
+        Some(code) => (" AND b.unit_code = ?", vec![Value::from(code)]),
+        None => ("", Vec::new()),
+    };
+    let mut all = vec![Value::from(company_id)];
+    all.append(&mut values);
+    all.push(Value::from(i64::from(limit)));
     let stmt = Statement::with_values(
         format!(
-            "{BILL_SELECT} WHERE b.company_id = ? ORDER BY b.created_at DESC, b.id DESC LIMIT ?"
+            "{BILL_SELECT} WHERE b.company_id = ?{condition} ORDER BY b.created_at DESC, b.id DESC LIMIT ?"
         ),
-        vec![Value::from(company_id), Value::from(i64::from(limit))],
+        all,
     );
     let rows = db.query(&stmt).await?;
     rows.rows.iter().map(from_row).collect()
@@ -184,13 +196,13 @@ pub async fn bill_for_invoice(
     Ok(rows.first().and_then(|row| row.get::<String>("id")))
 }
 
-/// Every vendor in `company_id`.
+/// Every unmerged vendor (party) in `company_id`.
 ///
 /// # Errors
 /// A database error.
 pub async fn vendors(db: &dyn Database, company_id: &str) -> Result<Vec<VendorView>, DbError> {
     let stmt = Statement::with_values(
-        "SELECT id, name, vat_id, iban, needs_review FROM vendor WHERE company_id = ? ORDER BY name, id".to_owned(),
+        "SELECT id, name, vat_id, iban, needs_review FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY name, id".to_owned(),
         vec![Value::from(company_id)],
     );
     let rows = db.query(&stmt).await?;

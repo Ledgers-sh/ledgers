@@ -82,6 +82,7 @@ pub mod report;
 pub mod reversal;
 pub mod store;
 pub mod surface;
+pub mod units;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
 pub use chart::{ChartAccount, ChartTemplate};
@@ -93,7 +94,7 @@ pub use commands::ImportReport;
 pub use entry::{Entry, EntryDraft, Fx, JournalError, Line, Side};
 pub use error::AccountsError;
 pub use fiscal::{FiscalYear, FiscalYearSpec};
-pub use i18n::{I18N_DE_TOML, I18N_EN_TOML, I18N_ID_TOML};
+pub use i18n::{I18N_DE_TOML, I18N_EN_TOML, I18N_ID_TOML, I18N_NL_TOML};
 pub use journal::{Journal, JournalDraft, JournalKind};
 pub use journal_port::{AccountBalance, BoxFuture, Journal as JournalPort, NewEntry, NewEntryLine};
 pub use ledger_journal::EntryJournal;
@@ -121,6 +122,17 @@ pub const GENERIC_SME_TOML: &str = include_str!(concat!(
 pub const DE_HGB_TOML: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../templates/de-hgb.toml"
+));
+
+/// The Dutch sole-trader chart on RGS 3.7 (`templates/nl-rgs-ez.toml`).
+pub const NL_RGS_EZ_TOML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../templates/nl-rgs-ez.toml"
+));
+/// The Dutch private-company chart on RGS 3.7 (`templates/nl-rgs-bv.toml`).
+pub const NL_RGS_BV_TOML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../templates/nl-rgs-bv.toml"
 ));
 
 /// The chart, fiscal-year and journal migrations, in apply order: the
@@ -166,6 +178,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0008",
         "account_display_name",
         include_str!("../migrations/sqlite/0008_account_display_name.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0009",
+        "units",
+        include_str!("../migrations/sqlite/0009_units.sql"),
     ),
 ];
 
@@ -214,6 +231,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "account_display_name",
         include_str!("../migrations/postgres/0008_account_display_name.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0009",
+        "units",
+        include_str!("../migrations/postgres/0009_units.sql"),
+    ),
 ];
 
 // Compile-time check on both sets: ids run contiguously from 0001 in
@@ -239,6 +261,22 @@ pub fn de_hgb_template() -> Result<chart::ChartTemplate, error::AccountsError> {
     chart::parse_chart(DE_HGB_TOML)
 }
 
+/// The bundled Dutch sole-trader chart on RGS 3.7, parsed.
+///
+/// # Errors
+/// [`AccountsError::Template`] when the file no longer parses.
+pub fn nl_rgs_ez_template() -> Result<chart::ChartTemplate, error::AccountsError> {
+    chart::parse_chart(NL_RGS_EZ_TOML)
+}
+
+/// The bundled Dutch private-company chart on RGS 3.7, parsed.
+///
+/// # Errors
+/// [`AccountsError::Template`] when the file no longer parses.
+pub fn nl_rgs_bv_template() -> Result<chart::ChartTemplate, error::AccountsError> {
+    chart::parse_chart(NL_RGS_BV_TOML)
+}
+
 /// The bundled SKR03 and SKR04 number mappings, parsed. Validation
 /// against the German chart is [`mapping::NumberMapping::validate_against`],
 /// run by the integration tests for the bundled pair.
@@ -261,7 +299,7 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 8);
+            assert_eq!(set.len(), 9);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
@@ -278,6 +316,8 @@ mod tests {
             assert_eq!(set[6].name, "dimensions");
             assert_eq!(set[7].id, "0008");
             assert_eq!(set[7].name, "account_display_name");
+            assert_eq!(set[8].id, "0009");
+            assert_eq!(set[8].name, "units");
         }
     }
 
@@ -303,6 +343,9 @@ mod tests {
             ("i18n/en.toml", I18N_EN_TOML),
             ("i18n/de.toml", I18N_DE_TOML),
             ("i18n/id.toml", I18N_ID_TOML),
+            ("i18n/nl.toml", I18N_NL_TOML),
+            ("nl-rgs-ez.toml", NL_RGS_EZ_TOML),
+            ("nl-rgs-bv.toml", NL_RGS_BV_TOML),
         ] {
             assert!(!text.trim().is_empty(), "{name} is empty");
         }

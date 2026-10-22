@@ -1,0 +1,56 @@
+# United States: no federal VAT or GST. Sales tax is levied by state, county
+# and city, and the rate depends on where the buyer is. Ledgers records sales
+# tax as a liability on each sale, at the rates the company enters (there is
+# no statutory table here, and none is shipped).
+#
+# Sources:
+#   No federal VAT or GST: not re-verified in the 2026-10-23 check (TODO: cite IRS/Treasury).
+#   EIN format NN-NNNNNNN (nine digits): IRS, Form SS-4 instructions, https://www.irs.gov/pub/irs-pdf/iss4.pdf
+#
+# TODO: the sales-tax return is state-specific; the generic return (output,
+#   input, net) is what the core drafts for now.
+
+id = "us"
+iso = "US"
+covers = ["US"]
+name = "United States"
+native_name = "United States"
+currency = "USD"
+fiscal_year_start_month = 1
+decimal_separator = "."
+thousands_separator = ","
+date_format = "MM/DD/YYYY"
+chart = "generic-sme"
+regime = "sales_tax"
+rounding = "per_line"
+user_rates = true
+
+[registration]
+label = "EIN"
+validator = "us-ein"
+note = "Nine digits, written NN-NNNNNNN. The campus prefix list is not checked."
+
+[[tax_codes]]
+code = "US-SALES-TAX"
+label = "Taxable sale (sales tax at company rate)"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "US-EXEMPT"
+label = "Exempt sale"
+kind = "exempt"
+category = "exempt"
+
+[[tax_codes]]
+code = "US-PURCHASE"
+label = "Purchase (sales tax paid, not reclaimable)"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "Sales tax summary (generic)"
+kind = "generic"
