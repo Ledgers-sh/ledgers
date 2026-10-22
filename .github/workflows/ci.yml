@@ -114,6 +114,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.98.1"
+      - name: Test guard checks
+        run: bash tools/test-guards.sh
       - name: Open-core boundary (docs/adr/0002)
         run: bash tools/check-boundary.sh
       - name: Harness pins - exactly one cratefield-core (docs/adr/0001)
