@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, buildUrl, kindForStatus } from './client';
 import {
   accountsList,
-  billsMatch,
   entriesGet,
   entriesList,
   entriesPost,
@@ -100,14 +99,6 @@ describe('request building', () => {
     expect(captured[3].url).toBe(
       'http://127.0.0.1:3000/v1/reports/account-balance-by-dimension?account=6000&dimension=cost-centre&period=2026-10',
     );
-  });
-
-  it('posts bills.match to the match path for the bill id', async () => {
-    const { fetchImpl, captured } = fakeFetch(200, { status: 'matched' });
-    const result = await billsMatch(config(fetchImpl), 'bill 7');
-    expect(result).toEqual({ status: 'matched' });
-    expect(captured[0].url).toBe('http://127.0.0.1:3000/v1/bills/bill%207/match');
-    expect(captured[0].init.method).toBe('POST');
   });
 
   it('buildUrl skips empty query values', () => {

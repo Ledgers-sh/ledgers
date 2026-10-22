@@ -1,239 +1,233 @@
-//! Integration tests for document upload streaming.
+//! Integration tests for document upload, dedupe and signed download links
+//! (issue #20). The fixture is the real server stack over SQLite, with an
+//! in-memory blob store.
 
-use bytes::Bytes;
-use cratefield_core::{
-    UlidIdGen,
-    axum::{
-        self,
-        body::Body,
-        http::{HeaderValue, Method, Request, StatusCode, header},
-        response::Response,
-    },
-};
-use cratefield_testing::{MemoryBlob, TestHarness};
-use futures_core::Stream;
-use ledgers_server::documents::DocumentsModule;
+mod common;
+
+use common::{COMPANY, Fixture, fixture};
+use cratefield_core::axum::http::{Method, StatusCode};
+use ledgers_documents::sign;
 use serde_json::Value;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tower::ServiceExt;
 
-/// A chunked request body: a `Vec<Bytes>` drained one chunk per poll.
-struct Chunks {
-    items: std::vec::IntoIter<Bytes>,
+/// A raw reply from the router: the status and the body bytes.
+struct Got {
+    status: StatusCode,
+    body: Vec<u8>,
 }
 
-impl Stream for Chunks {
-    type Item = Result<Bytes, std::convert::Infallible>;
+const DOC_KEY: &[u8] = common::DOCUMENT_KEY;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.get_mut().items.next().map(Ok))
-    }
+/// The fixture: the real stack, with the documents module mounted.
+fn fx() -> Fixture {
+    fixture()
 }
 
-/// A simple test response wrapper
-struct TestResponse {
-    pub status: StatusCode,
-    pub body: Bytes,
+/// A valid invented one-page PDF with a text layer.
+fn invoice_pdf() -> Vec<u8> {
+    ledgers_extract::fixture::pdf_with_text(&[
+        "Halden Works GmbH",
+        "Invoice No: RE-2026-0042",
+        "Total 119,00 EUR",
+    ])
 }
 
-impl TestResponse {
-    pub fn json(&self) -> Value {
-        serde_json::from_slice(&self.body).expect("valid JSON")
-    }
-
-    pub async fn from_response(response: Response) -> Self {
-        let status = response.status();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("read body");
-        TestResponse { status, body }
-    }
-}
-
-/// Helper to make a POST upload request with chunked body and custom content-type
-async fn upload_with_content_type(
-    harness: &TestHarness,
-    chunks: Vec<Bytes>,
-    content_type: &str,
-) -> TestResponse {
-    let body = Body::from_stream(Chunks {
-        items: chunks.into_iter(),
-    });
-    let request = Request::builder()
+/// Uploads `body` with `key` and the declared `content_type`.
+fn upload(fx: &Fixture, key: &str, body: &[u8], content_type: &str) -> Got {
+    let request = cratefield_core::axum::http::Request::builder()
         .method(Method::POST)
         .uri("/v1/documents/upload")
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_str(content_type).unwrap(),
-        )
-        .body(body)
+        .header("authorization", format!("Bearer {key}"))
+        .header("content-type", content_type)
+        .header("x-file-name", "Rechnung-0042.pdf")
+        .body(cratefield_core::axum::body::Body::from(body.to_vec()))
         .expect("request builds");
-
-    let response = harness
-        .router
-        .clone()
-        .oneshot(request)
-        .await
+    let response = pollster::block_on(tower::ServiceExt::oneshot(fx.router().clone(), request))
         .expect("router answers");
-    TestResponse::from_response(response).await
+    let status = response.status();
+    let bytes = pollster::block_on(cratefield_core::axum::body::to_bytes(
+        response.into_body(),
+        usize::MAX,
+    ))
+    .expect("body");
+    Got {
+        status,
+        body: bytes.to_vec(),
+    }
 }
 
-/// Helper to make a POST upload request with chunked body (defaults to application/pdf)
-async fn upload(harness: &TestHarness, chunks: Vec<Bytes>) -> TestResponse {
-    upload_with_content_type(harness, chunks, "application/pdf").await
+fn json_of(response: &Got) -> Value {
+    serde_json::from_slice(&response.body).unwrap_or(Value::Null)
 }
 
-#[tokio::test]
-async fn upload_1kb_pdf_succeeds() {
-    let modules: Vec<Box<dyn cratefield_core::Module>> = vec![
-        Box::new(ledgers_storage::StorageModule),
-        Box::new(DocumentsModule::new()),
-    ];
-    let harness = TestHarness::with_ports(modules, |ports| {
-        ports.blob = Some(Arc::new(MemoryBlob::new()));
-        ports.id_gen = Some(Arc::new(UlidIdGen));
-    });
-
-    // Create a 1 KiB invented PDF
-    let mut pdf_bytes = b"%PDF-1.7\n".to_vec();
-    pdf_bytes.resize(1024, b'X');
-
-    // Upload as single chunk
-    let response = upload(&harness, vec![Bytes::from(pdf_bytes)]).await;
-
-    assert_eq!(response.status, StatusCode::CREATED);
-    let body = response.json();
-    assert_eq!(body["bytes"], 1024);
-    assert!(body["key"].as_str().unwrap().starts_with("documents/doc_"));
-    assert_eq!(body["content_type"], "application/pdf");
+#[test]
+fn a_pdf_is_stored_once_with_its_hash_and_uploader() {
+    let fx = fx();
+    let pdf = invoice_pdf();
+    let response = upload(&fx, &fx.keys.draft, &pdf, "application/pdf");
+    assert_eq!(
+        response.status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&response.body)
+    );
+    let body = json_of(&response);
+    assert_eq!(body["duplicate"], false);
+    let document = &body["document"];
+    assert_eq!(document["size_bytes"], pdf.len());
+    assert_eq!(document["mime"], "application/pdf");
+    assert_eq!(document["original_name"], "Rechnung-0042.pdf");
+    assert_eq!(document["retention_class"], "ten-years");
+    assert!(
+        document["uploaded_by"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("agent:")
+    );
+    let sha = document["sha256"].as_str().expect("hash").to_owned();
+    assert_eq!(sha.len(), 64);
+    // The original is kept under its hash: the download link serves the same bytes.
+    let id = document["id"].as_str().expect("id").to_owned();
+    let link = fx.send(
+        Method::GET,
+        &format!("/v1/documents/{id}/url"),
+        &fx.keys.read,
+        None,
+    );
+    let url = link.json()["url"].as_str().expect("url").to_owned();
+    let served = fx.send_anonymous(Method::GET, &url, None);
+    assert_eq!(served.body().as_ref(), pdf.as_slice());
 }
 
-#[tokio::test]
-async fn upload_11mb_pdf_without_opt_in_returns_413() {
-    let modules: Vec<Box<dyn cratefield_core::Module>> = vec![
-        Box::new(ledgers_storage::StorageModule),
-        Box::new(DocumentsModule::new()),
-    ];
-    let harness = TestHarness::with_ports(modules, |ports| {
-        ports.blob = Some(Arc::new(MemoryBlob::new()));
-        ports.id_gen = Some(Arc::new(UlidIdGen));
-    });
+#[test]
+fn the_same_file_twice_is_one_document_and_two_upload_events() {
+    let fx = fx();
+    let pdf = invoice_pdf();
+    let first = json_of(&upload(&fx, &fx.keys.draft, &pdf, "application/pdf"));
+    let second_response = upload(&fx, &fx.keys.draft, &pdf, "application/pdf");
+    assert_eq!(second_response.status, StatusCode::OK);
+    let second = json_of(&second_response);
+    assert_eq!(second["duplicate"], true);
+    assert!(
+        second["warning"]
+            .as_str()
+            .unwrap_or("")
+            .contains("already stored")
+    );
+    assert_eq!(first["document"]["id"], second["document"]["id"]);
 
-    // Create an 11 MiB invented PDF (exceeds default 10 MiB cap)
-    let mut pdf_bytes = b"%PDF-1.7\n".to_vec();
-    pdf_bytes.resize(11 * 1024 * 1024, b'X');
+    let events = pollster::block_on(fx.deps.db.query(&cratefield_core::Statement::with_values(
+        "SELECT COUNT(*) AS n FROM document_upload_event WHERE document_id = ?".to_owned(),
+        vec![sea_query::Value::from(
+            first["document"]["id"].as_str().unwrap_or(""),
+        )],
+    )))
+    .expect("count");
+    assert_eq!(events.first().and_then(|r| r.get::<i64>("n")), Some(2));
+    let documents = pollster::block_on(fx.deps.db.query(&cratefield_core::Statement::with_values(
+        "SELECT COUNT(*) AS n FROM document WHERE company_id = ?".to_owned(),
+        vec![sea_query::Value::from(COMPANY)],
+    )))
+    .expect("count documents");
+    assert_eq!(documents.first().and_then(|r| r.get::<i64>("n")), Some(1));
+}
 
-    // Upload in multiple chunks to exercise streaming
-    let chunks = pdf_bytes
-        .chunks(1024 * 1024)
-        .map(Bytes::copy_from_slice)
-        .collect();
+#[test]
+fn an_executable_renamed_to_pdf_is_refused_by_its_bytes() {
+    let fx = fx();
+    let elf = b"\x7fELF\x02\x01\x01\x00 not a pdf at all".to_vec();
+    let response = upload(&fx, &fx.keys.draft, &elf, "application/pdf");
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert!(
+        json_of(&response)["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("PDF, PNG and JPEG")
+    );
+}
 
-    let response = upload(&harness, chunks).await;
+#[test]
+fn a_declared_type_that_does_not_match_the_bytes_is_refused() {
+    let fx = fx();
+    let response = upload(&fx, &fx.keys.draft, &invoice_pdf(), "image/png");
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert!(
+        json_of(&response)["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not match")
+    );
+}
 
-    // Should get 413 Payload Too Large
+#[test]
+fn an_eleven_mebibyte_file_is_refused_as_too_large() {
+    let fx = fx();
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    pdf.resize(11 * 1024 * 1024, b'X');
+    let response = upload(&fx, &fx.keys.draft, &pdf, "application/pdf");
     assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
 }
 
-#[tokio::test]
-async fn upload_html_returns_415() {
-    let modules = vec![
-        Box::new(ledgers_storage::StorageModule) as Box<dyn cratefield_core::Module>,
-        Box::new(ledgers_server::documents::DocumentsModule::new()),
-    ];
-    let harness = TestHarness::with_ports(modules, |ports| {
-        ports.blob = Some(Arc::new(MemoryBlob::new()));
-        ports.id_gen = Some(Arc::new(UlidIdGen));
-    });
-
-    // Create some HTML content
-    let html_bytes = b"<html><body>test</body></html>".to_vec();
-
-    // Try to upload with unsupported content-type
-    let response =
-        upload_with_content_type(&harness, vec![Bytes::from(html_bytes)], "text/html").await;
-
-    // Should get 415 Unsupported Media Type
-    assert_eq!(response.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-}
-
-#[tokio::test]
-async fn upload_25mb_pdf_with_large_blob_opt_in_succeeds() {
-    // Create a module with large blob enabled (25 MB is < 33 MB limit)
-    struct TestConfig;
-    impl cratefield_core::Config for TestConfig {
-        fn get(&self, key: &str) -> Option<String> {
-            if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                Some("33554432".to_string()) // 32 MiB
-            } else {
-                None
-            }
-        }
-    }
-
-    let modules = vec![
-        Box::new(ledgers_storage::StorageModule) as Box<dyn cratefield_core::Module>,
-        Box::new(ledgers_server::documents::DocumentsModule::from_config(&TestConfig).unwrap()),
-    ];
-    let harness = TestHarness::with_ports(modules, |ports| {
-        ports.blob = Some(Arc::new(MemoryBlob::new()));
-        ports.id_gen = Some(Arc::new(UlidIdGen));
-    });
-
-    // Create a 25 MiB invented PDF
-    let mut pdf_bytes = b"%PDF-1.7\n".to_vec();
-    pdf_bytes.resize(25_000_000, b'X');
-
-    // Upload in multiple chunks
-    let chunks = pdf_bytes
-        .chunks(1024 * 1024)
-        .map(Bytes::copy_from_slice)
-        .collect();
-
-    let response = upload(&harness, chunks).await;
-
-    assert_eq!(response.status, StatusCode::CREATED);
-    let body = response.json();
-    assert_eq!(body["bytes"], 25_000_000);
-    assert!(body["key"].as_str().unwrap().starts_with("documents/doc_"));
-    assert_eq!(body["content_type"], "application/pdf");
+#[test]
+fn a_read_tier_key_cannot_upload_and_no_credential_is_unauthenticated() {
+    let fx = fx();
+    let read = upload(&fx, &fx.keys.read, &invoice_pdf(), "application/pdf");
+    assert_eq!(read.status, StatusCode::FORBIDDEN);
+    let anonymous = fx.send_anonymous(Method::POST, "/v1/documents/upload", Some("{}"));
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
 }
 
 #[test]
-fn module_config_validation() {
-    // Test that invalid config is rejected
-    struct InvalidConfig;
-    impl cratefield_core::Config for InvalidConfig {
-        fn get(&self, key: &str) -> Option<String> {
-            if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                Some("not_a_number".to_string())
-            } else {
-                None
-            }
-        }
-    }
+fn a_download_link_serves_the_original_until_it_expires() {
+    let fx = fx();
+    let pdf = invoice_pdf();
+    let body = json_of(&upload(&fx, &fx.keys.draft, &pdf, "application/pdf"));
+    let id = body["document"]["id"].as_str().expect("id").to_owned();
+    let sha = body["document"]["sha256"].as_str().expect("sha").to_owned();
 
-    let result = ledgers_server::documents::DocumentsModule::from_config(&InvalidConfig);
-    assert!(result.is_err());
-}
+    let link = fx.send(
+        Method::GET,
+        &format!("/v1/documents/{id}/url"),
+        &fx.keys.read,
+        None,
+    );
+    assert_eq!(
+        link.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(link.body().as_ref())
+    );
+    let url = link.json()["url"].as_str().expect("url").to_owned();
+    assert!(url.starts_with(&format!("/v1/documents/{id}/file?expires=")));
 
-#[test]
-fn module_config_exceeds_ceiling() {
-    // Test that values exceeding harness ceiling are rejected
-    struct TooLargeConfig;
-    impl cratefield_core::Config for TooLargeConfig {
-        fn get(&self, key: &str) -> Option<String> {
-            if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                // Much larger than harness MAX_LARGE_BLOB_BYTES (5 GiB)
-                Some("99999999999999".to_string())
-            } else {
-                None
-            }
-        }
-    }
+    // The link works without any credential: the signature is the credential.
+    let served = fx.send_anonymous(Method::GET, &url, None);
+    assert_eq!(served.status, StatusCode::OK);
+    assert_eq!(served.body().as_ref(), pdf.as_slice());
 
-    let result = ledgers_server::documents::DocumentsModule::from_config(&TooLargeConfig);
-    assert!(result.is_err());
+    // Once the expiry passes, the same signature is refused.
+    let expired_at = 1_000;
+    let expired_sig = sign::sign(DOC_KEY, &id, &sha, expired_at);
+    let expired = fx.send_anonymous(
+        Method::GET,
+        &format!("/v1/documents/{id}/file?expires={expired_at}&signature={expired_sig}"),
+        None,
+    );
+    assert_eq!(expired.status, StatusCode::FORBIDDEN);
+    assert!(
+        expired.json()["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("expired")
+    );
+
+    // A forged signature, or a link moved to another document, is refused.
+    let forged = fx.send_anonymous(
+        Method::GET,
+        &format!(
+            "/v1/documents/{id}/file?expires={}&signature=00",
+            4_000_000_000i64
+        ),
+        None,
+    );
+    assert_eq!(forged.status, StatusCode::FORBIDDEN);
 }

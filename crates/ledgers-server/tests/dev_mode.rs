@@ -41,10 +41,13 @@ fn dev_mode_allows_the_local_web_origin() {
 
 #[test]
 fn outside_dev_mode_the_local_web_origin_is_not_allowed() {
-    let cfg = MapConfig(BTreeMap::from([(
-        "LEDGERS_COMPANY_ID",
-        "01PRODCOMPANY000000000000A",
-    )]));
+    let cfg = MapConfig(BTreeMap::from([
+        ("LEDGERS_COMPANY_ID", "01PRODCOMPANY000000000000A"),
+        (
+            "LEDGERS_DOCUMENT_SIGNING_KEY",
+            "prod-test-document-signing-key-0123456789",
+        ),
+    ]));
     let built = harness(&registry(), &cfg, runtime()).expect("production composes");
     assert!(
         !built

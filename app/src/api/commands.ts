@@ -10,7 +10,6 @@ import type {
   AccountWriteOutput,
   AccountsListOutput,
   BalanceSheetOutput,
-  BillsMatchOutput,
   EntriesListOutput,
   EntryRecord,
   KeysCreateInput,
@@ -169,18 +168,6 @@ export function reportsAccountBalanceByDimension(
     method: 'GET',
     path: '/v1/reports/account-balance-by-dimension',
     query: { account: params.account, dimension: params.dimension, period: params.period },
-  });
-}
-
-/**
- * POST /v1/bills/{id}/match (bills.match). Not in the registry yet, so the
- * response is returned as the server sends it.
- */
-export function billsMatch(config: Config, billId: string): Promise<BillsMatchOutput> {
-  return request<BillsMatchOutput>(config, {
-    method: 'POST',
-    path: `/v1/bills/${encodeURIComponent(billId)}/match`,
-    body: {},
   });
 }
 

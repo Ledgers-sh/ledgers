@@ -1,0 +1,25 @@
+[package]
+name = "ledgers-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+cratefield-text-guard = { workspace = true }
+ledgers-money = { workspace = true }
+lopdf = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+pollster = { workspace = true }
+
+[lints]
+workspace = true

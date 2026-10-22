@@ -1,0 +1,40 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 557 >>
+stream
+BT /F1 12 Tf 1 0 0 1 50 800 Tm (Halden Supplies GmbH) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 784 Tm (VAT ID: DE123456789) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 768 Tm (Invoice No: RE-2026-0042) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 752 Tm (Invoice date: 15.10.2026) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 736 Tm (Due date: 2026-11-14) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 720 Tm (IBAN DE89 3704 0044 0532 0130 00) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 704 Tm (Subtotal 1.000,00 EUR) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 688 Tm (VAT 19%: 190,00 EUR) Tj ET
+BT /F1 12 Tf 1 0 0 1 50 672 Tm (Total 1.190,00 EUR) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000848 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+918
+%%EOF

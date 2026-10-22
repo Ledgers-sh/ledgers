@@ -274,6 +274,7 @@ fn entry(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> Command
 
 /// The command registry's built-in descriptors.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn default_commands() -> Vec<CommandDescriptor> {
     let mut commands = vec![
         entry(
@@ -364,6 +365,76 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers reports p-and-l",
         ),
         entry(
+            "documents.list",
+            "read",
+            "GET",
+            "/v1/documents",
+            "ledgers documents list",
+        ),
+        entry(
+            "documents.get",
+            "read",
+            "GET",
+            "/v1/documents/{id}",
+            "ledgers documents get",
+        ),
+        entry(
+            "documents.download_url",
+            "read",
+            "GET",
+            "/v1/documents/{id}/url",
+            "ledgers documents url",
+        ),
+        entry(
+            "bills.extract",
+            "draft",
+            "POST",
+            "/v1/bills/extract",
+            "ledgers bills extract",
+        ),
+        entry(
+            "bills.create",
+            "draft",
+            "POST",
+            "/v1/bills",
+            "ledgers bills create",
+        ),
+        entry(
+            "bills.list",
+            "read",
+            "GET",
+            "/v1/bills",
+            "ledgers bills list",
+        ),
+        entry(
+            "bills.get",
+            "read",
+            "GET",
+            "/v1/bills/{id}",
+            "ledgers bills get",
+        ),
+        entry(
+            "bills.update",
+            "draft",
+            "POST",
+            "/v1/bills/{id}/update",
+            "ledgers bills update",
+        ),
+        entry(
+            "bills.discard",
+            "draft",
+            "POST",
+            "/v1/bills/{id}/discard",
+            "ledgers bills discard",
+        ),
+        entry(
+            "bills.post",
+            "post-within-limits",
+            "POST",
+            "/v1/bills/{id}/post",
+            "ledgers bills post",
+        ),
+        entry(
             "reports.trial_balance",
             "read",
             "GET",
@@ -408,6 +479,13 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
         }
     }
     vec![
+        human_entry(
+            "bills.confirm",
+            "draft",
+            "POST",
+            "/v1/bills/{id}/confirm",
+            "ledgers bills confirm",
+        ),
         human_entry("keys.list", "read", "GET", "/v1/keys", "ledgers keys list"),
         human_entry(
             "keys.create",
