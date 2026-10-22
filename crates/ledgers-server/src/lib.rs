@@ -7,6 +7,7 @@ pub mod demo;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
+pub mod members;
 /// The native (SQLite) composition `ledgers-server` and `ledgers serve` share.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
@@ -102,6 +103,9 @@ pub fn compose(
         }
     };
 
+    // The people module's company: the same id the dispatch serves.
+    let people_company = company_id.clone();
+
     let venture = Venture::new("ledgers", &domain)
         .public_url(public_url.clone())
         .cors_origins(cors_origins.clone())
@@ -168,7 +172,7 @@ pub fn compose(
 
     // Last, so its migration follows every existing module's: the D1 files
     // are numbered in this order and staging has already applied them.
-    let builder = builder.module(people::PeopleModule::new(optional.people));
+    let builder = builder.module(people::PeopleModule::new(optional.people, people_company));
     // The approval inbox columns come after every other module's migrations.
     let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
     // The notification outbox comes last of all, after the inbox.
@@ -177,6 +181,9 @@ pub fn compose(
     // module above, the same way the D1 files are numbered.
     let builder = builder.module(ledgers_documents::DocumentsStoreModule);
     let builder = builder.module(ledgers_bills::BillsModule);
+    // The company's organization: members, roles and invitations. Mounted after
+    // the bills module so its migrations are the last in the D1 set.
+    let builder = builder.module(members::MembersModule::new(cors_origins.clone()));
 
     // The status read: which optional features are off and why. Mounted last;
     // it has no migrations, so it does not renumber the D1 files.

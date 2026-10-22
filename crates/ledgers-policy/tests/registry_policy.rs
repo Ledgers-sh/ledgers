@@ -164,6 +164,7 @@ fn test_humans_can_always_access_policy_commands() {
 
     let human_principal = ledgers_commands::Principal::Person {
         person_id: "alice".to_string(),
+        role: ledgers_commands::Role::Owner,
     };
 
     // All policy commands should be allowed for humans.

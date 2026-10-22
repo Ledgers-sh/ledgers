@@ -74,6 +74,7 @@ impl Authenticator for OwnerAuth {
     async fn authenticate(&self, _credential: &Credential) -> Result<Principal, CommandError> {
         Ok(Principal::Person {
             person_id: self.person_id.clone(),
+            role: ledgers_commands::Role::Owner,
         })
     }
 }

@@ -186,9 +186,13 @@ fn fixture() -> Fixture {
         Box::new(ledgers_approvals::module::ApprovalsInboxModule),
         Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
         Box::new(ApiKeysModule),
-        Box::new(PeopleModule::new(Some(config()))),
+        Box::new(PeopleModule::new(Some(config()), COMPANY)),
+        Box::new(ledgers_server::members::MembersModule::new(vec![
+            APP.to_owned(),
+        ])),
     ];
     let patch_clock = clock_dyn.clone();
+    let patch_auth_clock = clock_dyn.clone();
     let patch_ids = ids.clone();
     let patch_issuer = issuer.clone();
     let kit = TestHarness::with_builder(
@@ -202,6 +206,12 @@ fn fixture() -> Fixture {
             ports.clock = Some(patch_clock);
             ports.id_gen = Some(patch_ids);
             ports.http = Some(patch_issuer as Arc<dyn HttpClient>);
+            ports.auth = ports.db.clone().map(|db| {
+                Arc::new(ledgers_server::members::SessionIdentity::new(
+                    db,
+                    patch_auth_clock,
+                )) as Arc<dyn cratefield_core::Auth>
+            });
         },
     );
     let deps = Deps {
@@ -593,7 +603,7 @@ fn a_signed_in_non_owner_is_refused_with_403() {
         json_body(&body)["detail"]
             .as_str()
             .unwrap()
-            .contains("owner or an admin")
+            .contains("not a member")
     );
 
     let (status, _, body) = call(
@@ -612,12 +622,20 @@ fn a_signed_in_non_owner_is_refused_with_403() {
 }
 
 #[test]
-fn an_admin_may_use_the_company() {
+fn an_admin_claim_without_a_membership_is_not_a_member() {
+    // Only the owner claim bootstraps the company; an admin claim is a claim
+    // the company does not read (docs/permissions.md).
     let fx = fixture();
     let session = sign_in(&fx, &["admin"]);
     let (name, value) = cookie(&session);
-    let (status, _, _) = call(&fx, Method::GET, "/v1/auth/session", &[(name, value)], None);
-    assert_eq!(status, StatusCode::OK);
+    let (status, _, body) = call(&fx, Method::GET, "/v1/auth/session", &[(name, value)], None);
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        json_body(&body)["type"]
+            .as_str()
+            .unwrap()
+            .ends_with("not-a-member")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -724,7 +742,7 @@ fn sign_in_is_503_when_no_issuer_is_configured() {
     let kit = TestHarness::with_builder(
         vec![
             Box::new(DbModule) as Box<dyn Module>,
-            Box::new(PeopleModule::new(None)),
+            Box::new(PeopleModule::new(None, COMPANY)),
         ],
         |builder| builder,
         move |ports: &mut Ports| {
@@ -802,13 +820,14 @@ fn from_config_reads_the_issuer_and_refuses_a_partial_setup() {
 
 #[test]
 fn people_module_declares_the_session_migration() {
-    let module = PeopleModule::new(None);
+    let module = PeopleModule::new(None, COMPANY);
     let migrations = module.migrations();
-    assert_eq!(people::PEOPLE_MIGRATIONS.len(), 2);
+    assert_eq!(people::PEOPLE_MIGRATIONS.len(), 3);
     assert_eq!(people::PEOPLE_MIGRATIONS[0].name, "people_session");
     assert_eq!(
         people::PEOPLE_MIGRATIONS[1].name,
         "people_session_auth_time"
     );
-    assert_eq!(migrations.sqlite.len(), 2);
+    assert_eq!(people::PEOPLE_MIGRATIONS[2].name, "people_profile");
+    assert_eq!(migrations.sqlite.len(), 3);
 }

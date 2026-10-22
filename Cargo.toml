@@ -15,6 +15,11 @@ cratefield-runtime-cloudflare = "=0.5.0"
 cratefield-runtime-native = "=0.4.4"
 cratefield-adapter-sqlite = "=0.3.2"
 cratefield-module-webhooks = "=0.4.2"
+# Organizations, memberships, roles and email invitations (issue: users and permissions).
+# Mounted at /v1/orgs; the Ledgers company is one organization (docs/permissions.md).
+cratefield-module-orgs = "=0.1.4"
+# Owlpost mail provider for the Mailer port (invitation mail), on the same HTTP port as core.
+cratefield-adapter-owlpost = "=0.2.3"
 # The workspace default for the testing kit is its light, wasm-clean surface
 # (port conformance only, no harness graph); a crate that wants the harness
 # (TestHarness, fakes) adds `features = ["harness"]`, which is the kit's

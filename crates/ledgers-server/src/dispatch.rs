@@ -263,6 +263,7 @@ impl ServerDispatch {
                         db: Arc::clone(&deps.db),
                         clock: Arc::clone(&deps.clock),
                         app_origins: self.app_origins.clone(),
+                        company_id: self.company_id.clone(),
                         presented: session,
                     }),
                     id,
@@ -359,11 +360,16 @@ impl ServerDispatch {
     /// The person behind a human-only command. An agent key answers 403
     /// (`human-only`), an unknown or revoked credential 401, and a session
     /// goes through the same origin, role and expiry checks as every command.
+    /// The signed-in person a route acts for. With a `command`, the company's
+    /// role matrix must let the person's role run it (docs/permissions.md);
+    /// without one the call only identifies the person. An agent key is refused
+    /// with `human-only`; a role the matrix refuses gets `policy-denied`.
     async fn person_id(
         &self,
         deps: &Deps,
         presented: Option<Presented>,
         request_id: &str,
+        command: Option<&str>,
     ) -> Result<String, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
         let principal = match presented
@@ -385,6 +391,7 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     app_origins: self.app_origins.clone(),
+                    company_id: self.company_id.clone(),
                     presented: session,
                 }
                 .authenticate(&id)
@@ -394,7 +401,13 @@ impl ServerDispatch {
             Presented::Principal(principal) => principal,
         };
         match principal {
-            Principal::Person { person_id } => Ok(person_id),
+            Principal::Person { person_id, role } => {
+                if let Some(command) = command {
+                    ledgers_policy::roles::check(role, command)
+                        .map_err(|_| fail(CommandError::PolicyDenied))?;
+                }
+                Ok(person_id)
+            }
             Principal::Agent { .. } => Err(fail(CommandError::HumanOnly)),
         }
     }
@@ -406,7 +419,8 @@ impl ServerDispatch {
         request_id: &str,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        self.person_id(deps, presented, request_id).await?;
+        self.person_id(deps, presented, request_id, Some("keys.list"))
+            .await?;
         let keys = crate::agent_keys::list(deps, &self.company_id)
             .await
             .map_err(fail)?;
@@ -422,7 +436,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("keys.create"))
+            .await?;
         let input: crate::agent_keys::KeysCreateInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let output = crate::agent_keys::create(deps, &self.company_id, &person, &input)
@@ -440,7 +456,9 @@ impl ServerDispatch {
         input: Value,
     ) -> Result<Value, Problem> {
         let fail = |err: CommandError| err.to_problem().instance(request_id);
-        let person = self.person_id(deps, presented, request_id).await?;
+        let person = self
+            .person_id(deps, presented, request_id, Some("keys.revoke"))
+            .await?;
         let input: crate::agent_keys::KeysRevokeInput = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let output = crate::agent_keys::revoke(deps, &self.company_id, &person, &input.id)
@@ -493,7 +511,8 @@ impl ServerDispatch {
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        self.person_id(deps, presented.clone(), request_id).await?;
+        self.person_id(deps, presented.clone(), request_id, Some("bills.confirm"))
+            .await?;
         self.execute(deps, &BillsConfirm, presented, request_id, input)
             .await
     }

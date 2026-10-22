@@ -25,6 +25,7 @@ pub mod key;
 pub mod limit;
 pub mod module;
 pub mod policy;
+pub mod roles;
 pub mod screen;
 pub mod store;
 pub mod surface;

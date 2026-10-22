@@ -26,6 +26,10 @@ pub const CHART_WRITE_COMMANDS: &[&str] = &[
 ];
 
 pub struct KeyPolicy {
+    /// Whether this policy runs an approved request: person-side role checks
+    /// are skipped for [`crate::roles::APPROVED_COMMANDS`], because the approval
+    /// is what authorizes them (see [`KeyPolicy::for_approval`]).
+    approval_run: bool,
     /// Keys indexed by id.
     keys: BTreeMap<String, AgentKey>,
     /// Protected account identifiers (bank, equity, tax, AR/AP control, etc).
@@ -41,6 +45,15 @@ impl KeyPolicy {
     #[must_use]
     pub fn agent_keys(&self) -> &BTreeMap<String, AgentKey> {
         &self.keys
+    }
+
+    /// The same policy for running a request that a person has approved. The
+    /// approval path builds it; the approver's role is checked for the decision
+    /// itself, not again for the approved command.
+    #[must_use]
+    pub fn for_approval(mut self) -> Self {
+        self.approval_run = true;
+        self
     }
 
     /// Adds one key to the engine, replacing any key with the same id. The
@@ -61,6 +74,7 @@ impl KeyPolicy {
         company_offset: UtcOffset,
     ) -> Self {
         KeyPolicy {
+            approval_run: false,
             keys,
             protected_accounts,
             now,
@@ -77,7 +91,17 @@ impl Policy for KeyPolicy {
         preview: &JournalPreview,
     ) -> Decision {
         match principal {
-            Principal::Person { .. } => Decision::Allow,
+            Principal::Person { role, .. } => {
+                let approved_run = self.approval_run
+                    && crate::roles::APPROVED_COMMANDS.contains(&meta.name.as_str());
+                if approved_run {
+                    return Decision::Allow;
+                }
+                match crate::roles::check(*role, &meta.name) {
+                    Ok(()) => Decision::Allow,
+                    Err(reason) => Decision::Deny { reason },
+                }
+            }
             Principal::Agent { key_id, .. } => {
                 // Look up the key.
                 let Some(key) = self.keys.get(key_id) else {
@@ -200,27 +224,61 @@ mod tests {
     use ledgers_commands::Tier;
 
     #[test]
-    fn policy_person_always_allowed() {
+    fn policy_person_is_decided_by_the_role_matrix() {
         let policy = KeyPolicy::new(
             BTreeMap::new(),
             BTreeSet::new(),
             OffsetDateTime::now_utc(),
             UtcOffset::UTC,
         );
-        let person = Principal::Person {
-            person_id: "alice".to_string(),
-        };
-        let meta = CommandMeta {
-            name: "test.command".to_string(),
+        let meta = |name: &str| CommandMeta {
+            name: name.to_string(),
             tier: Tier::PostWithinLimits,
             human_only: false,
             supports_dry_run: false,
             idempotent: false,
         };
         let preview = JournalPreview::empty();
+        let person = |role| Principal::Person {
+            person_id: "alice".to_string(),
+            role,
+        };
 
-        let decision = policy.decide(&person, &meta, &preview);
-        assert_eq!(decision, Decision::Allow);
+        let owner = person(ledgers_commands::Role::Owner);
+        assert_eq!(
+            policy.decide(&owner, &meta("entries.post"), &preview),
+            Decision::Allow
+        );
+        let viewer = person(ledgers_commands::Role::Viewer);
+        assert!(matches!(
+            policy.decide(&viewer, &meta("entries.post"), &preview),
+            Decision::Deny { .. }
+        ));
+        assert_eq!(
+            policy.decide(&viewer, &meta("entries.list"), &preview),
+            Decision::Allow
+        );
+        // An approved entry posts under the approver's decision, not their role.
+        let approver = person(ledgers_commands::Role::Approver);
+        assert!(matches!(
+            policy.decide(&approver, &meta("entries.post"), &preview),
+            Decision::Deny { .. }
+        ));
+        let approval_run = KeyPolicy::new(
+            BTreeMap::new(),
+            BTreeSet::new(),
+            OffsetDateTime::now_utc(),
+            UtcOffset::UTC,
+        )
+        .for_approval();
+        assert_eq!(
+            approval_run.decide(&approver, &meta("entries.post"), &preview),
+            Decision::Allow
+        );
+        assert!(matches!(
+            approval_run.decide(&approver, &meta("bill.pay"), &preview),
+            Decision::Deny { .. }
+        ));
     }
 
     #[test]

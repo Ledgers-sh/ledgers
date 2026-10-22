@@ -44,6 +44,10 @@ schemars = { workspace = true }
 sea-query = { workspace = true }
 time = { workspace = true }
 ledgers-audit = { workspace = true }
+# Organizations and memberships (the company is one organization); the invitation
+# mail goes through the Mailer port (Owlpost on Workers and native).
+cratefield-module-orgs = { workspace = true }
+cratefield-adapter-owlpost = { workspace = true }
 # People sign-in (issue #12): HTTP requests to the issuer and the form body of
 # the token exchange.
 http = "1"
