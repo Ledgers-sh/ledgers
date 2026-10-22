@@ -57,6 +57,10 @@ pub struct KeysCreateInput {
     /// Per-currency limits, keyed by ISO 4217 code. A currency with no entry
     /// is not allowed at all (fail closed).
     pub limits: BTreeMap<String, LimitAmounts>,
+    /// Pin the key to one business unit: its entries carry that unit, and it
+    /// may post to no other. Absent means all units.
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// Input of `keys.revoke`: the key's `id`, as `keys.list` returns it.
@@ -73,6 +77,9 @@ pub struct AgentKeyView {
     pub id: String,
     /// The label the key was created with.
     pub name: String,
+    /// The business unit the key is pinned to; absent means all units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
     /// The public prefix, `lk_live_<id>`. The secret part is never shown again.
     pub prefix: Option<String>,
     /// `read`, `draft` or `post-within-limits`.
@@ -201,19 +208,53 @@ pub async fn create(
     let name = validate_name(&input.name)?;
     let tier = parse_tier(&input.tier)?;
     let limits = parse_limits(&input.limits)?;
-    let (key_id, token) = dispatch::issue_key_as(deps, company_id, &name, person_id, tier, limits)
-        .await
-        .map_err(|err| {
-            // The failed step names a table, never a secret; it stays in the log.
-            tracing::error!(error = %err, "agent key creation failed");
-            CommandError::Domain(Problem::internal())
-        })?;
+    let unit = resolve_pin(deps.db.as_ref(), company_id, input.unit.as_deref()).await?;
+    let (key_id, token) =
+        dispatch::issue_key_as(deps, company_id, &name, person_id, tier, limits, unit)
+            .await
+            .map_err(|err| {
+                // The failed step names a table, never a secret; it stays in the log.
+                tracing::error!(error = %err, "agent key creation failed");
+                CommandError::Domain(Problem::internal())
+            })?;
     let key = load_views(deps.db.as_ref(), company_id, Some(&key_id))
         .await?
         .into_iter()
         .next()
         .ok_or_else(|| CommandError::Domain(Problem::internal()))?;
     Ok(KeysCreateOutput { key, token })
+}
+
+/// Checks the unit a key is pinned to: it must name an active unit of the
+/// company. `None` pins nothing (the key may post to every unit).
+///
+/// # Errors
+/// The unit problems of [`crate::dispatch::resolve_scope`]'s counterpart:
+/// `unit-not-found` for an unknown code, `unit-conflict` for an archived one.
+pub async fn resolve_pin(
+    db: &dyn cratefield_core::Database,
+    company_id: &str,
+    unit: Option<&str>,
+) -> Result<Option<String>, CommandError> {
+    let Some(code) = unit.map(str::trim).filter(|code| !code.is_empty()) else {
+        return Ok(None);
+    };
+    let code = ledgers_ledger::units::validate_code(code)
+        .map_err(|err| CommandError::Domain(err.to_problem()))?;
+    let found = ledgers_ledger::units::find_unit(db, company_id, &code)
+        .await
+        .map_err(|err| CommandError::Domain(err.to_problem()))?
+        .ok_or_else(|| {
+            CommandError::Domain(
+                ledgers_ledger::AccountsError::UnitNotFound { code: code.clone() }.to_problem(),
+            )
+        })?;
+    if found.archived {
+        return Err(CommandError::Domain(
+            ledgers_ledger::AccountsError::UnitArchived { code }.to_problem(),
+        ));
+    }
+    Ok(Some(code))
 }
 
 /// Revokes the agent key `id`. Revoking a key that is already revoked changes
@@ -383,6 +424,7 @@ fn view_of(
     Ok(AgentKeyView {
         id: id.to_owned(),
         name: policy.label.clone(),
+        unit: policy.unit.clone(),
         prefix,
         tier: policy.tier.as_str().to_owned(),
         limits,
