@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { useHash, useOnline } from './hooks';
 import { BILLS_MATCH_OPERATION, fetchOperationIds } from './api/features';
+import { ApiError } from './api/client';
+import { fetchSession, initialOf, signOut, type Person } from './api/auth';
 import {
   clearCredentials,
+  DEFAULT_SERVER_URL,
   loadCredentials,
   loadCurrency,
   loadPeriod,
@@ -18,6 +21,7 @@ import {
   type ToastKind,
 } from './session';
 import { Connect } from './ui/Connect';
+import { SignIn } from './ui/SignIn';
 import { Icon, type IconName } from './ui/icons';
 import { Toasts, useToasts } from './ui/common';
 import { Overview } from './ui/Overview';
@@ -41,29 +45,116 @@ const NAV: { hash: string; label: string; icon: IconName; match: (route: string)
  */
 type BillsState = 'checking' | 'offered' | 'absent';
 
-export function App() {
-  const [credentials, setCredentials] = useState<Credentials | null>(() => loadCredentials());
+/**
+ * Who is using the app. A person signs in with a passkey on the server and
+ * their session cookie is sent with each call. An agent key (advanced, for
+ * self-hosted servers and automation) is kept in session storage instead.
+ */
+type Mode =
+  | { kind: 'checking' }
+  | { kind: 'signed-out'; error: string | null; advanced: boolean }
+  | { kind: 'forbidden'; detail: string }
+  | { kind: 'person'; baseUrl: string; person: Person }
+  | { kind: 'key'; credentials: Credentials };
 
-  if (!credentials) {
-    return (
-      <Connect
-        onConnected={(next) => {
-          saveCredentials(next);
-          setCredentials(next);
-        }}
-      />
+export function App() {
+  const [mode, setMode] = useState<Mode>(() => {
+    const stored = loadCredentials();
+    return stored ? { kind: 'key', credentials: stored } : { kind: 'checking' };
+  });
+
+  useEffect(() => {
+    if (mode.kind !== 'checking') return;
+    let live = true;
+    fetchSession(DEFAULT_SERVER_URL).then(
+      (person) => {
+        if (!live) return;
+        if (person) setMode({ kind: 'person', baseUrl: DEFAULT_SERVER_URL, person });
+        else setMode({ kind: 'signed-out', error: null, advanced: false });
+      },
+      (error: unknown) => {
+        if (!live) return;
+        if (error instanceof ApiError && error.kind === 'forbidden') {
+          setMode({ kind: 'forbidden', detail: error.detail ?? error.message });
+        } else {
+          const message = error instanceof ApiError ? (error.detail ?? error.message) : 'Sign-in is not available right now.';
+          setMode({ kind: 'signed-out', error: message, advanced: false });
+        }
+      },
     );
+    return () => {
+      live = false;
+    };
+  }, [mode.kind]);
+
+  const endPersonSession = useCallback(async (baseUrl: string) => {
+    await signOut(baseUrl);
+    void clearApiCaches();
+    setMode({ kind: 'signed-out', error: null, advanced: false });
+  }, []);
+
+  switch (mode.kind) {
+    case 'checking':
+      return (
+        <main class="connect" id="main">
+          <p class="muted" role="status">Checking your sign-in…</p>
+        </main>
+      );
+    case 'signed-out':
+      return mode.advanced ? (
+        <Connect
+          onBack={() => setMode({ kind: 'signed-out', error: null, advanced: false })}
+          onConnected={(next) => {
+            saveCredentials(next);
+            setMode({ kind: 'key', credentials: next });
+          }}
+        />
+      ) : (
+        <SignIn
+          baseUrl={DEFAULT_SERVER_URL}
+          error={mode.error}
+          onAdvanced={() => setMode({ kind: 'signed-out', error: null, advanced: true })}
+        />
+      );
+    case 'forbidden':
+      return (
+        <main class="connect" id="main">
+          <div class="connect-card" role="alert">
+            <h1 style={{ font: 'inherit' }}>This account cannot use this ledger</h1>
+            <p class="muted">{mode.detail}</p>
+            <div class="row-actions">
+              <button
+                type="button"
+                class="btn btn-primary"
+                onClick={() => void endPersonSession(DEFAULT_SERVER_URL)}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </main>
+      );
+    case 'person':
+      return (
+        <Shell
+          baseUrl={mode.baseUrl}
+          person={mode.person}
+          onSignOut={() => void endPersonSession(mode.baseUrl)}
+        />
+      );
+    case 'key':
+      return (
+        <Shell
+          baseUrl={mode.credentials.baseUrl}
+          apiKey={mode.credentials.apiKey}
+          onSignOut={() => {
+            clearCredentials();
+            void clearApiCaches();
+            setMode({ kind: 'signed-out', error: null, advanced: false });
+          }}
+        />
+      );
   }
-  return (
-    <Shell
-      credentials={credentials}
-      onSignOut={() => {
-        clearCredentials();
-        void clearApiCaches();
-        setCredentials(null);
-      }}
-    />
-  );
 }
 
 /** Drops cached read views on sign-out so the next person on this device sees nothing. */
@@ -78,7 +169,17 @@ async function clearApiCaches(): Promise<void> {
   }
 }
 
-function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut: () => void }) {
+function Shell({
+  baseUrl,
+  apiKey,
+  person,
+  onSignOut,
+}: {
+  baseUrl: string;
+  apiKey?: string;
+  person?: Person;
+  onSignOut: () => void;
+}) {
   const hash = useHash();
   const online = useOnline();
   const { items, push, dismiss } = useToasts();
@@ -95,13 +196,13 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
   useEffect(() => {
     let live = true;
     setBillsState('checking');
-    void fetchOperationIds(credentials.baseUrl).then((ids) => {
+    void fetchOperationIds(baseUrl).then((ids) => {
       if (live) setBillsState(ids.has(BILLS_MATCH_OPERATION) ? 'offered' : 'absent');
     });
     return () => {
       live = false;
     };
-  }, [credentials.baseUrl]);
+  }, [baseUrl]);
 
   const nav = NAV.filter((item) => item.hash !== 'bills' || billsState === 'offered');
 
@@ -115,7 +216,7 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
   }, []);
 
   const session: Session = {
-    client: { baseUrl: credentials.baseUrl, apiKey: credentials.apiKey },
+    client: apiKey ? { baseUrl, apiKey } : { baseUrl },
     period,
     setPeriod,
     currency,
@@ -170,7 +271,7 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
           </nav>
           <div class="sidebar-foot">
             <span>
-              Server <code>{credentials.baseUrl.replace(/^https?:\/\//, '')}</code>
+              Server <code>{baseUrl.replace(/^https?:\/\//, '')}</code>
             </span>
             <button type="button" class="btn btn-ghost btn-sm" onClick={onSignOut} style={{ justifyContent: 'flex-start' }}>
               <Icon name="logout" />
@@ -184,10 +285,18 @@ function Shell({ credentials, onSignOut }: { credentials: Credentials; onSignOut
               <img src="/assets/favicon.svg" alt="" width="24" height="24" />
               <span>ledgers<span class="muted">.sh</span></span>
             </a>
-            <span class="ledger-id" title={credentials.baseUrl}>
-              {credentials.baseUrl.replace(/^https?:\/\//, '')}
+            <span class="ledger-id" title={baseUrl}>
+              {baseUrl.replace(/^https?:\/\//, '')}
             </span>
             <div class="grow" />
+            {person && (
+              <span class="person" title={person.email ?? person.personId}>
+                <span class="avatar" aria-hidden="true">
+                  {initialOf(person)}
+                </span>
+                <span class="person-name">{person.email ?? 'Signed in'}</span>
+              </span>
+            )}
             <label class="period">
               <span>Period</span>
               <input

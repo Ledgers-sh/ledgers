@@ -7,6 +7,7 @@
 
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
 use crate::harness;
+use crate::people::{allowed_origin, credentialed_cors_headers};
 use cratefield_core::{Config, NoopDefer, constant_time_eq};
 use cratefield_runtime_cloudflare::{Cloudflare, serve};
 use serde_json::json;
@@ -46,8 +47,51 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         return bootstrap_route(req, &env, runtime).await;
     }
 
+    // Credentialed CORS for the person sign-in and session calls. The harness's
+    // CORS layer answers without `Allow-Credentials` and cannot be configured
+    // here, so the Worker answers the preflight and marks the responses itself.
+    // Only the configured app origins get the header, and only on `/v1`.
+    let credentialed = req.path().starts_with("/v1/");
+    let allowed = crate::app_origins(&WorkerConfig { env: env.clone() });
+    let origin = origin_header_worker(&req)
+        .filter(|origin| credentialed && allowed_origin(&allowed, origin).is_some());
+    if let Some(origin) = origin.as_deref()
+        && req.method() == Method::Options
+        && req
+            .headers()
+            .get("access-control-request-method")?
+            .is_some()
+    {
+        let mut response = Response::empty()?.with_status(204);
+        for (name, value) in credentialed_cors_headers(origin) {
+            response.headers_mut().set(name, &value)?;
+        }
+        response
+            .headers_mut()
+            .set("access-control-allow-methods", "GET, POST, OPTIONS")?;
+        response.headers_mut().set(
+            "access-control-allow-headers",
+            "Content-Type, Authorization",
+        )?;
+        response
+            .headers_mut()
+            .set("access-control-max-age", "600")?;
+        return Ok(response);
+    }
+
     // Call the runtime's serve function to handle the request
-    serve(harness_instance, runtime, req, env, ctx).await
+    let mut response = serve(harness_instance, runtime, req, env, ctx).await?;
+    if let Some(origin) = origin.as_deref() {
+        for (name, value) in credentialed_cors_headers(origin) {
+            response.headers_mut().set(name, &value)?;
+        }
+    }
+    Ok(response)
+}
+
+/// The request's `Origin` header, if it sent one.
+fn origin_header_worker(req: &Request) -> Option<String> {
+    req.headers().get("origin").ok().flatten()
 }
 
 /// `POST /admin/bootstrap` with `Authorization: Bearer <BOOTSTRAP_TOKEN>` and a

@@ -2,7 +2,7 @@
 //! RFC 9728 protected-resource metadata at `/.well-known/oauth-protected-resource`.
 
 use crate::dispatch::{DISPATCH_PORTS, Deps};
-use crate::routes::Dispatch;
+use crate::routes::{Dispatch, Presented};
 use axum::extract::Query;
 use axum::http::header;
 use cratefield_core::axum::{
@@ -266,7 +266,7 @@ impl mcp::ToolCaller for ServerToolCaller {
                 &descriptor.name,
                 input,
                 &self.request_id,
-                self.credential.clone(),
+                self.credential.clone().map(Presented::Bearer),
             )
             .await
         {

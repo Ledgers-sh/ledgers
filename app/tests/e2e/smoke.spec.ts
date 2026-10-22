@@ -8,10 +8,14 @@ test.describe('connect, post, reverse', () => {
     const api = await mockApi();
     await page.goto('/');
 
-    // Connect screen: default server URL, key kept in sessionStorage only.
+    // Signed out: the passkey sign-in is the front door. The agent-key connect is advanced.
     await expect(page.getByRole('heading', { name: 'ledgers.sh' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in with passkey' })).toBeVisible();
+    await page.getByRole('button', { name: 'Advanced: connect with an agent key' }).click();
+
+    // Connect screen: default server URL, key kept in sessionStorage only.
+    await expect(page.getByRole('heading', { name: 'Advanced: connect with an agent key' })).toBeVisible();
     await expect(page.getByLabel('Server URL')).toHaveValue(API_ORIGIN);
-    await expect(page.getByText(/passkey sign-in arrives with issue #12/i)).toBeVisible();
     await page.getByLabel('API key').fill(API_KEY);
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(page.getByText(/Connected\. /)).toBeVisible();

@@ -127,6 +127,8 @@ const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': 'http://localhost:5173',
   'Access-Control-Allow-Headers': 'authorization, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  // The app sends the session cookie with credentials: 'include'.
+  'Access-Control-Allow-Credentials': 'true',
 };
 
 interface Reply {
@@ -293,6 +295,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           // The public document the app reads to decide which pages to show.
           res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
           res.end(JSON.stringify(OPENAPI));
+          return;
+        }
+        // Signed out: no key and no session. The people sign-in answers 401 here,
+        // which the app shows as the sign-in screen. Specs mock signed-in sessions.
+        if (new URL(req.url ?? '/', API_ORIGIN).pathname === '/v1/auth/session' && req.headers.authorization !== `Bearer ${API_KEY}`) {
+          res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(401, 'Sign-in required').body));
           return;
         }
         if (req.headers.authorization !== `Bearer ${API_KEY}`) {

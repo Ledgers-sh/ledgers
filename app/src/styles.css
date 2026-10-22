@@ -347,3 +347,33 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* People sign-in (issue #12): the signed-in person in the top bar, the
+   sign-in screen and the advanced agent-key link. */
+.topbar .person { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 260px; font-size: 14px; color: var(--text-2); }
+.topbar .person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  background: var(--agent-bg);
+  border: 1px solid var(--rule);
+  color: var(--agent);
+  font: 600 13px var(--mono);
+}
+.connect-title { font: 600 20px var(--sans); margin: 0; color: var(--text); }
+.explainer summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
+.explainer p { margin: 8px 0 0; font-size: 14px; }
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--agent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-button:focus-visible, .explainer summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

@@ -166,3 +166,19 @@ describe('error mapping', () => {
     expect(error.status).toBeNull();
   });
 });
+
+describe('person sessions', () => {
+  it('sends the session cookie and no bearer header when there is no key', async () => {
+    const { fetchImpl, captured } = fakeFetch(200, { accounts: [] });
+    await accountsList({ baseUrl: 'http://127.0.0.1:3000', fetch: fetchImpl });
+    expect(captured[0].init.credentials).toBe('include');
+    expect(headersOf(captured[0].init).get('Authorization')).toBeNull();
+  });
+
+  it('keeps bearer auth for an agent key and does not send the cookie', async () => {
+    const { fetchImpl, captured } = fakeFetch(200, { accounts: [] });
+    await accountsList(config(fetchImpl));
+    expect(captured[0].init.credentials).toBeUndefined();
+    expect(headersOf(captured[0].init).get('Authorization')).toBe('Bearer test_sk_key');
+  });
+});

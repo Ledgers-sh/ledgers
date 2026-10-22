@@ -7,7 +7,13 @@ import { Icon } from './icons';
 
 type TestState = { status: 'idle' } | { status: 'busy' } | { status: 'ok'; message: string } | { status: 'fail'; message: string };
 
-export function Connect({ onConnected }: { onConnected: (credentials: Credentials) => void }) {
+export function Connect({
+  onConnected,
+  onBack,
+}: {
+  onConnected: (credentials: Credentials) => void;
+  onBack: () => void;
+}) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_SERVER_URL);
   const [apiKey, setApiKey] = useState('');
   const [test, setTest] = useState<TestState>({ status: 'idle' });
@@ -66,7 +72,8 @@ export function Connect({ onConnected }: { onConnected: (credentials: Credential
           </h1>
         </div>
         <div>
-          <p class="muted">Connect to a Ledgers server to review the books and post entries.</p>
+          <h2 class="connect-title">Advanced: connect with an agent key</h2>
+          <p class="muted">For a self-hosted server or an automation that holds an agent key. People sign in with a passkey instead.</p>
         </div>
         <form onSubmit={connect} noValidate>
           <label class="field">
@@ -131,7 +138,7 @@ export function Connect({ onConnected }: { onConnected: (credentials: Credential
           </div>
         </form>
         <p class="note">
-          Passkey sign-in arrives with issue #12. Until then this app uses an API key, and no passkey flow is shown.
+          Agent keys are read and post within the limits of their tier. <button type="button" class="link-button" onClick={onBack}>Back to sign-in</button>
         </p>
       </div>
     </main>
