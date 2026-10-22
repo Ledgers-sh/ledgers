@@ -1,0 +1,317 @@
+/**
+ * A local fake of the Ledgers HTTP API for Playwright. It runs as a real HTTP
+ * server on 127.0.0.1:3000 (route interception cannot model the CORS preflight
+ * Chrome sends for a bearer-authenticated cross-origin fetch). It keeps a small
+ * ledger in memory so posting and reversing show up in the journal and reports.
+ */
+import http from 'node:http';
+import type { Page } from '@playwright/test';
+
+export const API_ORIGIN = 'http://127.0.0.1:3000';
+const PORT = 3000;
+export const API_KEY = 'test_sk_mock_0123456789';
+
+type Side = 'debit' | 'credit';
+interface Line {
+  account_number: string;
+  side: Side;
+  base: { minor: string; currency: string };
+  memo: string | null;
+}
+interface Entry {
+  external_id: string | null;
+  entry_id: string;
+  journal_id: string;
+  fiscal_year: number;
+  number: number;
+  document_date: string;
+  posting_date: string;
+  base_currency: string;
+  description: string;
+  posted_by: 'agent' | 'person';
+  reverses: string | null;
+  reversed_by: string | null;
+  recorded_at: string;
+  lines: Line[];
+}
+
+export interface MockOptions {
+  /** Seed entries so screens are populated (screenshots). */
+  seed?: boolean;
+}
+
+const ACCOUNTS = [
+  { number: '1000', name_key: 'account.cash', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '1200', name_key: 'account.receivables', account_type: 'asset', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '2000', name_key: 'account.payables', account_type: 'liability', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '3000', name_key: 'account.capital', account_type: 'equity', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '4000', name_key: 'account.sales', account_type: 'income', normal_balance: 'credit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6000', name_key: 'account.rent', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+  { number: '6100', name_key: 'account.software', account_type: 'expense', normal_balance: 'debit', currency: null, parent: null, tags: [], is_postable: true },
+];
+
+const period = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+function seedEntries(): Entry[] {
+  const p = period();
+  const line = (account_number: string, side: Side, minor: string, memo: string | null = null): Line => ({
+    account_number,
+    side,
+    base: { minor, currency: 'EUR' },
+    memo,
+  });
+  return [
+    {
+      external_id: 'seed-1',
+      entry_id: 'entry-seed-1',
+      journal_id: 'general',
+      fiscal_year: Number(p.slice(0, 4)),
+      number: 1,
+      document_date: `${p}-01`,
+      posting_date: `${p}-01`,
+      base_currency: 'EUR',
+      description: 'Capital introduced by the owner',
+      posted_by: 'person',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${p}-01T09:00:00Z`,
+      lines: [line('1000', 'debit', '500000'), line('3000', 'credit', '500000')],
+    },
+    {
+      external_id: 'seed-2',
+      entry_id: 'entry-seed-2',
+      journal_id: 'general',
+      fiscal_year: Number(p.slice(0, 4)),
+      number: 2,
+      document_date: `${p}-03`,
+      posting_date: `${p}-03`,
+      base_currency: 'EUR',
+      description: 'Invoice 2026-118 Halden Works GmbH',
+      posted_by: 'agent',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${p}-03T10:15:00Z`,
+      lines: [line('1200', 'debit', '119000', 'Invoice 2026-118'), line('4000', 'credit', '100000'), line('2000', 'credit', '19000')],
+    },
+  ];
+}
+
+function sum(entries: Entry[], filter: (account: string) => boolean, side: Side): bigint {
+  let total = 0n;
+  for (const entry of entries) {
+    for (const line of entry.lines) {
+      if (line.side === side && filter(line.account_number)) total += BigInt(line.base.minor);
+    }
+  }
+  return total;
+}
+
+const money = (minor: bigint) => ({ minor: minor.toString(), currency: 'EUR' });
+
+function trialRows(entries: Entry[]) {
+  return ACCOUNTS.map((account) => {
+    const debit = sum(entries, (n) => n === account.number, 'debit');
+    const credit = sum(entries, (n) => n === account.number, 'credit');
+    return { account_code: account.number, debit: money(debit), credit: money(credit), balance: money(debit - credit) };
+  }).filter((row) => BigInt(row.debit.minor) !== 0n || BigInt(row.credit.minor) !== 0n);
+}
+
+export interface MockApi {
+  entries: Entry[];
+  posts: unknown[];
+  reversals: unknown[];
+}
+
+/** The real server allows the app origin via CORS; the fake does the same. */
+const CORS: Record<string, string> = {
+  'Access-Control-Allow-Origin': 'http://localhost:5173',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+
+interface Reply {
+  status: number;
+  body: unknown;
+  problem?: boolean;
+}
+
+function problem(status: number, title: string, detail?: string): Reply {
+  return { status, problem: true, body: { type: 'about:blank', title, status, detail } };
+}
+
+const state: MockApi = { entries: [], posts: [], reversals: [] };
+let nextNumber = 1;
+
+/** Routes one request against the in-memory ledger. */
+function handle(method: string, url: URL, bodyText: string): Reply {
+  const path = url.pathname;
+
+  if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
+  if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
+  if (method === 'GET' && path.startsWith('/v1/entries/')) {
+    const id = decodeURIComponent(path.slice('/v1/entries/'.length));
+    const entry = state.entries.find((e) => e.external_id === id);
+    return entry ? { status: 200, body: entry } : problem(404, 'Not found');
+  }
+  if (method === 'GET' && path === '/v1/reports/trial-balance') {
+    return { status: 200, body: { period: url.searchParams.get('period'), rows: trialRows(state.entries) } };
+  }
+  if (method === 'GET' && path === '/v1/reports/p-and-l') {
+    const revenue = sum(state.entries, (n) => n.startsWith('4'), 'credit') - sum(state.entries, (n) => n.startsWith('4'), 'debit');
+    const expenses = sum(state.entries, (n) => n.startsWith('6'), 'debit') - sum(state.entries, (n) => n.startsWith('6'), 'credit');
+    return {
+      status: 200,
+      body: { period: url.searchParams.get('period'), revenue: money(revenue), expenses: money(expenses), net_income: money(revenue - expenses) },
+    };
+  }
+  if (method === 'GET' && path === '/v1/reports/balance-sheet') {
+    const assets = sum(state.entries, (n) => n.startsWith('1'), 'debit') - sum(state.entries, (n) => n.startsWith('1'), 'credit');
+    const liabilities = sum(state.entries, (n) => n.startsWith('2'), 'credit') - sum(state.entries, (n) => n.startsWith('2'), 'debit');
+    const equity = sum(state.entries, (n) => n.startsWith('3'), 'credit') - sum(state.entries, (n) => n.startsWith('3'), 'debit');
+    return {
+      status: 200,
+      body: {
+        as_of: url.searchParams.get('as_of'),
+        assets: money(assets),
+        liabilities: money(liabilities),
+        // Equity includes the period's net income, as the real balance sheet does.
+        equity: money(equity + netIncome(state.entries)),
+      },
+    };
+  }
+  if (method === 'POST' && path === '/v1/entries') {
+    const body = JSON.parse(bodyText) as {
+      journal_id: string;
+      fiscal_year: number;
+      entry: { external_id: string | null; description: string; posting_date: string; base_currency: string; lines: Line[] };
+    };
+    const debit = body.entry.lines.filter((l) => l.side === 'debit').reduce((a, l) => a + BigInt(l.base.minor), 0n);
+    const credit = body.entry.lines.filter((l) => l.side === 'credit').reduce((a, l) => a + BigInt(l.base.minor), 0n);
+    if (debit !== credit) return problem(422, 'Validation failed', 'entry does not balance');
+    state.posts.push(body);
+    const existing = state.entries.find((e) => e.external_id === body.entry.external_id);
+    if (existing) return { status: 200, body: { entry: summary(existing) } };
+    const number = nextNumber++;
+    const entry: Entry = {
+      external_id: body.entry.external_id,
+      entry_id: `entry-${number}`,
+      journal_id: body.journal_id,
+      fiscal_year: body.fiscal_year,
+      number,
+      document_date: body.entry.posting_date,
+      posting_date: body.entry.posting_date,
+      base_currency: body.entry.base_currency,
+      description: body.entry.description,
+      posted_by: 'person',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${body.entry.posting_date}T12:00:00Z`,
+      lines: body.entry.lines,
+    };
+    state.entries.push(entry);
+    return { status: 200, body: { entry: summary(entry) } };
+  }
+  const reverse = /^\/v1\/entries\/([^/]+)\/reverse$/.exec(path);
+  if (method === 'POST' && reverse) {
+    const original = state.entries.find((e) => e.external_id === decodeURIComponent(reverse[1]));
+    if (!original) return problem(404, 'Not found');
+    if (original.reversed_by) return problem(422, 'Validation failed', 'entry already reversed');
+    const body = JSON.parse(bodyText) as { posting_date: string; description: string };
+    state.reversals.push(body);
+    const number = nextNumber++;
+    const reversal: Entry = {
+      ...original,
+      external_id: null,
+      entry_id: `entry-${number}`,
+      number,
+      posting_date: body.posting_date,
+      document_date: body.posting_date,
+      description: body.description,
+      reverses: original.entry_id,
+      reversed_by: null,
+      lines: original.lines.map((l) => ({ ...l, side: l.side === 'debit' ? 'credit' : 'debit' })),
+    };
+    original.reversed_by = reversal.entry_id;
+    state.entries.push(reversal);
+    return { status: 200, body: { entry: summary(reversal) } };
+  }
+  if (method === 'POST' && /^\/v1\/bills\/[^/]+\/match$/.test(path)) {
+    return { status: 200, body: { status: 'no_candidates', candidates: [] } };
+  }
+  return problem(501, 'Not yet implemented');
+}
+
+function netIncome(entries: Entry[]): bigint {
+  const revenue = sum(entries, (n) => n.startsWith('4'), 'credit') - sum(entries, (n) => n.startsWith('4'), 'debit');
+  const expenses = sum(entries, (n) => n.startsWith('6'), 'debit') - sum(entries, (n) => n.startsWith('6'), 'credit');
+  return revenue - expenses;
+}
+
+function summary(entry: Entry) {
+  return {
+    entry_id: entry.entry_id,
+    journal_id: entry.journal_id,
+    fiscal_year: entry.fiscal_year,
+    number: entry.number,
+    recorded_at: entry.recorded_at,
+  };
+}
+
+let server: http.Server | null = null;
+
+/**
+ * Starts (once per worker) the fake API on 127.0.0.1:3000 and resets its ledger.
+ * Requests without the right bearer key get 401.
+ */
+export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
+  state.entries = options.seed ? seedEntries() : [];
+  state.posts = [];
+  state.reversals = [];
+  nextNumber = state.entries.length + 1;
+  if (!server) {
+    server = http.createServer((req, res) => {
+      let text = '';
+      req.on('data', (chunk: Buffer) => (text += chunk.toString()));
+      req.on('end', () => {
+        const headers = { ...CORS };
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, headers);
+          res.end();
+          return;
+        }
+        if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+          res.writeHead(401, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(401, 'Unauthorized').body));
+          return;
+        }
+        const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
+        res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });
+        res.end(JSON.stringify(reply.body));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server?.once('error', reject);
+      server?.listen(PORT, '127.0.0.1', () => resolve());
+    });
+  }
+  return state;
+}
+
+/** Stops the fake API (call from afterAll). */
+export async function stopMockApi(): Promise<void> {
+  const current = server;
+  server = null;
+  if (current) await new Promise<void>((resolve) => current.close(() => resolve()));
+}
+
+/** Puts the API key in sessionStorage before any page script runs (skips the connect screen). */
+export async function signIn(page: Page, theme: 'dark' | 'light' = 'dark') {
+  await page.addInitScript(
+    ({ key, origin, themeValue }) => {
+      window.sessionStorage.setItem('ledgers.apiKey', key);
+      window.sessionStorage.setItem('ledgers.baseUrl', origin);
+      window.localStorage.setItem('ledgers.theme', themeValue);
+    },
+    { key: API_KEY, origin: API_ORIGIN, themeValue: theme },
+  );
+}
