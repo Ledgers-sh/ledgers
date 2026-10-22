@@ -244,6 +244,59 @@ pub enum AccountsError {
         value: String,
     },
 
+    /// A business-unit value is malformed: the code, name, colour, logo or
+    /// a transfer's amount or units.
+    #[error("invalid business unit: {reason}")]
+    InvalidUnit {
+        /// What was wrong, in words a person can act on.
+        reason: String,
+    },
+
+    /// No business unit has this code.
+    #[error("business unit {code} does not exist")]
+    UnitNotFound {
+        /// The code asked for.
+        code: String,
+    },
+
+    /// A business unit with this code already exists.
+    #[error("business unit {code} already exists")]
+    UnitExists {
+        /// The code taken.
+        code: String,
+    },
+
+    /// The unit is archived: it takes no changes and no new postings.
+    #[error("business unit {code} is archived")]
+    UnitArchived {
+        /// The archived unit's code.
+        code: String,
+    },
+
+    /// The chart has no active account carrying a tag the books need
+    /// (the inter-unit clearing account, or the due-from/due-to pair).
+    #[error("the chart has no active account tagged {tag}")]
+    ChartTagMissing {
+        /// The tag that is missing.
+        tag: String,
+    },
+
+    /// More than one active account carries a tag that must name exactly one.
+    #[error("more than one active account is tagged {tag}")]
+    ChartTagAmbiguous {
+        /// The tag that is ambiguous.
+        tag: String,
+    },
+
+    /// A transfer names an account of the wrong class.
+    #[error("account {number} must be an {expected} account for this transfer")]
+    TransferAccount {
+        /// The account number given.
+        number: String,
+        /// The class it must be.
+        expected: String,
+    },
+
     /// A custom account name is empty, too long or contains control
     /// characters.
     #[error("invalid account name: {reason}")]
@@ -345,6 +398,30 @@ pub const ACCOUNT_EXISTS: cratefield_core::ProblemDef = cratefield_core::Problem
     description: "An account with this number already exists for the company.",
 };
 
+/// `unit.not_found` problem: no business unit has this code.
+pub const UNIT_NOT_FOUND: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "unit-not-found",
+    status: cratefield_core::axum::http::StatusCode::NOT_FOUND,
+    title: "Business unit not found",
+    description: "No business unit of this company has that code.",
+};
+
+/// `unit.conflict` problem: the unit code is taken, or the unit is archived.
+pub const UNIT_CONFLICT: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "unit-conflict",
+    status: cratefield_core::axum::http::StatusCode::CONFLICT,
+    title: "Business unit conflict",
+    description: "The business unit already exists, or is archived and takes no changes.",
+};
+
+/// `unit.refused` problem: a unit value or a recharge is malformed.
+pub const UNIT_REFUSED: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "unit-refused",
+    status: cratefield_core::axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+    title: "Business unit operation refused",
+    description: "The business unit value or the recharge between units is not allowed.",
+};
+
 impl AccountsError {
     /// The RFC 9457 problem this error renders as.
     ///
@@ -391,6 +468,20 @@ impl AccountsError {
                 .with_detail(self.to_string())
                 .with_extension("number", number.clone())
                 .with_extension("reason", "non-zero-balance".to_owned()),
+            AccountsError::UnitNotFound { code } => Problem::new(&UNIT_NOT_FOUND)
+                .with_detail(self.to_string())
+                .with_extension("code", code.clone()),
+            AccountsError::UnitExists { code } | AccountsError::UnitArchived { code } => {
+                Problem::new(&UNIT_CONFLICT)
+                    .with_detail(self.to_string())
+                    .with_extension("code", code.clone())
+            }
+            AccountsError::InvalidUnit { .. }
+            | AccountsError::ChartTagMissing { .. }
+            | AccountsError::ChartTagAmbiguous { .. }
+            | AccountsError::TransferAccount { .. } => {
+                Problem::new(&UNIT_REFUSED).with_detail(self.to_string())
+            }
             AccountsError::ParentHasPostings { parent } => Problem::new(&ACCOUNT_OPERATION_FAILED)
                 .with_detail(self.to_string())
                 .with_extension("parent", parent.clone())

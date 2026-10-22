@@ -29,6 +29,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "bill_reader",
         include_str!("../migrations/sqlite/0002_bill_reader.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "bill_unit",
+        include_str!("../migrations/sqlite/0003_bill_unit.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite.
@@ -42,6 +47,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "bill_reader",
         include_str!("../migrations/postgres/0002_bill_reader.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "bill_unit",
+        include_str!("../migrations/postgres/0003_bill_unit.sql"),
     ),
 ];
 

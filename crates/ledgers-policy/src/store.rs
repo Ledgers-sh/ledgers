@@ -70,6 +70,7 @@ mod tests {
             last_used_at: None,
             revoked_at: None,
             chart_changes: false,
+            unit: None,
         };
 
         let json = serialize_key(&key).expect("serialize");
@@ -103,6 +104,7 @@ mod tests {
             last_used_at: None,
             revoked_at: None,
             chart_changes: false,
+            unit: None,
         };
 
         let json = serialize_key(&key).expect("serialize");
