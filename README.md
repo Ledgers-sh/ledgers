@@ -129,6 +129,30 @@ cargo run -p ledgers-server
 
 The full set of checks CI runs on every pull request is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Run the app
+
+The web app in [`app/`](app/) talks to a local server. Start the server in dev mode, which prints a
+one-time key and allows the app's origin through CORS:
+
+```sh
+LEDGERS_DEV=1 cargo run -p ledgers-server
+# listens on http://127.0.0.1:3000 and prints "dev key: <key>" once
+```
+
+Copy the dev key, then in a second terminal:
+
+```sh
+cd app
+npm install
+npm run dev
+```
+
+Open http://localhost:5173, keep the server URL at `http://127.0.0.1:3000`, paste the key and
+connect. The key is kept in `sessionStorage` for that tab only. Passkey sign-in comes with issue #12.
+
+Checks for the app: `npm run typecheck`, `npm test` (unit tests), `npm run build`, and
+`npm run test:e2e` (Playwright against a local fake API, no server needed).
+
 ## MCP
 
 The MCP adapter exposes the same registry commands as the CLI and HTTP API, filtered by the
