@@ -36,10 +36,12 @@ impl Module for StorageModule {
     }
 
     fn migrations(&self) -> Migrations {
-        // The portable set: the SQLite dialect runs on D1, rusqlite and
-        // (lint-checked) Postgres. A postgres override set is added here
-        // only where the SQL truly differs.
-        Migrations::sqlite(super::SQLITE_MIGRATIONS)
+        // The portable set runs on D1 and rusqlite; the Postgres set is the
+        // same tables plus the base-currency trigger, which is dialect SQL.
+        Migrations {
+            sqlite: super::SQLITE_MIGRATIONS,
+            postgres: super::POSTGRES_MIGRATIONS,
+        }
     }
 
     fn validate_config(&self, _cfg: &dyn Config) -> Result<(), ConfigError> {

@@ -839,6 +839,44 @@ fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
     limits
 }
 
+/// The display name of the development company.
+const DEV_COMPANY_NAME: &str = "Development company";
+
+/// The base currency of the development company (and of the demo book).
+pub const DEV_BASE_CURRENCY: &str = "EUR";
+
+/// Creates the company row with its base currency when it does not exist yet.
+/// An existing row is left as it is: the base currency is set once, at
+/// creation, and never rewritten here.
+///
+/// # Errors
+/// A message naming the failed step.
+async fn ensure_company(
+    deps: &Deps,
+    company_id: &str,
+    name: &str,
+    currency: &str,
+) -> Result<(), String> {
+    let stamp = rfc3339_utc(deps.clock.now());
+    deps.db
+        .execute(&Statement::with_values(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
+                .to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(name),
+                sea_query::Value::from(currency),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(company_id),
+            ],
+        ))
+        .await
+        .map(|_| ())
+        .map_err(|err| format!("create company: {err}"))
+}
+
 /// Development bootstrap for `company_id`: when the company has no chart,
 /// imports the generic SME chart, opens the general journal `GN` and the
 /// current calendar year; then issues one local key with full tier
@@ -847,13 +885,14 @@ fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
 /// # Errors
 /// A message naming the failed step.
 pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+    ensure_company(deps, company_id, DEV_COMPANY_NAME, DEV_BASE_CURRENCY).await?;
     seed_company(deps, company_id, DEV_OWNER).await?;
     issue_key(
         deps,
         company_id,
         "dev local key",
         Tier::PostWithinLimits,
-        bootstrap_limits("EUR"),
+        bootstrap_limits(DEV_BASE_CURRENCY),
     )
     .await
 }
@@ -885,10 +924,13 @@ impl CompanyBootstrap {
                 "company must be 1 to {BOOTSTRAP_NAME_MAX} characters"
             ));
         }
-        if self.currency.len() != 3 || !self.currency.bytes().all(|b| b.is_ascii_uppercase()) {
-            return Err("currency must be a three-letter ISO 4217 code, such as EUR".to_owned());
+        // The code must be the table's own spelling of an ISO 4217 currency
+        // (uppercase, a known code), so a company is never stored in a code
+        // the amount types cannot represent.
+        match ledgers_money::Currency::from_code(&self.currency) {
+            Ok(currency) if currency.code() == self.currency => Ok(()),
+            _ => Err("currency must be an uppercase ISO 4217 code, such as EUR".to_owned()),
         }
-        Ok(())
     }
 }
 

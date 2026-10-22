@@ -18,7 +18,7 @@
 //!   (through the period override), carries balances forward, and a rerun
 //!   is idempotent.
 
-use cratefield_core::Database;
+use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_db::{DbModule, RetryPolicy};
@@ -211,12 +211,28 @@ fn api_ctx(number: &str) -> PostContext {
 
 #[test]
 fn fiscal_close_and_reopen_run_over_the_real_journal() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(scenarios(&*kit.db));
     }
 }
 
 async fn scenarios(db: &dyn Database) {
+    // Create the company with EUR base currency
+    let _ = db
+        .execute(&Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{COMPANY}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            ),
+        ))
+        .await;
+
     let template = chart::parse_chart(CHART).expect("the chart parses");
     commands::import_template(db, COMPANY, &template, NOW.to_owned(), &person())
         .await
@@ -461,7 +477,11 @@ async fn year_end(db: &dyn Database, port: &EntryJournal) {
     .await
     .expect("the year-end close runs over the real journal");
     assert_eq!(
-        first.closing_entry.entry_id,
+        first
+            .closing_entry
+            .as_ref()
+            .expect("a closing entry")
+            .entry_id,
         "yearend-01ARZ3NDEKTSV4RRFFQ69G5FAV-2026"
     );
     // Income 50 + 100 + 7 posted, costs none: 157 EUR clears to retained

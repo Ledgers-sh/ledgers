@@ -120,9 +120,13 @@ async fn post_entry(
 
 #[test]
 fn ac1_required_dimension_missing_rejected() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_ac1(&*kit.db));
     }
 }
@@ -186,9 +190,13 @@ async fn test_ac1(db: &dyn Database) {
 
 #[test]
 fn ac2_per_unit_balancing_generates_clearing_lines() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_ac2(&*kit.db));
     }
 }
@@ -262,9 +270,13 @@ async fn test_ac2(db: &dyn Database) {
 
 #[test]
 fn dimension_forbidden_rejected() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_forbidden(&*kit.db));
     }
 }
@@ -317,9 +329,13 @@ async fn test_forbidden(db: &dyn Database) {
 
 #[test]
 fn unknown_dimension_value_rejected() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_unknown(&*kit.db));
     }
 }
@@ -368,9 +384,13 @@ async fn test_unknown(db: &dyn Database) {
 
 #[test]
 fn unit_unbalanced_rejected() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_unit_unbalanced(&*kit.db));
     }
 }
@@ -434,9 +454,13 @@ async fn test_unit_unbalanced(db: &dyn Database) {
 
 #[test]
 fn trial_balance_dimension_filter() {
-    for kit in
-        TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(ledgers_db::DbModule)])
-    {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(ledgers_db::DbModule),
+        ]
+    }) {
         pollster::block_on(test_trial_balance_filter(&*kit.db));
     }
 }

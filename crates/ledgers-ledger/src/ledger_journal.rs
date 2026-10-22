@@ -13,11 +13,9 @@
 //! - **`balances`** and **`find_entry`** read the posted rows back.
 //! - **`draft_count`** is always `0`: #67 has no draft state (every entry
 //!   is posted on write), so there is nothing to count.
-//! - **`base_currency`** is the currency of the company's posted entries.
-//!   No company row carries a base currency yet (the entries API carries
-//!   one per entry, too), so a company with no entries has none and the
-//!   port refuses rather than guesses. A port post takes its currency from
-//!   its lines, which must agree.
+//! - **`base_currency`** is the currency of the company, stored in the
+//!   company table. A port post takes its currency from its lines, which
+//!   must agree.
 
 use crate::entry::JournalError;
 use crate::error::AccountsError;
@@ -175,11 +173,11 @@ impl Journal for EntryJournal {
     }
 }
 
-/// The base currency of a company: the currency its posted entries carry.
+/// The base currency of a company, read from the company configuration.
 async fn base_currency_of(db: &dyn Database, company_id: &str) -> Result<Currency, AccountsError> {
     let rows = db
         .query(&Statement::with_values(
-            "SELECT base_currency FROM journal_entry WHERE company_id = ? LIMIT 1".to_owned(),
+            "SELECT base_currency FROM company WHERE id = ?".to_owned(),
             vec![SeaValue::from(company_id)],
         ))
         .await?;
@@ -189,7 +187,7 @@ async fn base_currency_of(db: &dyn Database, company_id: &str) -> Result<Currenc
         .and_then(|row| row.get::<String>("base_currency"))
         .ok_or_else(|| {
             DbError::Query(format!(
-                "company {company_id} has no base currency yet: no entry has been posted"
+                "company {company_id} has no base currency configured"
             ))
         })?;
     Ok(code.parse::<Currency>()?)

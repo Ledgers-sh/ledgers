@@ -145,6 +145,26 @@ fn two_racing_bootstraps_mint_one_key() {
 }
 
 #[test]
+fn a_development_company_is_created_with_the_demo_base_currency() {
+    let (db, deps) = fresh();
+    pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("dev bootstrap");
+    let rows = pollster::block_on(db.query(&Statement::new(
+        "SELECT id, base_currency FROM company".to_owned(),
+    )))
+    .expect("company rows");
+    assert_eq!(
+        rows.rows.len(),
+        1,
+        "the dev bootstrap creates the company row"
+    );
+    assert_eq!(rows.rows[0].get::<String>("id").as_deref(), Some(COMPANY));
+    assert_eq!(
+        rows.rows[0].get::<String>("base_currency").as_deref(),
+        Some("EUR")
+    );
+}
+
+#[test]
 fn a_development_key_also_closes_the_bootstrap() {
     let (_db, deps) = fresh();
     pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("dev bootstrap");
@@ -167,6 +187,8 @@ fn invalid_input_is_refused_before_anything_is_written() {
         input("Demo GmbH", "eur"),
         input("Demo GmbH", "EURO"),
         input("Demo GmbH", ""),
+        input("Demo GmbH", "ZZZ"),
+        input("Demo GmbH", "ABC"),
     ] {
         let result = pollster::block_on(dispatch::bootstrap_company(&deps, COMPANY, &bad));
         assert!(

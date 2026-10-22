@@ -109,19 +109,32 @@ pub async fn open_period(db: &dyn Database, company_id: &str, period: &str) {
     .unwrap_or_else(|err| panic!("open {period} for {company_id}: {err}"));
 }
 
-/// A SQLite harness over both modules — the ledger's own tables and
-/// ledgers-db's guards, chain and outbox. Every table a command writes,
-/// `audit_event` included, exists after this.
+/// A SQLite harness over all modules — ledgers-storage for the company
+/// anchor, ledgers-ledger for accounts/journals/entries, and ledgers-db
+/// for guards/chain/outbox. Every table a command writes, `audit_event`
+/// included, exists after this.
 pub fn harness() -> cratefield_testing::TestHarness {
     cratefield_testing::TestHarness::new(vec![
+        Box::new(ledgers_storage::StorageModule),
         Box::new(LedgerModule),
         Box::new(ledgers_db::DbModule),
     ])
 }
 
 /// Gives `company_id` the shared chart, so a case that posts or closes
-/// has accounts to move money between.
+/// has accounts to move money between. Creates the company with EUR base
+/// currency if it doesn't already exist.
 pub async fn mount(db: &dyn Database, company_id: &str) {
+    // Create the company with EUR base currency if it doesn't exist
+    let _ = db
+        .execute(&Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{company_id}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            ),
+        ))
+        .await;
+
     create_chart(db, company_id).await;
 }
 
