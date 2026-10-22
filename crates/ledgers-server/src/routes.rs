@@ -72,7 +72,7 @@ pub struct DomainModule {
 }
 
 impl DomainModule {
-    fn new(
+    pub(crate) fn new(
         name: &'static str,
         dispatch: Arc<dyn Dispatch>,
         routes: Vec<(String, String, String)>,
@@ -227,6 +227,32 @@ impl Module for DomainModule {
     }
 }
 
+/// The command routes of one registry domain (`documents` for
+/// `/v1/documents/...`): `(method, relative path, command name)`. A module
+/// that owns the domain mounts these itself, next to its own routes.
+#[must_use]
+pub fn domain_routes(registry: &Registry, domain: &str) -> Vec<(String, String, String)> {
+    registry
+        .iter()
+        .filter_map(|descriptor| {
+            let after_v1 = descriptor.http_path.strip_prefix("/v1/")?;
+            let first = after_v1.split('/').next().unwrap_or("");
+            (first == domain).then(|| {
+                let relative = after_v1.strip_prefix(&format!("{domain}/")).unwrap_or("");
+                (
+                    descriptor.http_method.clone(),
+                    format!("/{relative}"),
+                    descriptor.name.clone(),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Domains whose routes a module of the same name mounts itself, with the
+/// command routes of the domain (see [`domain_routes`]).
+const MODULE_OWNED: &[&str] = &["documents"];
+
 /// Generate domain modules from the registry.
 ///
 /// # Errors
@@ -245,7 +271,6 @@ pub fn domain_modules(
         "auth",
         "fx",
         "tax",
-        "documents",
         "openapi",
     ];
 
@@ -277,6 +302,7 @@ pub fn domain_modules(
             ));
         }
     }
+    domains.retain(|domain, _| !MODULE_OWNED.contains(&domain.as_str()));
 
     let mut sorted_domains: Vec<_> = domains.into_iter().collect();
     sorted_domains.sort_by_key(|(name, _)| name.clone());

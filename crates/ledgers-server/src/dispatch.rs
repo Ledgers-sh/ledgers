@@ -10,24 +10,30 @@
 //! (docs/PLAN.md sections 3 and 5).
 
 mod approvals;
+mod bills;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
 use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
-    ApiKeys, Clock, Database, DbError, IdGen, Port, Ports, Problem, RateLimiter, Statement,
+    ApiKeys, Blob, Clock, Database, DbError, HttpClient, IdGen, Port, Ports, Problem, RateLimiter,
+    Statement,
 };
 use ledgers_approvals::{
     ApprovalEvent, ApprovalRequest, NewRequest, notice_statement, request_statement,
 };
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
+use ledgers_bills::commands::{
+    BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
+};
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
     Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
     PendingApproval, Plan, Registry,
 };
+use ledgers_documents::commands::{DocumentsGet, DocumentsList, DocumentsRegister};
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
 use ledgers_ledger::report;
@@ -72,6 +78,22 @@ const PROTECTED_TAGS: &[&str] = &[
     "fx-loss",
     "rounding",
 ];
+/// The input of `documents.download_url`: the document id, from the path.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentUrlInput {
+    /// The document id.
+    pub id: String,
+}
+
+/// The output of `documents.download_url`: a relative link and its expiry.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentUrlOutput {
+    /// The link, relative to the API origin.
+    pub url: String,
+    /// When the link stops working (Unix seconds).
+    pub expires_at: i64,
+}
+
 /// Rows a list query returns when the caller names no limit, and the cap.
 const DEFAULT_LIST_LIMIT: u32 = 50;
 const MAX_LIST_LIMIT: u32 = 200;
@@ -87,6 +109,10 @@ pub struct Deps {
     pub id_gen: Arc<dyn IdGen>,
     /// The rate limiter for agent keys, when the runtime provides one.
     pub rate_limiter: Option<Arc<dyn RateLimiter>>,
+    /// The blob store the original documents are kept in.
+    pub blob: Option<Arc<dyn Blob>>,
+    /// The HTTP client the model extractor calls the Messages API with.
+    pub http: Option<Arc<dyn HttpClient>>,
 }
 
 impl Deps {
@@ -99,6 +125,8 @@ impl Deps {
             clock: ports.clock.clone()?,
             id_gen: ports.id_gen.clone()?,
             rate_limiter: ports.rate_limiter.clone(),
+            blob: ports.blob.clone(),
+            http: ports.http.clone(),
         })
     }
 }
@@ -111,6 +139,11 @@ pub struct ServerDispatch {
     company_id: String,
     app_origins: Vec<String>,
     app_url: String,
+    /// The key that signs document download links; empty until configured,
+    /// and then download links are refused.
+    document_key: Vec<u8>,
+    /// The Messages API key of the model extractor, when one is configured.
+    extract_key: Option<String>,
 }
 
 impl ServerDispatch {
@@ -122,7 +155,23 @@ impl ServerDispatch {
             company_id: company_id.into(),
             app_origins: Vec::new(),
             app_url: String::new(),
+            document_key: Vec::new(),
+            extract_key: None,
         }
+    }
+
+    /// The key that signs document download links.
+    #[must_use]
+    pub fn with_document_key(mut self, key: Vec<u8>) -> Self {
+        self.document_key = key;
+        self
+    }
+
+    /// The Messages API key of the model extractor (never logged).
+    #[must_use]
+    pub fn with_extract_key(mut self, key: Option<String>) -> Self {
+        self.extract_key = key.filter(|k| !k.trim().is_empty());
+        self
     }
 
     /// The app's absolute URL: approval links point at `{app_url}/approvals/{id}`.
@@ -378,8 +427,77 @@ impl ServerDispatch {
     }
 }
 
+impl ServerDispatch {
+    /// `documents.register`: the server fills the id and the uploader from the
+    /// credential; the caller cannot choose either.
+    async fn documents_register(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        mut input: Value,
+    ) -> Result<Value, Problem> {
+        let caller = self
+            .caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        fill_server_fields(&mut input, deps, "id", &caller);
+        self.execute(deps, &DocumentsRegister, presented, request_id, input)
+            .await
+    }
+
+    /// `bills.create`: the server fills the id and the author from the credential.
+    async fn bills_create(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        mut input: Value,
+    ) -> Result<Value, Problem> {
+        let caller = self
+            .caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        fill_server_fields(&mut input, deps, "id", &caller);
+        self.execute(deps, &BillsCreate, presented, request_id, input)
+            .await
+    }
+
+    /// `bills.confirm`: a person only. An agent gets 403 (`human-only`).
+    async fn bills_confirm(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        self.person_id(deps, presented.clone(), request_id).await?;
+        self.execute(deps, &BillsConfirm, presented, request_id, input)
+            .await
+    }
+}
+
+/// Sets the id (when the caller left it empty) and the caller label on a
+/// command input. Values the caller sent for these are overwritten.
+fn fill_server_fields(input: &mut Value, deps: &Deps, id_field: &str, caller: &str) {
+    if let Value::Object(map) = input {
+        let empty = map
+            .get(id_field)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty);
+        if empty {
+            map.insert(id_field.to_owned(), Value::String(deps.id_gen.ulid()));
+        }
+        let label_field = if map.contains_key("uploaded_by") {
+            "uploaded_by"
+        } else {
+            "created_by"
+        };
+        map.insert(label_field.to_owned(), Value::String(caller.to_owned()));
+    }
+}
+
 #[async_trait]
 impl Dispatch for ServerDispatch {
+    #[allow(clippy::too_many_lines)]
     async fn dispatch(
         &self,
         deps: &Deps,
@@ -446,6 +564,45 @@ impl Dispatch for ServerDispatch {
                     input,
                 )
                 .await
+            }
+            "documents.register" => {
+                self.documents_register(deps, presented, request_id, input)
+                    .await
+            }
+            "documents.list" => {
+                self.execute(deps, &DocumentsList, presented, request_id, input)
+                    .await
+            }
+            "documents.get" => {
+                self.execute(deps, &DocumentsGet, presented, request_id, input)
+                    .await
+            }
+            "documents.download_url" => {
+                self.documents_download_url(deps, presented, request_id, input)
+                    .await
+            }
+            "bills.extract" => self.bills_extract(deps, presented, request_id, input).await,
+            "bills.create" => self.bills_create(deps, presented, request_id, input).await,
+            "bills.list" => {
+                self.execute(deps, &BillsList, presented, request_id, input)
+                    .await
+            }
+            "bills.get" => {
+                self.execute(deps, &BillsGet, presented, request_id, input)
+                    .await
+            }
+            "bills.update" => {
+                self.execute(deps, &BillsUpdate, presented, request_id, input)
+                    .await
+            }
+            "bills.post" => {
+                self.execute(deps, &BillsPost, presented, request_id, input)
+                    .await
+            }
+            "bills.confirm" => self.bills_confirm(deps, presented, request_id, input).await,
+            "bills.discard" => {
+                self.execute(deps, &BillsDiscard, presented, request_id, input)
+                    .await
             }
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
@@ -1059,6 +1216,7 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 /// # Panics
 /// Never in practice: the command names are fixed and unique.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
         (
@@ -1143,6 +1301,86 @@ pub fn registry() -> Registry {
             (
                 schema_of::<crate::agent_keys::KeysRevokeInput>(),
                 schema_of::<crate::agent_keys::KeysRevokeOutput>(),
+            ),
+        ),
+    ]);
+    let mut schemas = schemas;
+    schemas.extend([
+        (
+            "documents.list",
+            (
+                schema_of::<ledgers_documents::commands::ListInput>(),
+                schema_of::<ledgers_documents::commands::ListOutput>(),
+            ),
+        ),
+        (
+            "documents.get",
+            (
+                schema_of::<ledgers_documents::commands::GetInput>(),
+                schema_of::<ledgers_documents::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "documents.download_url",
+            (
+                schema_of::<DocumentUrlInput>(),
+                schema_of::<DocumentUrlOutput>(),
+            ),
+        ),
+        (
+            "bills.extract",
+            (
+                schema_of::<bills::ExtractInput>(),
+                schema_of::<bills::ExtractResponse>(),
+            ),
+        ),
+        (
+            "bills.create",
+            (
+                schema_of::<ledgers_bills::model::BillInput>(),
+                schema_of::<ledgers_bills::commands::CreateOutput>(),
+            ),
+        ),
+        (
+            "bills.update",
+            (
+                schema_of::<ledgers_bills::commands::UpdateInput>(),
+                schema_of::<ledgers_bills::commands::CreateOutput>(),
+            ),
+        ),
+        (
+            "bills.get",
+            (
+                schema_of::<ledgers_bills::commands::GetInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "bills.list",
+            (
+                schema_of::<ledgers_bills::commands::ListInput>(),
+                schema_of::<ledgers_bills::commands::ListOutput>(),
+            ),
+        ),
+        (
+            "bills.post",
+            (
+                schema_of::<ledgers_bills::commands::PostInput>(),
+                schema_of::<ledgers_bills::commands::PostOutput>(),
+            ),
+        ),
+        (
+            "bills.discard",
+            (
+                schema_of::<ledgers_bills::commands::DiscardInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "bills.confirm",
+            (
+                schema_of::<ledgers_bills::commands::ConfirmInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
             ),
         ),
     ]);
