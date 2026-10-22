@@ -10,6 +10,7 @@ publish = false
 cratefield-core = { workspace = true }
 cratefield-text-guard = { workspace = true }
 ledgers-commands = { workspace = true }
+ledgers-db = { workspace = true }
 ledgers-documents = { workspace = true }
 ledgers-extract = { workspace = true }
 ledgers-ledger = { workspace = true }

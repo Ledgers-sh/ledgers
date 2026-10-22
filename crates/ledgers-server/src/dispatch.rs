@@ -18,6 +18,7 @@ use crate::routes::{Dispatch, Presented};
 use accounts::AccountsGet;
 use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
+use bills::PortTransport;
 use cratefield_core::{
     ApiKeys, Blob, Clock, Database, DbError, HttpClient, IdGen, Port, Ports, Problem, RateLimiter,
     Statement,
@@ -29,6 +30,9 @@ use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_bills::commands::{
     BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
+};
+use ledgers_bills::parties::{
+    PartiesCheckVat, PartiesCreate, PartiesList, PartiesMerge, PartiesSetBank, PartiesUpdate,
 };
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
@@ -487,6 +491,48 @@ impl ServerDispatch {
         self.execute(deps, &BillsConfirm, presented, request_id, input)
             .await
     }
+
+    /// `parties.set_bank`: a person only. An agent gets 403 (`human-only`).
+    async fn parties_set_bank(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let person = self.person_id(deps, presented.clone(), request_id).await?;
+        let cmd = PartiesSetBank::new(Some(person));
+        self.execute(deps, &cmd, presented, request_id, input).await
+    }
+
+    /// `parties.check_vat`: agent allowed, validates VAT via VIES.
+    async fn parties_check_vat(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let transport = deps.http.clone().map(|http| {
+            std::sync::Arc::new(PortTransport(http))
+                as std::sync::Arc<dyn ledgers_extract::llm::Transport>
+        });
+        let cmd = PartiesCheckVat::new(transport);
+        self.execute(deps, &cmd, presented, request_id, input).await
+    }
+
+    /// `parties.merge`: a person only. An agent gets 403 (`human-only`).
+    async fn parties_merge(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let person = self.person_id(deps, presented.clone(), request_id).await?;
+        let cmd = PartiesMerge::new(Some(person));
+        self.execute(deps, &cmd, presented, request_id, input).await
+    }
 }
 
 /// Sets the id (when the caller left it empty) and the caller label on a
@@ -626,6 +672,27 @@ impl Dispatch for ServerDispatch {
                 self.execute(deps, &BillsDiscard, presented, request_id, input)
                     .await
             }
+            "parties.list" => {
+                self.execute(deps, &PartiesList, presented, request_id, input)
+                    .await
+            }
+            "parties.create" => {
+                self.execute(deps, &PartiesCreate, presented, request_id, input)
+                    .await
+            }
+            "parties.update" => {
+                self.execute(deps, &PartiesUpdate, presented, request_id, input)
+                    .await
+            }
+            "parties.set_bank" => {
+                self.parties_set_bank(deps, presented, request_id, input)
+                    .await
+            }
+            "parties.check_vat" => {
+                self.parties_check_vat(deps, presented, request_id, input)
+                    .await
+            }
+            "parties.merge" => self.parties_merge(deps, presented, request_id, input).await,
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
@@ -1477,6 +1544,48 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::commands::ConfirmInput>(),
                 schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "parties.list",
+            (
+                schema_of::<ledgers_bills::parties::ListInput>(),
+                schema_of::<ledgers_bills::parties::ListOutput>(),
+            ),
+        ),
+        (
+            "parties.create",
+            (
+                schema_of::<ledgers_bills::parties::CreateInput>(),
+                schema_of::<ledgers_bills::parties::CreateOutput>(),
+            ),
+        ),
+        (
+            "parties.update",
+            (
+                schema_of::<ledgers_bills::parties::UpdateInput>(),
+                schema_of::<ledgers_bills::parties::UpdateOutput>(),
+            ),
+        ),
+        (
+            "parties.set_bank",
+            (
+                schema_of::<ledgers_bills::parties::SetBankInput>(),
+                schema_of::<ledgers_bills::parties::SetBankOutput>(),
+            ),
+        ),
+        (
+            "parties.check_vat",
+            (
+                schema_of::<ledgers_bills::parties::CheckVatInput>(),
+                schema_of::<ledgers_bills::parties::CheckVatOutput>(),
+            ),
+        ),
+        (
+            "parties.merge",
+            (
+                schema_of::<ledgers_bills::parties::MergeInput>(),
+                schema_of::<ledgers_bills::parties::MergeOutput>(),
             ),
         ),
     ]);

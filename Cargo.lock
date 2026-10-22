@@ -2165,6 +2165,7 @@ dependencies = [
  "cratefield-testing",
  "cratefield-text-guard",
  "ledgers-commands",
+ "ledgers-db",
  "ledgers-documents",
  "ledgers-extract",
  "ledgers-ledger",

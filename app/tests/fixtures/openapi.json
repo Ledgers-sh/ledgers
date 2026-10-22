@@ -2740,6 +2740,217 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/parties/{id}/merge": {
+      "post": {
+        "operationId": "parties_merge",
+        "description": "Execute command: parties.merge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "MergeInput",
+                "description": "The input of `parties.merge`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The surviving party id (from the path).",
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "The party to merge away.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "from"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "MergeOutput",
+                  "description": "The output of `parties.merge`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The surviving party.",
+                      "$ref": "#/components/schemas/PartyView"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.merge",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties merge",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/merge\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/parties/{id}/set-bank": {
+      "post": {
+        "operationId": "parties_set_bank",
+        "description": "Execute command: parties.set_bank",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SetBankInput",
+                "description": "The input of `parties.set_bank`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party id (from the path).",
+                    "type": "string"
+                  },
+                  "iban": {
+                    "description": "The new IBAN.",
+                    "type": "string"
+                  },
+                  "bic": {
+                    "description": "The new BIC (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "reason": {
+                    "description": "Reason for the change.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "iban",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "SetBankOutput",
+                  "description": "The output of `parties.set_bank`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The updated party.",
+                      "$ref": "#/components/schemas/PartyView"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.set_bank",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties set-bank",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/set-bank\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/reports/account-balance-by-dimension": {
       "get": {
         "operationId": "reports_account_balance_by_dimension",
@@ -4087,6 +4298,106 @@
           "limits",
           "created_at",
           "created_by"
+        ]
+      },
+      "PartyView": {
+        "description": "A party with latest VIES result.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The party id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The legal name.",
+            "type": "string"
+          },
+          "vat_id": {
+            "description": "The VAT id (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "iban": {
+            "description": "The IBAN (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bic": {
+            "description": "The BIC (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roles": {
+            "description": "Roles: 'customer', 'vendor', or 'both'.",
+            "type": "string"
+          },
+          "merged_into": {
+            "description": "Whether merged away (null if not merged).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latest_vies": {
+            "description": "Latest VIES check result (if any).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViesResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "personal_data": {
+            "description": "Whether this party's name/address/contacts is personal data.",
+            "type": "boolean"
+          },
+          "possible_duplicates": {
+            "description": "IDs of other unmerged parties with possible duplicates (same VAT id, IBAN, or name).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "roles",
+          "personal_data",
+          "possible_duplicates"
+        ]
+      },
+      "ViesResult": {
+        "description": "The latest VIES check result for a party.",
+        "type": "object",
+        "properties": {
+          "valid": {
+            "description": "Whether the VAT number is valid.",
+            "type": "boolean"
+          },
+          "consultation_number": {
+            "description": "The VIES request identifier (consultation number).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checked_at": {
+            "description": "When we checked it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "valid",
+          "checked_at"
         ]
       },
       "DimensionValueView": {
