@@ -172,6 +172,8 @@ fn list_reads() -> Vec<(&'static str, Value)> {
         ("tax_settings.get", json!({})),
         ("company.get", json!({})),
         ("fiscal_years.list", json!({})),
+        ("units.list", json!({})),
+        ("reports.units_summary", json!({"period": "2026-10"})),
     ]
 }
 
