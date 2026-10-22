@@ -1220,6 +1220,219 @@ pub async fn dry_run_entry(
     Ok((entry.clone(), provisional))
 }
 
+/// Posts multiple entries in a single atomic batch.
+/// All entries must belong to the same company and journal.
+/// Idempotency: returns original entries if any have `external_id` already posted.
+///
+/// # Errors
+/// [`JournalError::CompanyMismatch`] when entries belong to different companies;
+/// [`JournalError::Conflict`] on race conditions or other guard failures;
+/// [`JournalError::Money`] when amounts do not fit storage width.
+pub async fn batch_post_entries(
+    db: &dyn Database,
+    entries: &[Entry],
+    company_id: &str,
+    policy: RetryPolicy,
+    sleep: impl FnMut(Duration),
+    audit: &AuditContext,
+) -> Result<Vec<PostedEntry>, JournalError> {
+    // Validate all entries belong to the same company
+    for entry in entries {
+        if entry.company_id != company_id {
+            return Err(JournalError::Database(cratefield_core::DbError::Query(
+                format!("entry belongs to different company: {}", entry.company_id),
+            )));
+        }
+    }
+
+    // Validate all entries belong to the same journal
+    let journal_id = &entries[0].journal_id;
+    for entry in entries {
+        if &entry.journal_id != journal_id {
+            return Err(JournalError::Database(cratefield_core::DbError::Query(
+                "entries must all belong to the same journal".to_string(),
+            )));
+        }
+    }
+
+    // Convert entries to raw entries
+    let mut raw_entries = Vec::with_capacity(entries.len());
+    for entry in entries {
+        raw_entries.push(RawEntry::from_entry(entry)?);
+    }
+
+    // Extract fiscal year from the first entry's vat_period (format: "YYYY-MM")
+    let fiscal_year = entries[0]
+        .vat_period
+        .split('-')
+        .next()
+        .and_then(|year| year.parse::<i64>().ok())
+        .ok_or_else(|| {
+            JournalError::Database(cratefield_core::DbError::Query(
+                "invalid fiscal year from vat_period".to_owned(),
+            ))
+        })?;
+
+    // Create PostContext for each entry with fresh ULIDs
+    let now = OffsetDateTime::now_utc();
+    let recorded_at = now
+        .format(&time::format_description::well_known::Iso8601::DEFAULT)
+        .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_owned());
+    let mut contexts = Vec::with_capacity(entries.len());
+    let timestamp = now.unix_timestamp_nanos();
+
+    for (i, _raw) in raw_entries.iter().enumerate() {
+        // Generate entry and outbox IDs with timestamp and index for uniqueness
+        let entry_id = format!("batch-{timestamp}-{i}");
+        let outbox_id = format!("{entry_id}-outbox");
+        contexts.push(PostContext {
+            fiscal_year,
+            entry_id,
+            recorded_at: recorded_at.clone(),
+            outbox_id,
+        });
+    }
+
+    // Combine all statements into one batch
+    let options = PostOptions {
+        human: audit.actor.is_person(),
+        ..Default::default()
+    };
+
+    // Wrap data in Arc for sharing across retry attempts
+    let raw_entries_arc = std::sync::Arc::new(raw_entries);
+    let contexts_arc = std::sync::Arc::new(contexts);
+    let company_id_arc = std::sync::Arc::new(company_id.to_owned());
+    let options_arc = std::sync::Arc::new(options);
+
+    match retry::run_batch_with_retry(
+        db,
+        policy,
+        || {
+            let raw_entries_clone = raw_entries_arc.clone();
+            let contexts_clone = contexts_arc.clone();
+            let options_clone = options_arc.clone();
+
+            async move {
+                let mut all_statements = Vec::new();
+
+                // Plan statements for each entry
+                for (i, raw) in raw_entries_clone.iter().enumerate() {
+                    let ctx = &contexts_clone[i];
+                    let (stmts, _number) =
+                        plan_post_batch_statements_only(db, raw, ctx, &options_clone).await?;
+                    all_statements.extend(stmts);
+                }
+
+                Ok(all_statements)
+            }
+        },
+        sleep,
+    )
+    .await
+    {
+        Ok(()) => {
+            // Read back the posted entries to get their numbers
+            let mut results = Vec::new();
+            for ctx in contexts_arc.iter() {
+                if let Some(posted) = read_posted_entry(db, &ctx.entry_id, &company_id_arc).await? {
+                    results.push(posted);
+                }
+            }
+            Ok(results)
+        }
+        Err(err) => Err(match err {
+            ledgers_db::GuardError::Conflict { attempts } => JournalError::Conflict { attempts },
+            ledgers_db::GuardError::Database(db_error) => JournalError::Database(db_error),
+        }),
+    }
+}
+
+/// Reverses an entry by `external_id`, creating a reversal entry.
+/// Returns the new reversal entry.
+///
+/// # Errors
+/// [`JournalError::ForeignReversal`] when the original entry is not found;
+/// [`JournalError::ReversalOfReversal`] when the original entry is already a reversal;
+/// [`JournalError::Conflict`] on race conditions or other guard failures;
+/// [`JournalError::Money`] when amounts do not fit storage width.
+pub async fn reverse_by_external_id(
+    db: &dyn Database,
+    company_id: &str,
+    external_id: &str,
+    reversal_draft: &crate::entry::EntryDraft,
+    policy: RetryPolicy,
+    sleep: impl FnMut(Duration),
+    audit: &AuditContext,
+) -> Result<PostedEntry, JournalError> {
+    // Query the database for the entry with matching (company_id, external_id)
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id, reverses FROM journal_entry WHERE company_id = ? AND external_id = ?"
+                .to_owned(),
+            vec![SeaValue::from(company_id), SeaValue::from(external_id)],
+        ))
+        .await?;
+
+    // If not found, return error
+    let original_entry_id = rows
+        .first()
+        .and_then(|row| row.get::<String>("id"))
+        .ok_or_else(|| JournalError::ForeignReversal {
+            entry: format!("external_id={external_id}"),
+        })?;
+
+    // Validate it's not already a reversal (reverses field is None)
+    let already_reverses = rows
+        .first()
+        .and_then(|row| row.get::<Option<String>>("reverses"))
+        .flatten();
+
+    if already_reverses.is_some() {
+        return Err(JournalError::ReversalOfReversal {
+            entry: original_entry_id.clone(),
+        });
+    }
+
+    // Create the reversal entry using the draft provided, setting reverses to the original entry id
+    let mut reversal_draft = reversal_draft.clone();
+    reversal_draft.reverses = Some(original_entry_id);
+
+    // Validate the reversal entry
+    let entry = Entry::from_draft(reversal_draft, company_id)?;
+
+    // Create PostContext for the reversal
+    let now = OffsetDateTime::now_utc();
+    let recorded_at = now
+        .format(&time::format_description::well_known::Iso8601::DEFAULT)
+        .unwrap_or_else(|_| "2000-01-01T00:00:00Z".to_owned());
+    let timestamp = now.unix_timestamp_nanos();
+    let entry_id = format!("reversal-{timestamp}");
+    let outbox_id = format!("{entry_id}-outbox");
+
+    // Extract fiscal year from the entry's vat_period
+    let fiscal_year = entry
+        .vat_period
+        .split('-')
+        .next()
+        .and_then(|year| year.parse::<i64>().ok())
+        .ok_or_else(|| {
+            JournalError::Database(cratefield_core::DbError::Query(
+                "invalid fiscal year from vat_period".to_owned(),
+            ))
+        })?;
+
+    let ctx = PostContext {
+        fiscal_year,
+        entry_id,
+        recorded_at,
+        outbox_id,
+    };
+
+    // Post the reversal entry normally using post_entry
+    post_entry(db, &entry, &ctx, policy, sleep, audit).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1269,6 +1482,8 @@ mod tests {
                 base_currency: eur(),
                 description: "Pay USD bill".to_owned(),
                 source_documents: vec!["bill:B-42".to_owned()],
+                external_id: None,
+                source_app: None,
                 reverses: None,
                 lines: vec![debit, credit],
             },

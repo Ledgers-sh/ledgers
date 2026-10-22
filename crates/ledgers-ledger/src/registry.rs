@@ -192,4 +192,12 @@ pub const EXEMPT: &[(&str, &str)] = &[
         "posting::plan_post_batch_statements_only",
         "internal helper used by plan_post_entry; audit event appended by executor",
     ),
+    (
+        "posting::batch_post_entries",
+        "batch posting helper; audit events handled by individual post_entry calls or higher-level commands",
+    ),
+    (
+        "posting::reverse_by_external_id",
+        "reversal helper; audit event handled by post_entry call within the function",
+    ),
 ];

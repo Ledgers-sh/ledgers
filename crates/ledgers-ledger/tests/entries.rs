@@ -39,6 +39,8 @@ fn standard_entry_draft(journal_id: &str, description: &str) -> EntryDraft {
         base_currency: ledgers_money::Currency::from_code("EUR").unwrap(),
         description: description.to_owned(),
         source_documents: vec![],
+        external_id: None,
+        source_app: None,
         reverses: None,
         lines: vec![
             Line {
@@ -129,6 +131,8 @@ fn same_idempotency_key_posts_once() {
             base_currency: ledgers_money::Currency::from_code("EUR").unwrap(),
             description: "test".to_owned(),
             source_documents: vec![],
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines: vec![
                 ledgers_ledger::Line {
@@ -215,6 +219,8 @@ fn dry_run_returns_provisional_number() {
             base_currency: ledgers_money::Currency::from_code("EUR").unwrap(),
             description: "test".to_owned(),
             source_documents: vec![],
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines: vec![
                 ledgers_ledger::Line {
@@ -359,6 +365,8 @@ fn reversal_of_reversal_is_rejected() {
                 base_currency: original.base_currency,
                 description: "reversal".to_owned(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 lines: reversal_lines(&original),
             },
             COMPANY_ID,
@@ -369,6 +377,7 @@ fn reversal_of_reversal_is_rejected() {
         // Try to reverse the reversal - should fail
         let reversal_of_reversal = Entry::from_draft(
             EntryDraft {
+                external_id: None,
                 reverses: Some("e2".to_owned()),
                 journal_id: "j1".to_owned(),
                 document_date: original.document_date,
@@ -377,6 +386,7 @@ fn reversal_of_reversal_is_rejected() {
                 base_currency: original.base_currency,
                 description: "reversal of reversal".to_owned(),
                 source_documents: vec![],
+                source_app: None,
                 lines: original.lines.clone(),
             },
             COMPANY_ID,
@@ -421,6 +431,8 @@ fn double_reversal_is_rejected() {
                 base_currency: original.base_currency,
                 description: "first reversal".to_owned(),
                 source_documents: vec![],
+                external_id: None,
+                source_app: None,
                 lines: reversal_lines(&original),
             },
             COMPANY_ID,
@@ -431,6 +443,7 @@ fn double_reversal_is_rejected() {
         // Try to reverse again - should fail (guard prevents double reversals)
         let second_reversal = Entry::from_draft(
             EntryDraft {
+                external_id: None,
                 reverses: Some(original_posted.entry_id.clone()),
                 journal_id: "j1".to_owned(),
                 document_date: original.document_date,
@@ -439,6 +452,7 @@ fn double_reversal_is_rejected() {
                 base_currency: original.base_currency,
                 description: "second reversal".to_owned(),
                 source_documents: vec![],
+                source_app: None,
                 lines: reversal_lines(&original),
             },
             COMPANY_ID,
