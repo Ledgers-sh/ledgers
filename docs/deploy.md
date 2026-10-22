@@ -199,6 +199,24 @@ The app shows Bills only when the server's OpenAPI document lists
 4. Agent keys still work: connect through "Advanced: connect with an agent key"
    with a key from step 6 and read the overview.
 
+### Request timing (staging only)
+
+`wrangler.toml` sets `LEDGERS_SERVER_TIMING = "1"` on the staging environment.
+Domain command responses then carry a `Server-Timing` header:
+
+```
+server-timing: total;dur=13.00, db;dur=9.00, db-calls;dur=10, db-statements;dur=10
+```
+
+- `total` is the Worker's wall time for the request.
+- `db` is the time spent in database calls, in milliseconds.
+- `db-calls` and `db-statements` are counts carried in the `dur` slot:
+  round trips to D1, and the SQL statements inside them (a batch counts once
+  per statement).
+
+Check it with `curl -sD - -o /dev/null -H "Authorization: Bearer $KEY" https://api-staging.ledgers.sh/v1/accounts/1030`.
+Never set the variable on production; the header is for staging measurements.
+
 ## Local development
 
 Sign-in on a laptop needs a publicly routable issuer. The native server

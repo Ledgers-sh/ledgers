@@ -37,6 +37,12 @@ pub struct KeyPolicy {
 }
 
 impl KeyPolicy {
+    /// The agent keys this policy was loaded with, by id.
+    #[must_use]
+    pub fn agent_keys(&self) -> &BTreeMap<String, AgentKey> {
+        &self.keys
+    }
+
     /// Adds one key to the engine, replacing any key with the same id. The
     /// server uses this for the in-process seeding principal, which has no
     /// `agent_key` row; a stored key is never replaced by a request.

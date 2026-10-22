@@ -172,9 +172,16 @@ impl ServerDispatch {
             now: rfc3339_utc(now_at),
         };
         let now = ctx.now.clone();
-        let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
-            .await
-            .map_err(fail)?;
+        // Reads never touch protected accounts (their previews are empty), so
+        // only a command that can move money loads the protected-account set.
+        let policy = load_policy_with(
+            deps.db.as_ref(),
+            &self.company_id,
+            now_at,
+            C::TIER != Tier::Read,
+        )
+        .await
+        .map_err(fail)?;
         let policy = match &presented {
             Presented::Principal(principal) => internal_agent_policy(policy, principal, now_at),
             Presented::Bearer(_) | Presented::Session(_) => policy,
@@ -185,6 +192,9 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     company_id: self.company_id.clone(),
+                    // The policy above already read every agent key of the
+                    // company, so the key is not read a second time.
+                    preloaded: Some(policy.agent_keys().clone()),
                 }),
                 token,
             ),
@@ -304,6 +314,7 @@ impl ServerDispatch {
                 db: Arc::clone(&deps.db),
                 clock: Arc::clone(&deps.clock),
                 company_id: self.company_id.clone(),
+                preloaded: None,
             }
             .authenticate(&token)
             .await
@@ -467,11 +478,23 @@ impl Dispatch for ServerDispatch {
         }
     }
 
+    async fn verified_key_id(&self, deps: &Deps, credential: &str) -> Option<String> {
+        // The same verify the command path runs, without the policy read:
+        // a revoked or unknown credential verifies to nothing.
+        api_keys(&deps.db, &deps.clock)
+            .verify(credential)
+            .await
+            .ok()
+            .flatten()
+            .map(|verified| verified.subject)
+    }
+
     async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem> {
         let authenticator = KeyStore {
             db: Arc::clone(&deps.db),
             clock: Arc::clone(&deps.clock),
             company_id: self.company_id.clone(),
+            preloaded: None,
         };
         authenticator
             .authenticate(&credential.to_owned())
@@ -552,6 +575,9 @@ pub(crate) struct KeyStore {
     pub(crate) db: Arc<dyn Database>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) company_id: String,
+    /// The company's agent keys when the caller already loaded them (the
+    /// command path loads the policy first); `None` reads the key row.
+    pub(crate) preloaded: Option<BTreeMap<String, AgentKey>>,
 }
 
 #[async_trait]
@@ -561,9 +587,11 @@ impl Authenticator for KeyStore {
             .verify(credential)
             .await?
             .ok_or(CommandError::Unauthenticated)?;
-        let key = load_key(self.db.as_ref(), &self.company_id, &verified.subject)
-            .await?
-            .ok_or(CommandError::Unauthenticated)?;
+        let key = match &self.preloaded {
+            Some(keys) => keys.get(&verified.subject).cloned(),
+            None => load_key(self.db.as_ref(), &self.company_id, &verified.subject).await?,
+        }
+        .ok_or(CommandError::Unauthenticated)?;
         let now = self.clock.now();
         if key.revoked_at.is_some_and(|at| at <= now) || key.expires_at.is_some_and(|at| at <= now)
         {
@@ -646,6 +674,19 @@ pub(crate) async fn load_policy(
     company_id: &str,
     now: OffsetDateTime,
 ) -> Result<KeyPolicy, CommandError> {
+    load_policy_with(db, company_id, now, true).await
+}
+
+/// [`load_policy`], with the chart's protected-account set read only when
+/// `with_protected` is set. An empty set makes the protected-account rule a
+/// no-op, so the caller must pass `false` only for a command whose preview
+/// touches no accounts (every read-tier command's preview is empty).
+pub(crate) async fn load_policy_with(
+    db: &dyn Database,
+    company_id: &str,
+    now: OffsetDateTime,
+    with_protected: bool,
+) -> Result<KeyPolicy, CommandError> {
     let rows = db
         .query(&Statement::with_values(
             "SELECT id, policy FROM agent_key WHERE company_id = ?".to_owned(),
@@ -660,20 +701,24 @@ pub(crate) async fn load_policy(
     let keys = parse_keys(pairs)
         .map_err(|err| CommandError::InvalidInput(format!("agent key policy: {err}")))?;
 
-    let accounts = ledgers_ledger::commands::list_accounts(db, company_id, true)
-        .await
-        .map_err(|err| CommandError::Domain(err.to_problem()))?;
-    let protected: BTreeSet<String> = accounts
-        .iter()
-        .filter(|entry| {
-            entry
-                .account
-                .tags
-                .iter()
-                .any(|tag| PROTECTED_TAGS.contains(&tag.as_str()))
-        })
-        .map(|entry| entry.account.number.clone())
-        .collect();
+    let protected: BTreeSet<String> = if with_protected {
+        let accounts = ledgers_ledger::commands::list_accounts(db, company_id, true)
+            .await
+            .map_err(|err| CommandError::Domain(err.to_problem()))?;
+        accounts
+            .iter()
+            .filter(|entry| {
+                entry
+                    .account
+                    .tags
+                    .iter()
+                    .any(|tag| PROTECTED_TAGS.contains(&tag.as_str()))
+            })
+            .map(|entry| entry.account.number.clone())
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
 
     Ok(KeyPolicy::new(keys, protected, now, UtcOffset::UTC))
 }
