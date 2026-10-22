@@ -18,6 +18,8 @@ const SCREENS: { name: string; hash: string; person?: boolean }[] = [
   { name: 'reports', hash: '#/reports' },
   // The approvals inbox is a person's screen: an agent key sees a notice instead.
   { name: 'approvals', hash: '#/approvals', person: true },
+  // Agent keys are managed by a person under Settings.
+  { name: 'agent-keys', hash: '#/settings/agent-keys', person: true },
 ];
 
 async function blockingViolations(page: Page) {

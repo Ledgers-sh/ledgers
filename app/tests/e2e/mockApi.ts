@@ -9,12 +9,10 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
-/**
- * Ports are configurable so parallel checkouts do not share one fake API or
- * one preview server: E2E_API_PORT (default 3000) and E2E_WEB_PORT (default 5173).
- */
-const PORT = Number(process.env.E2E_API_PORT ?? 3000);
-const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5173);
+/** Port of the fake API. LEDGERS_MOCK_PORT moves it when another local server holds 3000. */
+const PORT = Number(process.env.LEDGERS_MOCK_PORT ?? 3000);
+/** Port of the app under test. LEDGERS_E2E_PORT moves it when another local server holds 5173. */
+const WEB_PORT = Number(process.env.LEDGERS_E2E_PORT ?? 5173);
 export const API_ORIGIN = `http://127.0.0.1:${PORT}`;
 export const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 export const API_KEY = 'test_sk_mock_0123456789';
@@ -389,10 +387,76 @@ function handleApprovals(method: string, url: URL, bodyText: string): Reply | nu
 }
 
 /** Routes one request against the in-memory ledger. */
+/** An agent key as the fake keeps it. The token is held here only, like the server's hash. */
+interface MockKey {
+  id: string;
+  name: string;
+  prefix: string;
+  tier: string;
+  limits: Record<string, { per_entry: string; per_day: string }>;
+  created_at: string;
+  created_by: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token: string;
+}
+
+let keyCounter = 0;
+const keyState: { keys: MockKey[] } = { keys: [] };
+
+function keyView(key: MockKey) {
+  const { token: _token, ...view } = key;
+  return view;
+}
+
+function hex(length: number, seed: number): string {
+  return Array.from({ length }, (_, i) => ((seed * 31 + i * 7) % 16).toString(16)).join('');
+}
+
+/** Key commands, for the signed-in person (keys.list, keys.create, keys.revoke). */
+function handleKeys(method: string, path: string, bodyText: string): Reply | null {
+  if (method === 'GET' && path === '/v1/keys') return { status: 200, body: { keys: keyState.keys.map(keyView) } };
+  if (method === 'POST' && path === '/v1/keys') {
+    const input = JSON.parse(bodyText || '{}') as { name?: string; tier?: string; limits?: MockKey['limits'] };
+    const name = (input.name ?? '').trim();
+    if (name === '') return problem(400, 'Invalid input', 'name is required');
+    keyCounter += 1;
+    const prefix = `lk_live_${hex(16, keyCounter)}`;
+    const token = `${prefix}_${hex(64, keyCounter + 3)}`;
+    const key: MockKey = {
+      id: `01KEY${String(keyCounter).padStart(20, '0')}`,
+      name,
+      prefix,
+      tier: input.tier ?? 'read',
+      limits: input.limits ?? {},
+      created_at: '2026-10-22T10:00:00Z',
+      created_by: PERSON.personId,
+      last_used_at: null,
+      revoked_at: null,
+      token,
+    };
+    keyState.keys.push(key);
+    return { status: 200, body: { key: keyView(key), token } };
+  }
+  const revoke = /^\/v1\/keys\/([^/]+)\/revoke$/.exec(path);
+  if (method === 'POST' && revoke) {
+    const key = keyState.keys.find((k) => k.id === decodeURIComponent(revoke[1]));
+    if (!key) return problem(404, 'Not found');
+    key.revoked_at ??= '2026-10-22T11:00:00Z';
+    return { status: 200, body: { key: keyView(key) } };
+  }
+  return null;
+}
+
 function handle(method: string, url: URL, bodyText: string): Reply {
   const path = url.pathname;
   const approvals = handleApprovals(method, url, bodyText);
   if (approvals) return approvals;
+  if (path.startsWith('/v1/keys')) {
+    const keys = handleKeys(method, path, bodyText);
+    if (keys) return keys;
+  }
+  if (method === 'GET' && path === '/v1/auth/session' && state.person) return { status: 200, body: PERSON };
 
   if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
   if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
@@ -519,6 +583,8 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.approvals = options.person ? approvalSeed() : [];
   state.decisions = [];
   state.bulk = [];
+  keyState.keys = [];
+  keyCounter = 0;
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -552,7 +618,12 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end(JSON.stringify(problem(401, 'Unauthorized').body));
           return;
         }
-        // Agent keys may not review approvals (the server answers 403).
+        // Agent keys may not manage keys or review approvals (the server answers 403).
+        if (path.startsWith('/v1/keys') && req.headers.authorization === `Bearer ${API_KEY}`) {
+          res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
+          res.end(JSON.stringify(problem(403, 'Human-only', 'this command is human-only').body));
+          return;
+        }
         if (!asPerson && path.startsWith('/v1/approval-requests')) {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Forbidden').body));

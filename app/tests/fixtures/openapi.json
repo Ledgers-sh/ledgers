@@ -750,6 +750,282 @@
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/entries/{external_id}/reverse\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
+    "/v1/keys": {
+      "post": {
+        "operationId": "keys_create",
+        "description": "Execute command: keys.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "KeysCreateInput",
+                "description": "Input of `keys.create`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "A label for the key, shown in the app and the audit trail.",
+                    "type": "string"
+                  },
+                  "tier": {
+                    "description": "`read`, `draft` or `post-within-limits`.",
+                    "type": "string"
+                  },
+                  "limits": {
+                    "description": "Per-currency limits, keyed by ISO 4217 code. A currency with no entry\nis not allowed at all (fail closed).",
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/LimitAmounts"
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "tier",
+                  "limits"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "KeysCreateOutput",
+                  "description": "Output of `keys.create`: the key, and its full token, shown once.",
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "description": "The new key.",
+                      "$ref": "#/components/schemas/AgentKeyView"
+                    },
+                    "token": {
+                      "description": "The full bearer token. It is not stored and cannot be shown again.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "token"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "keys.create",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers keys create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/keys\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "keys_list",
+        "description": "Execute command: keys.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "KeysListOutput",
+                  "description": "Output of `keys.list`.",
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "description": "Every agent key of the company, revoked ones included.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentKeyView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "keys"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "keys.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers keys list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/keys\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/keys/{id}/revoke": {
+      "post": {
+        "operationId": "keys_revoke",
+        "description": "Execute command: keys.revoke",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "keys"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "KeysRevokeInput",
+                "description": "Input of `keys.revoke`: the key's `id`, as `keys.list` returns it.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The key's id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "KeysRevokeOutput",
+                  "description": "Output of `keys.revoke`.",
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "description": "The key, with `revoked_at` set.",
+                      "$ref": "#/components/schemas/AgentKeyView"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "keys.revoke",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers keys revoke",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/keys/{id}/revoke\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/reports/account-balance-by-dimension": {
       "get": {
         "operationId": "reports_account_balance_by_dimension",
@@ -1473,6 +1749,86 @@
           "fiscal_year",
           "number",
           "recorded_at"
+        ]
+      },
+      "LimitAmounts": {
+        "description": "One currency's limits, as canonical decimal strings in major units\n(`\"1000.00\"` for EUR is 100000 minor units).",
+        "type": "object",
+        "properties": {
+          "per_entry": {
+            "description": "The most one entry may move in this currency.",
+            "type": "string"
+          },
+          "per_day": {
+            "description": "The most the key may move in this currency in a rolling day.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "per_entry",
+          "per_day"
+        ]
+      },
+      "AgentKeyView": {
+        "description": "One agent key as the owner sees it. Never carries the secret.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The key's id; `keys.revoke` takes it.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The label the key was created with.",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "The public prefix, `lk_live_<id>`. The secret part is never shown again.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tier": {
+            "description": "`read`, `draft` or `post-within-limits`.",
+            "type": "string"
+          },
+          "limits": {
+            "description": "Per-currency limits, in canonical major-unit strings.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LimitAmounts"
+            }
+          },
+          "created_at": {
+            "description": "When the key was created (RFC 3339).",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "The person who created the key.",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "When the key last authenticated a request, at most one write per minute.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "description": "When the key was revoked, if it was.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tier",
+          "limits",
+          "created_at",
+          "created_by"
         ]
       },
       "DimensionValueView": {

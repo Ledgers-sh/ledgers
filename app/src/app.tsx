@@ -32,6 +32,7 @@ import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
 import { Bills } from './ui/Bills';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
+import { Settings } from './ui/Settings';
 import { badgeText } from './lib/approvals';
 import { t, useLocale, type MessageKey } from './i18n';
 import { LanguagePicker } from './i18n/LanguagePicker';
@@ -45,6 +46,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' },
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' },
+  { hash: 'settings/agent-keys', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
 
@@ -432,6 +434,7 @@ function renderRoute(route: string, billsState: BillsState) {
   if (route === 'accounts') return <Accounts />;
   if (route === 'reports') return <Reports />;
   if (route === 'approvals') return <Approvals />;
+  if (route === 'settings' || route === 'settings/agent-keys') return <Settings section="agent-keys" />;
   if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
   if (route === 'bills' && billsState === 'offered') return <Bills />;
   if (route === 'bills' && billsState === 'checking') return <p class="muted">{t('shell.checking_bills')}</p>;

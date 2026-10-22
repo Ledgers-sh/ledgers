@@ -51,6 +51,10 @@ export const SCREEN_FOR: Record<string, { hash: string; label: MessageKey }> = {
   'approvals.get': { hash: '#/approvals', label: 'nav.approvals' },
   'approvals.decide': { hash: '#/approvals', label: 'nav.approvals' },
   'approvals.decide_bulk': { hash: '#/approvals', label: 'nav.approvals' },
+  // Agent keys are managed by a person under Settings; an agent key cannot manage them.
+  'keys.list': { hash: '#/settings/agent-keys', label: 'settings.agent_keys' },
+  'keys.create': { hash: '#/settings/agent-keys', label: 'settings.agent_keys' },
+  'keys.revoke': { hash: '#/settings/agent-keys', label: 'settings.agent_keys' },
 };
 
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'];

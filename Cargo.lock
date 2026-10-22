@@ -2210,6 +2210,7 @@ dependencies = [
  "ledgers-ext",
  "ledgers-fx",
  "ledgers-ledger",
+ "ledgers-money",
  "ledgers-policy",
  "ledgers-storage",
  "ledgers-tax",

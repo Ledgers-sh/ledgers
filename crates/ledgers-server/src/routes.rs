@@ -5,7 +5,7 @@
 
 use crate::dispatch::{DISPATCH_PORTS, Deps};
 use crate::people::presented_from;
-use cratefield_core::axum::http::header;
+use crate::rate_limiting::admit;
 use cratefield_core::axum::response::IntoResponse;
 use cratefield_core::axum::{
     self,
@@ -113,6 +113,11 @@ impl DomainModule {
                                         }
                                     }
 
+                                    if let Err(limited) =
+                                        admit(dispatch.as_ref(), &deps, presented.as_ref()).await
+                                    {
+                                        return limited.into_response();
+                                    }
                                     respond(
                                         dispatch
                                             .dispatch(&deps, &cmd, input, &request_id, presented)
@@ -147,6 +152,11 @@ impl DomainModule {
                                         input.insert(key, json!(value));
                                     }
 
+                                    if let Err(limited) =
+                                        admit(dispatch.as_ref(), &deps, presented.as_ref()).await
+                                    {
+                                        return limited.into_response();
+                                    }
                                     respond(
                                         dispatch
                                             .dispatch(
@@ -176,20 +186,8 @@ impl DomainModule {
 fn respond(result: Result<Value, Problem>) -> axum::response::Response {
     match result {
         Ok(body) => (axum::http::StatusCode::OK, Json(body)).into_response(),
-        Err(problem) => problem_to_response(problem),
+        Err(problem) => problem.into_response(),
     }
-}
-
-/// Convert a problem to a response, adding Retry-After for rate-limited errors.
-fn problem_to_response(problem: Problem) -> axum::response::Response {
-    let mut response = problem.into_response();
-    // Add Retry-After for rate-limited responses (429 status).
-    if response.status() == axum::http::StatusCode::TOO_MANY_REQUESTS {
-        response
-            .headers_mut()
-            .insert(header::RETRY_AFTER, "60".parse().unwrap());
-    }
-    response
 }
 
 impl Module for DomainModule {
@@ -203,6 +201,11 @@ impl Module for DomainModule {
 
     fn requires(&self) -> &'static [Port] {
         DISPATCH_PORTS
+    }
+
+    fn optional(&self) -> &'static [Port] {
+        // The agent-key limiter, when the runtime provides one.
+        &[Port::RateLimiter]
     }
 
     fn router(&self, ctx: ModuleContext) -> axum::Router {

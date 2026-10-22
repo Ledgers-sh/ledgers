@@ -5,6 +5,7 @@
 
 use crate::demo;
 use crate::dispatch::{self, Deps};
+use crate::rate_limiting;
 use crate::{harness, is_dev};
 use cratefield_adapter_sqlite::SqliteDatabase;
 use cratefield_core::{Config, Database};
@@ -43,9 +44,14 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
     let dev = is_dev(&cfg);
 
     let sqlite = Arc::new(SqliteDatabase::open(&options.database_path)?);
+    // The native runtime has no Redis limiter unless one is configured; agent
+    // keys then get this per-process fixed window instead of none at all.
+    let per_minute =
+        rate_limiting::per_minute_from_setting(cfg.get("LEDGERS_RATE_LIMIT_PER_MIN").as_deref())?;
     let native = Native::new()
         .db_arc(sqlite.clone() as Arc<dyn Database>)
-        .blob_arc(DirBlob::arc(&options.blob_dir));
+        .blob_arc(DirBlob::arc(&options.blob_dir))
+        .rate_limiter(rate_limiting::InProcessRateLimiter::per_minute(per_minute));
 
     let registry = dispatch::registry();
     let harness_inst = harness(&registry, &cfg, native.clone())?;

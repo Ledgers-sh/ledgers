@@ -36,6 +36,8 @@ const screens: { name: string; hash: string; person?: boolean }[] = [
   { name: 'reports', hash: '#/reports' },
   // The approvals inbox is a person's screen: an agent key sees a notice instead.
   { name: 'approvals', hash: '#/approvals', person: true },
+  // Agent keys are managed by a person under Settings.
+  { name: 'agent-keys', hash: '#/settings/agent-keys', person: true },
 ];
 
 /** A fixed bottom bar would sit mid-page in a full-page capture; lay it out in flow for the picture. */
