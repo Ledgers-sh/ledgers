@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 
 /// The person id the in-process seeding posts as. The company's owner
 /// records it on the audit events of person entries.
-const DEMO_OWNER_ID: &str = "demo-owner";
+pub(crate) const DEMO_OWNER_ID: &str = "demo-owner";
 
 /// The key id the internal seeding agent is recorded under on audit events.
 /// No key with this id is issued or stored.
@@ -67,8 +67,8 @@ pub struct SeedReport {
 /// The authenticator for a person posting in-process: the owner principal.
 /// It is used only by this seeding path, which runs on the server itself and
 /// never on a request.
-struct OwnerAuth {
-    person_id: String,
+pub(crate) struct OwnerAuth {
+    pub(crate) person_id: String,
 }
 
 #[async_trait]
@@ -263,6 +263,9 @@ pub async fn seed_as(
             }
         }
     }
+    // The bank side of the demo: the account and the March statement that
+    // partly matches the entries above.
+    crate::demo_bank::seed_bank(deps, company_id, book).await?;
     Ok(report)
 }
 
@@ -520,7 +523,7 @@ async fn reverse_as_person(
 }
 
 /// Runs one command through the executor under the person principal.
-async fn run_as_person<C>(
+pub(crate) async fn run_as_person<C>(
     deps: &Deps,
     company_id: &str,
     command: &C,

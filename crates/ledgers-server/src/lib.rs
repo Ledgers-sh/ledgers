@@ -4,6 +4,7 @@
 pub mod agent_keys;
 pub mod config;
 pub mod demo;
+pub mod demo_bank;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -177,6 +178,9 @@ pub fn compose(
     // module above, the same way the D1 files are numbered.
     let builder = builder.module(ledgers_documents::DocumentsStoreModule);
     let builder = builder.module(ledgers_bills::BillsModule);
+    // Bank accounts, statements and reconciliation: after the documents and the
+    // bills whose tables reconciliation reads.
+    let builder = builder.module(ledgers_bank::BankModule);
 
     // The status read: which optional features are off and why. Mounted last;
     // it has no migrations, so it does not renumber the D1 files.

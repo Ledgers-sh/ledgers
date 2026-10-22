@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>MSG-STMT-2026-03-A-H1</MsgId>
+      <CreDtTm>2026-03-05T18:00:00</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-2026-03-A-H1</Id>
+      <ElctrncSeqNb>1</ElctrncSeqNb>
+      <CreDtTm>2026-03-05T18:00:00</CreDtTm>
+      <FrToDt><FrDtTm>2026-03-01T00:00:00</FrDtTm><ToDtTm>2026-03-05T23:59:59</ToDtTm></FrToDt>
+      <Acct>
+        <Id><IBAN>DE64100200300400500600</IBAN></Id>
+        <Ccy>EUR</Ccy>
+        <Svcr><FinInstnId><BIC>EXMPDEFFXXX</BIC></FinInstnId></Svcr>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">12500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-03-01</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">15375.60</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-03-05</Dt></Dt>
+      </Bal>
+    <Ntry>
+      <NtryRef>001</NtryRef>
+      <Amt Ccy="EUR">1234.50</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-02</Dt></BookgDt>
+      <ValDt><Dt>2026-03-02</Dt></ValDt>
+      <AcctSvcrRef>S260302001</AcctSvcrRef>
+      <BkTxCd><Domn><Cd>PMNT</Cd></Domn></BkTxCd>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">1234.50</Amt></TxAmt></AmtDtls>
+        <RltdPties><Cdtr><Nm>Halden Supplies GmbH</Nm></Cdtr><CdtrAcct><Id><IBAN>DE60220330440550660770</IBAN></Id></CdtrAcct></RltdPties>
+        <RmtInf><Ustrd>Rechnung 4711 Stahltraeger</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <NtryRef>001</NtryRef>
+      <Amt Ccy="EUR">4200.00</Amt>
+      <CdtDbtInd>CRDT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-03</Dt></BookgDt>
+      <ValDt><Dt>2026-03-03</Dt></ValDt>
+      <AcctSvcrRef>S260303001</AcctSvcrRef>
+      <BkTxCd><Domn><Cd>PMNT</Cd></Domn></BkTxCd>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">4200.00</Amt></TxAmt></AmtDtls>
+        <RltdPties><Dbtr><Nm>Nordlicht Office GmbH</Nm></Dbtr><DbtrAcct><Id><IBAN>DE71550660770880990011</IBAN></Id></DbtrAcct></RltdPties>
+        <RmtInf><Ustrd>RE 2026-031 Projekt Nord</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <NtryRef>001</NtryRef>
+      <Amt Ccy="EUR">89.90</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-05</Dt></BookgDt>
+      <ValDt><Dt>2026-03-05</Dt></ValDt>
+      <AcctSvcrRef>S260305001</AcctSvcrRef>
+      <BkTxCd><Domn><Cd>PMNT</Cd></Domn></BkTxCd>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">89.90</Amt></TxAmt></AmtDtls>
+        <RltdPties><Cdtr><Nm>Stadtwerke Beispiel AG</Nm></Cdtr><CdtrAcct><Id><IBAN>DE32660770880990011022</IBAN></Id></CdtrAcct></RltdPties>
+        <RmtInf><Ustrd>Strom Kd.-Nr. 8812 02/2026</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

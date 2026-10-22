@@ -18,6 +18,12 @@ pub enum Kind {
     Png,
     /// `image/jpeg`.
     Jpeg,
+    /// An ISO 20022 `camt.053` bank statement, as XML.
+    Camt053,
+    /// A SWIFT MT940 bank statement message, as text.
+    Mt940,
+    /// A delimited bank export (CSV), read through the account's mapping.
+    BankCsv,
 }
 
 impl Kind {
@@ -28,6 +34,9 @@ impl Kind {
             Kind::Pdf => "application/pdf",
             Kind::Png => "image/png",
             Kind::Jpeg => "image/jpeg",
+            Kind::Camt053 => "application/xml",
+            Kind::Mt940 => "text/plain",
+            Kind::BankCsv => "text/csv",
         }
     }
 }
@@ -44,8 +53,10 @@ pub enum Refusal {
         /// The size of the file.
         size: usize,
     },
-    /// The bytes are not a PDF, PNG or JPEG.
-    #[error("only PDF, PNG and JPEG files can be stored; this file is not one of them")]
+    /// The bytes are not a PDF, PNG, JPEG or bank statement.
+    #[error(
+        "only PDF, PNG and JPEG files, or bank statements (camt.053, MT940, CSV), can be stored; this file is not one of them"
+    )]
     UnsupportedType,
     /// HEIC photos must be converted to JPEG on the device first.
     #[error("HEIC photos must be converted to JPEG before upload")]
@@ -97,7 +108,49 @@ pub fn sniff(bytes: &[u8]) -> Result<Kind, Refusal> {
     if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         return Ok(Kind::Jpeg);
     }
+    if let Some(kind) = sniff_statement_text(bytes) {
+        return Ok(kind);
+    }
     Err(Refusal::UnsupportedType)
+}
+
+/// Recognises the text bank formats. camt.053 is XML naming its message
+/// type; MT940 opens with a SWIFT block or a `:20:` field; CSV is text whose
+/// first lines share one delimiter count (the import checks the mapping).
+fn sniff_statement_text(bytes: &[u8]) -> Option<Kind> {
+    if bytes.contains(&0) {
+        return None;
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let head: String = text.chars().take(4096).collect();
+    let trimmed = head.trim_start_matches('\u{feff}').trim_start();
+    if trimmed.starts_with('<') && head.contains("camt.053") {
+        return Some(Kind::Camt053);
+    }
+    if trimmed.starts_with("{1:") || trimmed.starts_with(":20:") || head.contains("\n:20:") {
+        return Some(Kind::Mt940);
+    }
+    let lines: Vec<&str> = head
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(6)
+        .collect();
+    let delimiter = |line: &str| {
+        [';', ',', '\t']
+            .into_iter()
+            .map(|d| line.matches(d).count())
+            .max()
+            .unwrap_or(0)
+    };
+    if lines.len() >= 2
+        && delimiter(lines[0]) >= 1
+        && lines[1..]
+            .iter()
+            .all(|line| delimiter(line) == delimiter(lines[0]))
+    {
+        return Some(Kind::BankCsv);
+    }
+    None
 }
 
 /// Checks the declared `Content-Type` against the sniffed kind. A missing
@@ -182,6 +235,25 @@ mod tests {
         assert_eq!(sniff(&pdf(1)), Ok(Kind::Pdf));
         assert_eq!(sniff(b"\x89PNG\r\n\x1a\nrest"), Ok(Kind::Png));
         assert_eq!(sniff(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]), Ok(Kind::Jpeg));
+    }
+
+    #[test]
+    fn recognises_the_three_bank_statement_formats() {
+        let camt = b"<?xml version=\"1.0\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:camt.053.001.08\"></Document>";
+        assert_eq!(sniff(camt), Ok(Kind::Camt053));
+        assert_eq!(sniff(b"{1:F01X}{4:\n:20:A\n-}"), Ok(Kind::Mt940));
+        assert_eq!(
+            sniff(b"Buchungstag;Betrag\n02.03.2026;-1,00\n03.03.2026;2,00\n"),
+            Ok(Kind::BankCsv)
+        );
+    }
+
+    #[test]
+    fn plain_prose_is_not_a_bank_statement() {
+        assert_eq!(
+            sniff(b"Just a note.\nWith two lines.\n"),
+            Err(Refusal::UnsupportedType)
+        );
     }
 
     #[test]
