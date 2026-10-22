@@ -247,6 +247,7 @@ impl Default for Registry {
 /// Default command descriptors for the connected apps API (#79).
 /// These descriptors define the HTTP/MCP/CLI surfaces for entries and reports.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn default_commands() -> Vec<CommandDescriptor> {
     vec![
         // Entries commands
@@ -303,7 +304,10 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             http_path: "/v1/reports/trial-balance".to_string(),
             cli: "ledgers reports trial-balance".to_string(),
             mcp: Some("reports_trial_balance".to_string()),
-            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/trial-balance\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            curl: concat!(
+                "curl -X GET \"$LEDGERS_URL/v1/reports/trial-balance\" ",
+                "-H \"Authorization: Bearer test_sk_live_example\""
+            ).to_string(),
             input_schema: serde_json::json!({}),
             output_schema: serde_json::json!({}),
         },
@@ -331,7 +335,10 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             http_path: "/v1/reports/balance-sheet".to_string(),
             cli: "ledgers reports balance-sheet".to_string(),
             mcp: Some("reports_balance_sheet".to_string()),
-            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            curl: concat!(
+                "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" ",
+                "-H \"Authorization: Bearer test_sk_live_example\""
+            ).to_string(),
             input_schema: serde_json::json!({}),
             output_schema: serde_json::json!({}),
         },
@@ -345,7 +352,10 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             http_path: "/v1/reports/account-balance-by-dimension".to_string(),
             cli: "ledgers reports account-balance-by-dimension".to_string(),
             mcp: Some("reports_account_balance_by_dimension".to_string()),
-            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/account-balance-by-dimension\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            curl: concat!(
+                "curl -X GET \"$LEDGERS_URL/v1/reports/account-balance-by-dimension\" ",
+                "-H \"Authorization: Bearer test_sk_live_example\""
+            ).to_string(),
             input_schema: serde_json::json!({}),
             output_schema: serde_json::json!({}),
         },
