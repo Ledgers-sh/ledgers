@@ -184,6 +184,7 @@ fn fixture() -> Fixture {
         Box::new(ledgers_storage::StorageModule),
         Box::new(ledgers_approvals::module::ApprovalsModule),
         Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
         Box::new(ApiKeysModule),
         Box::new(PeopleModule::new(Some(config()))),
     ];

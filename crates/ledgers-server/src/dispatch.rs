@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use cratefield_core::{
     ApiKeys, Clock, Database, DbError, IdGen, Port, Ports, Problem, RateLimiter, Statement,
 };
-use ledgers_approvals::{ApprovalRequest, NewRequest, request_statement};
+use ledgers_approvals::{
+    ApprovalEvent, ApprovalRequest, NewRequest, notice_statement, request_statement,
+};
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
@@ -225,8 +227,18 @@ impl ServerDispatch {
                 low_risk_limits: &limits,
             })
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+            // The Created notice is enqueued in the same batch as the request.
+            let notice = notice_statement(
+                &approval_id,
+                ApprovalEvent::Created,
+                &request,
+                request.counterparty.as_deref(),
+                &self.app_url,
+                &now,
+            )
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
             *raised.lock().unwrap_or_else(PoisonError::into_inner) = Some(request);
-            Ok(vec![statement])
+            Ok(vec![statement, notice])
         };
 
         let executor = Executor::new(deps.db.as_ref(), authenticator, policy);

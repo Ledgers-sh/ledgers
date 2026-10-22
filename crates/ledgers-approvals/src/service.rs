@@ -3,6 +3,7 @@
 use crate::approval::{ApprovalRequest, Risk, Status};
 use crate::config::ApprovalConfig;
 use crate::error::ApprovalError;
+use crate::notify::{ApprovalEvent, notice_statement};
 use crate::rules::{ApprovalRules, StepUp};
 use crate::stepup::{AssertionVerifier, CredentialKeys, PasskeyProof};
 use cratefield_core::{Database, Statement};
@@ -105,8 +106,17 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             low_risk_limits: &BTreeMap::new(),
         })?;
         let card = build_card(&request, counterparty, None, false);
+        // Store the request and enqueue its Created notice in one batch.
+        let created_notice = notice_statement(
+            &approval_id,
+            ApprovalEvent::Created,
+            &request,
+            counterparty,
+            &self.config.base_url,
+            now,
+        )?;
         self.db
-            .batch_atomic(&[statement])
+            .batch_atomic(&[statement, created_notice])
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
         Ok(RaisedApproval { request, card })
@@ -165,19 +175,21 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
         let input: C::Input = serde_json::from_str(&request.input).map_err(|e| {
             ApprovalError::Other(format!("failed to deserialize frozen input: {e}"))
         })?;
+        let mut statements = Self::decision_statements(
+            approval_id,
+            &request.request_hash,
+            Status::Approved,
+            Some(person_id),
+            &ctx.now,
+            None,
+            &ctx.event_id,
+        );
+        statements.push(self.decided_notice(&request, Status::Approved, &ctx.now)?);
         let approval = Approval {
             approval_id: approval_id.to_string(),
             request_hash: request.request_hash.clone(),
             requested_by: request.requested_by.clone(),
-            statements: Self::decision_statements(
-                approval_id,
-                &request.request_hash,
-                Status::Approved,
-                Some(person_id),
-                &ctx.now,
-                None,
-                &ctx.event_id,
-            ),
+            statements,
             objects: vec![format!("approval:{approval_id}")],
         };
         let output = match executor
@@ -260,6 +272,7 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             reason,
             &ctx.event_id,
         );
+        statements.push(self.decided_notice(&request, Status::Rejected, &ctx.now)?);
         statements.extend(
             executor
                 .audit_statements(&request.company_id, &audit_ctx, &record, &ctx.now)
@@ -318,6 +331,26 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             update,
             guard::release_statement(&status_guard_key),
         ]
+    }
+
+    /// The Decided notice for a request moving to `to`, enqueued in the decision batch.
+    fn decided_notice(
+        &self,
+        request: &ApprovalRequest,
+        to: Status,
+        decided_at: &str,
+    ) -> Result<Statement, ApprovalError> {
+        let mut decided = request.clone();
+        decided.status = to;
+        notice_statement(
+            &request.id,
+            ApprovalEvent::Decided,
+            &decided,
+            request.counterparty.as_deref(),
+            &self.config.base_url,
+            decided_at,
+        )
+        .map_err(ApprovalError::from)
     }
 
     async fn mark_expired(&self, approval_id: &str) {
@@ -660,6 +693,9 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
         );
         approval_statements.extend(transition_stmts);
 
+        // Add notification notice for the decided event
+        approval_statements.push(self.decided_notice(&request, Status::Approved, &ctx.now)?);
+
         // 7. Run executor.run_approved with the approval statements
         let approval = Approval {
             approval_id: approval_id.to_string(),
@@ -779,6 +815,9 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             &ctx.now,
         );
         rejection_statements.extend(transition_stmts);
+
+        // Add notification notice for the decided event
+        rejection_statements.push(self.decided_notice(&request, Status::Rejected, &ctx.now)?);
 
         // 7. Create audit event for rejection
         let audit_ctx = AuditContext::new(

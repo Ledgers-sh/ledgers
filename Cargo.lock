@@ -637,6 +637,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cratefield-module-webhooks"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e76853144f06bce6fa705107f5ba13833734ac88335906dab20c30682cece20b"
+dependencies = [
+ "axum",
+ "bytes",
+ "cratefield-core",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
+ "http",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "cratefield-runtime-cloudflare"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1956,6 +1976,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "cratefield-core",
+ "cratefield-module-webhooks",
  "cratefield-testing",
  "futures-util",
  "hex",
