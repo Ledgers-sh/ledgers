@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { handleBills, resetBills, servedFile } from './mockBills';
 import { handleSettings, resetSettings } from './mockSettings';
+import { handlePeople, resetPeople } from './mockPeople';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -269,7 +270,7 @@ export interface MockApi {
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': WEB_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, content-type, x-file-name',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   // The app sends the session cookie with credentials: 'include'.
   'Access-Control-Allow-Credentials': 'true',
 };
@@ -971,6 +972,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   keyState.keys = [];
   keyCounter = 0;
   resetSettings();
+  resetPeople();
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -1036,6 +1038,14 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
             res.end(JSON.stringify(billsReply.body));
             return;
           }
+        }
+        // The people routes (the session, the roster, roles, invitations and membership).
+        const peopleReply = handlePeople(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
+        if (peopleReply) {
+          const empty = peopleReply.body === undefined;
+          res.writeHead(peopleReply.status, empty ? { ...headers } : { ...headers, 'Content-Type': peopleReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(empty ? undefined : JSON.stringify(peopleReply.body));
+          return;
         }
         // Settings routes (person only; an agent key gets 403 on them).
         const settingsReply = handleSettings(

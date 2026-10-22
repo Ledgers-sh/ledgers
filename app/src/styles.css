@@ -857,3 +857,35 @@ button.legend-item:hover { border-color: var(--rule); }
   .settings-link[aria-current='page'] { border-bottom-color: var(--text); }
   .settings-facts { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* People (Settings → People, the invitation link and the not-a-member screen) */
+.people-stack { display: flex; flex-direction: column; gap: 10px; }
+.people-small { font-size: 14px; }
+.people-email { overflow-wrap: anywhere; }
+.people-roster td.main { min-width: 230px; }
+.people-you {
+  display: inline-block; margin-inline-start: 8px; padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px;
+  font-size: 12px; font-weight: 600; color: var(--agent); white-space: nowrap;
+}
+.people-actions { white-space: normal; }
+.people-actions .btn { margin-inline-end: 6px; margin-block-end: 4px; }
+.people-invite-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+.people-legend { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: 14px; }
+.people-legend dt { font-weight: 600; color: var(--text-2); }
+.people-legend dt.current { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.people-legend dd { margin: 0; color: var(--muted); }
+.people-transfer { display: flex; flex-direction: column; gap: 12px; max-width: 480px; }
+.people-invite .field-error, dialog.confirm .field-error { color: var(--danger); font-weight: 400; }
+.role-badge { gap: 6px; padding: 2px 9px; border-radius: 999px; font: 600 13px var(--sans); }
+.role-glyph { font-size: 10px; line-height: 1; }
+.role-badge.role-owner { color: var(--human-text); background: var(--human-bg); border-color: var(--human-line); }
+.role-badge.role-admin { color: var(--human-text); border-style: dashed; border-color: var(--human-line); }
+.role-badge.role-accountant { color: var(--agent); background: var(--agent-bg); border-color: var(--rule); }
+.role-badge.role-approver { color: var(--agent); border-color: var(--agent); }
+.role-badge.role-viewer { color: var(--text-2); border-color: var(--rule); }
+.role-badge.role-auditor { color: var(--text-2); border-style: dotted; border-width: 1.5px; border-color: var(--rule); }
+.mark { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.mark.yes { color: var(--good); }
+.mark.no { color: var(--muted); }
+.mark .icon { width: 16px; height: 16px; }
+.role-matrix th[scope='row'] { font-weight: 400; }

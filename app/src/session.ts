@@ -6,6 +6,7 @@
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 import type { ClientConfig } from './api/client';
+import type { Person } from './api/auth';
 import { defaultServerUrl } from './api/config';
 import { currentPeriod, isPeriod } from './lib/period';
 import { normaliseRange, presetRange, type MonthRange } from './lib/trends';
@@ -123,6 +124,8 @@ export interface Session {
   online: boolean;
   toast: (message: string, kind?: ToastKind) => void;
   signOut: () => void;
+  /** The signed-in person; absent for an agent key. */
+  person?: Person;
   /** Approvals waiting for the person; null when unknown or not offered (agent key). */
   approvalCount: number | null;
   /** Re-reads the approvals count (after a decision). */
