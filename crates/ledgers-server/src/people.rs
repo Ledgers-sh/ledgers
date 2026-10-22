@@ -548,6 +548,11 @@ pub struct SessionAuthenticator {
     pub app_origins: Vec<String>,
     /// The company whose membership decides the person's role.
     pub company_id: String,
+    /// Whether the sign-in's `owner` claim may bootstrap the company's owner.
+    /// Only the deployment's own company may be bootstrapped this way: a
+    /// company created later gets its owner from its creator, never from a
+    /// claim presented against it (docs/permissions.md, "Companies").
+    pub bootstrap: bool,
     pub presented: SessionPresented,
 }
 
@@ -567,11 +572,12 @@ impl Authenticator for SessionAuthenticator {
             .await?
             .filter(|row| !row.expired_at(now))
             .ok_or(CommandError::Unauthenticated)?;
+        let claims: &[String] = if self.bootstrap { &row.roles } else { &[] };
         let role = members::resolve_role(
             self.db.as_ref(),
             &self.company_id,
             &row.person_id,
-            &row.roles,
+            claims,
             OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH),
         )
         .await?

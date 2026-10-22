@@ -101,6 +101,30 @@ company route answers `403 not-a-member`.
 - **Transfer ownership:** promote the new owner to owner first, then demote yourself
   to admin. The order keeps an owner in place at every step.
 
+## Companies
+
+One deployment serves several companies. Each company has its own books,
+chart, members and agent keys; the people who belong to one company never see
+another one.
+
+- `GET /v1/companies` lists the companies the signed-in person holds a
+  membership in, with their role. `POST /v1/companies` creates one (name, base
+  currency, country pack, fiscal year start month). The creator becomes its
+  owner. Both need a person session; agent keys are refused.
+- A company command names its company with the `X-Ledgers-Company` header
+  (letters and digits, at most 64 characters). Without the header the request
+  acts for the deployment's own company, `LEDGERS_COMPANY_ID`, as before.
+- The membership check runs against the named company. A person who is not a
+  member gets `403 not-a-member`; an agent key is bound to the company that
+  issued it, so the same key named against another company gets `401`.
+- The `owner` sign-in claim bootstraps the deployment's own company only. A
+  company created later gets its owner from its creator, never from a claim
+  presented against it.
+- The country pack chooses the starting chart: `nl` the RGS chart for a
+  BV, `de` the HGB chart, any other pack the generic SME chart.
+- The MCP endpoint serves the deployment's own company. Document download
+  links are signed for the deployment's company only.
+
 ## Agent keys
 
 Agent keys belong to the company. Each key records the member who created it
