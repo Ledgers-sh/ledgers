@@ -1880,3 +1880,85 @@ fn bulk_selection_refuses_mixed_risk_and_mixed_currency() {
         });
     }
 }
+
+/// Counts every statement that reaches the wrapped database.
+struct CountingDb<'a> {
+    inner: &'a dyn Database,
+    statements: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl Database for CountingDb<'_> {
+    async fn execute(&self, stmt: &Statement) -> Result<u64, cratefield_core::DbError> {
+        self.statements
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.execute(stmt).await
+    }
+
+    async fn query(
+        &self,
+        stmt: &Statement,
+    ) -> Result<cratefield_core::Rows, cratefield_core::DbError> {
+        self.statements
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.query(stmt).await
+    }
+
+    async fn batch_atomic(&self, stmts: &[Statement]) -> Result<(), cratefield_core::DbError> {
+        self.statements
+            .fetch_add(stmts.len().max(1), std::sync::atomic::Ordering::SeqCst);
+        self.inner.batch_atomic(stmts).await
+    }
+}
+
+/// The approvals inbox lists a page in a constant number of statements: the
+/// page's requests come from one select, not one lookup per request. Counts
+/// the statements for 2 and for 8 pending requests on every dialect.
+#[test]
+fn list_requests_is_a_constant_number_of_statements() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            let limits = BTreeMap::new();
+            let mut counts = Vec::new();
+            for (round, total) in [(0usize, 2usize), (2, 8)] {
+                for n in round..total {
+                    insert_bill(&*kit.db, &format!("lb{n}"), 10000, "EUR").await;
+                    agent_asks_to_pay(&*kit.db, &format!("la-{n}"), &format!("lb{n}"), &limits)
+                        .await;
+                }
+                let counting = CountingDb {
+                    inner: &*kit.db,
+                    statements: std::sync::atomic::AtomicUsize::new(0),
+                };
+                let (requests, pending) = list_requests(
+                    &counting,
+                    COMPANY_ID,
+                    ledgers_approvals::Listing::Pending,
+                    NOW,
+                    50,
+                )
+                .await
+                .expect("list");
+                assert_eq!(requests.len(), total, "every pending request is listed");
+                assert_eq!(pending, i64::try_from(total).expect("a small count"));
+                for request in &requests {
+                    let single = get_request(&*kit.db, COMPANY_ID, &request.id)
+                        .await
+                        .expect("the single read works");
+                    assert_eq!(format!("{request:?}"), format!("{single:?}"));
+                }
+                counts.push(
+                    counting
+                        .statements
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                );
+            }
+            assert_eq!(
+                counts[0], counts[1],
+                "listing 8 requests took {} statements, listing 2 took {}: the count must not grow",
+                counts[1], counts[0]
+            );
+        });
+    }
+}

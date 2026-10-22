@@ -166,6 +166,8 @@ export const ar: Messages = {
   'journal.count': '{shown} من {total}',
   'journal.no_match': 'لا توجد قيود تطابق “{query}”.',
   'journal.reversed': 'معكوس',
+  'journal.load_more': 'تحميل المزيد من القيود',
+  'journal.loading_more': 'جارٍ تحميل القيود',
   'entry.loading': 'جارٍ تحميل القيد',
   'entry.title': 'القيد {ref}',
   'entry.not_found_title': 'القيد غير موجود',
