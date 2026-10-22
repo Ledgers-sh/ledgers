@@ -1,11 +1,14 @@
 //! The D1 migration set (`d1/migrations`, applied by
 //! `wrangler d1 migrations apply`) is the native schema.
 //!
-//! The files are the SQLite migrations the composition's modules declare, in
-//! the order the native server applies them (the harness module order, then
-//! each module's migrations). Two checks keep them honest:
+//! The files are the SQLite migrations the composition's modules declare. A
+//! file keeps its number once it exists: a deployed D1 database has applied
+//! it, so numbers are never reused or shifted. A migration with no file yet
+//! takes the next free number, after the existing ones. Two checks keep them
+//! honest:
 //!
-//! - the files on disk are byte-for-byte the modules' migrations, in order;
+//! - the files on disk are byte-for-byte the modules' migrations, numbered as
+//!   above;
 //! - applying the files to SQLite gives the same schema (`sqlite_master`) as
 //!   the native path applying the modules.
 //!
@@ -32,10 +35,19 @@ impl Config for CompanyConfig {
     }
 }
 
-/// One planned D1 migration: the file name and the SQL it must contain.
+/// One planned D1 migration: its key (`module_migration`, the file name
+/// without its number) and the SQL it must contain.
 struct Planned {
-    file: String,
+    key: String,
     sql: &'static str,
+}
+
+/// The key of a numbered file: `0014_ledgers_policy_agent_key.sql` is
+/// `ledgers_policy_agent_key`.
+fn key_of(file: &str) -> &str {
+    file.split_once('_')
+        .map_or(file, |(_, key)| key)
+        .trim_end_matches(".sql")
 }
 
 fn slug(text: &str) -> String {
@@ -57,16 +69,40 @@ fn planned(harness: &Harness) -> Vec<Planned> {
     for module in harness.modules() {
         for migration in module.migrations().sqlite {
             out.push(Planned {
-                file: format!(
-                    "{:04}_{}_{}.sql",
-                    out.len() + 1,
-                    slug(module.name()),
-                    slug(migration.name)
-                ),
+                key: format!("{}_{}", slug(module.name()), slug(migration.name)),
                 sql: migration.sql,
             });
         }
     }
+    out
+}
+
+/// The file each planned migration must be, with its number: a file already
+/// on disk keeps its number, a new migration takes the next one.
+fn expected(plan: &[Planned], on_disk: &[PathBuf]) -> Vec<(String, &'static str)> {
+    let names: Vec<String> = on_disk
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    let mut next = names
+        .iter()
+        .filter_map(|name| name.get(..4)?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let mut out: Vec<(String, &'static str)> = plan
+        .iter()
+        .map(|step| {
+            let kept = names.iter().find(|name| key_of(name) == step.key);
+            let file = kept.cloned().unwrap_or_else(|| {
+                let file = format!("{next:04}_{}.sql", step.key);
+                next += 1;
+                file
+            });
+            (file, step.sql)
+        })
+        .collect();
+    out.sort();
     out
 }
 
@@ -95,30 +131,34 @@ fn d1_files_are_the_module_migrations_in_order() {
     assert!(!plan.is_empty(), "the modules declare SQLite migrations");
 
     if std::env::var("LEDGERS_WRITE_D1_MIGRATIONS").as_deref() == Ok("1") {
+        let wanted = expected(&plan, &files_on_disk());
         for old in files_on_disk() {
-            fs::remove_file(old).expect("remove a stale migration");
+            let name = old.file_name().unwrap().to_string_lossy().into_owned();
+            if !wanted.iter().any(|(file, _)| *file == name) {
+                fs::remove_file(old).expect("remove a stale migration");
+            }
         }
-        for step in &plan {
-            fs::write(Path::new(D1_DIR).join(&step.file), step.sql).expect("write a D1 migration");
+        for (file, sql) in &wanted {
+            fs::write(Path::new(D1_DIR).join(file), sql).expect("write a D1 migration");
         }
     }
 
     let on_disk = files_on_disk();
+    let wanted = expected(&plan, &on_disk);
     let names: Vec<String> = on_disk
         .iter()
         .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
         .collect();
-    let expected: Vec<String> = plan.iter().map(|step| step.file.clone()).collect();
+    let wanted_names: Vec<String> = wanted.iter().map(|(file, _)| file.clone()).collect();
     assert_eq!(
-        names, expected,
+        names, wanted_names,
         "the D1 files differ from the modules' migrations; regenerate with LEDGERS_WRITE_D1_MIGRATIONS=1"
     );
-    for (path, step) in on_disk.iter().zip(&plan) {
+    for (path, (file, sql)) in on_disk.iter().zip(&wanted) {
         let text = fs::read_to_string(path).expect("readable migration");
         assert_eq!(
-            text, step.sql,
-            "{} is not the module's migration; regenerate with LEDGERS_WRITE_D1_MIGRATIONS=1",
-            step.file
+            &text, sql,
+            "{file} is not the module's migration; regenerate with LEDGERS_WRITE_D1_MIGRATIONS=1"
         );
     }
 }

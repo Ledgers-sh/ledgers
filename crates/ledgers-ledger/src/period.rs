@@ -299,7 +299,7 @@ fn update_year_end_statement(
     company_id: &str,
     label: i64,
     closed_at: &str,
-    closing_entry_id: &str,
+    closing_entry_id: Option<&str>,
     report: &str,
     updated_at: &str,
 ) -> Statement {
@@ -310,7 +310,7 @@ fn update_year_end_statement(
             .to_owned(),
         vec![
             SeaValue::from(closed_at),
-            SeaValue::from(closing_entry_id),
+            SeaValue::from(closing_entry_id.map(str::to_owned)),
             SeaValue::from(report),
             SeaValue::from(updated_at),
             SeaValue::from(company_id),
@@ -444,8 +444,11 @@ pub struct YearEndReport {
     pub company_id: String,
     /// The fiscal year label that closed.
     pub label: i64,
-    /// The closing entry as posted (deterministic id, gapless number).
-    pub closing_entry: PostedEntry,
+    /// The closing entry as posted (deterministic id, gapless number), or
+    /// `None` when the year had no income or expense balance to clear: a
+    /// closing entry needs at least two lines to balance, so an empty one is
+    /// never posted.
+    pub closing_entry: Option<PostedEntry>,
     /// The amount landed in retained earnings: the sum of the cleared
     /// income and expense balances, signed debit-positive (a profit is
     /// a credit, i.e. negative).
@@ -466,15 +469,11 @@ impl YearEndReport {
     pub fn serialize(&self) -> String {
         let mut lines = vec![format!("company={}", self.company_id,)];
         lines.push(format!("label={}", self.label));
-        lines.push(format!("closing-entry-id={}", self.closing_entry.entry_id));
-        lines.push(format!(
-            "closing-entry-number={}",
-            self.closing_entry.number
-        ));
-        lines.push(format!(
-            "closing-entry-date={}",
-            self.closing_entry.entry_date
-        ));
+        if let Some(closing) = &self.closing_entry {
+            lines.push(format!("closing-entry-id={}", closing.entry_id));
+            lines.push(format!("closing-entry-number={}", closing.number));
+            lines.push(format!("closing-entry-date={}", closing.entry_date));
+        }
         lines.push(format!(
             "retained-earnings={}",
             self.retained_earnings_result.to_canonical_string()
@@ -566,10 +565,14 @@ impl YearEndReport {
         Ok(Self {
             company_id: company_id.ok_or_else(|| corrupt("company missing"))?,
             label: label.ok_or_else(|| corrupt("label missing"))?,
-            closing_entry: PostedEntry {
-                entry_id: entry_id.ok_or_else(|| corrupt("closing-entry-id missing"))?,
-                number: number.ok_or_else(|| corrupt("closing-entry-number missing"))?,
-                entry_date: entry_date.ok_or_else(|| corrupt("closing-entry-date missing"))?,
+            closing_entry: match (entry_id, number, entry_date) {
+                (None, None, None) => None,
+                (Some(entry_id), Some(number), Some(entry_date)) => Some(PostedEntry {
+                    entry_id,
+                    number,
+                    entry_date,
+                }),
+                _ => return Err(corrupt("closing entry lines are incomplete")),
             },
             retained_earnings_result: retained
                 .ok_or_else(|| corrupt("retained-earnings missing"))?,
@@ -1117,8 +1120,8 @@ async fn carried_forward_opening(
 struct YearEndCommit<'a> {
     /// The fiscal-year label closing.
     label: i64,
-    /// The posted closing entry's id.
-    closing_entry_id: &'a str,
+    /// The posted closing entry's id, when the close posted one.
+    closing_entry_id: Option<&'a str>,
     /// The last period, which the batch closes.
     last_period: &'a str,
     /// The serialized report stamped onto the row.
@@ -1147,6 +1150,9 @@ async fn commit_year_end(
     now: &str,
     audit: &AuditContext,
 ) -> Result<(), AccountsError> {
+    let refs: Vec<String> = std::iter::once(commit.label.to_string())
+        .chain(commit.closing_entry_id.map(str::to_owned))
+        .collect();
     let mut audited = AuditRecord::from_input(
         "fiscal_year.close",
         &serde_json::json!({
@@ -1156,7 +1162,7 @@ async fn commit_year_end(
             "override": reason.is_some(),
         }),
         Outcome::Allowed,
-        vec![commit.label.to_string(), commit.closing_entry_id.to_owned()],
+        refs,
         None,
     );
     if let Some(reason) = reason {
@@ -1393,6 +1399,9 @@ pub async fn close_fiscal_year(
     //    dated `ends_on`); skipped if it already exists (crash
     //    recovery).
     let (lines, net) = year_end_clearing(db, journal, company_id).await?;
+    // The retained-earnings line is always there; a second line means there
+    // was an income or expense balance to clear.
+    let clears_balances = lines.len() > 1;
     let entry = NewEntry {
         entry_id: format!("yearend-{company_id}-{label}"),
         journal_id: format!("jrn-yearend-{company_id}-{label}"),
@@ -1406,7 +1415,11 @@ pub async fn close_fiscal_year(
         human: true,
         daily_limit: YEAR_END_DAILY_LIMIT,
     };
-    let posted = post_closing_entry(db, journal, company_id, label, &entry, &now, audit).await?;
+    let posted = if clears_balances {
+        Some(post_closing_entry(db, journal, company_id, label, &entry, &now, audit).await?)
+    } else {
+        None
+    };
 
     // 7. Carry the balance sheet forward, from post-closing balances.
     let opening = carried_forward_opening(db, journal, company_id).await?;
@@ -1426,7 +1439,7 @@ pub async fn close_fiscal_year(
         company_id,
         YearEndCommit {
             label,
-            closing_entry_id: &posted.entry_id,
+            closing_entry_id: posted.as_ref().map(|entry| entry.entry_id.as_str()),
             last_period: &last_period,
             stored_report: &report.serialize(),
         },
@@ -1611,11 +1624,11 @@ mod tests {
         let report = YearEndReport {
             company_id: "test-company-000000000000".to_owned(),
             label: 2026,
-            closing_entry: PostedEntry {
+            closing_entry: Some(PostedEntry {
                 entry_id: "yearend-test-company-000000000000-2026".to_owned(),
                 number: 3,
                 entry_date: "2026-12-31".to_owned(),
-            },
+            }),
             retained_earnings_result: Amount::from_major(-600, eur).expect("in range"),
             opening_balance_count: 2,
             overridden_blockers: vec![Blocker {

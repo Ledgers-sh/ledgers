@@ -18,6 +18,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
+ledgers-storage = { workspace = true }
 pollster = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 

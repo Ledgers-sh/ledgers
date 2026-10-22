@@ -1195,12 +1195,28 @@ async fn year_end_lands_and_carries(
     assert_eq!(report.company_id, company);
     assert_eq!(report.label, 2026);
     assert_eq!(
-        report.closing_entry.entry_id,
+        report
+            .closing_entry
+            .as_ref()
+            .expect("a closing entry")
+            .entry_id,
         format!("yearend-{company}-2026")
     );
-    assert_eq!(report.closing_entry.entry_date, "2026-12-31");
     assert_eq!(
-        report.closing_entry.number, 3,
+        report
+            .closing_entry
+            .as_ref()
+            .expect("a closing entry")
+            .entry_date,
+        "2026-12-31"
+    );
+    assert_eq!(
+        report
+            .closing_entry
+            .as_ref()
+            .expect("a closing entry")
+            .number,
+        3,
         "after the two scenario entries"
     );
     assert_eq!(report.retained_earnings_result, Amount::new(-75_000, eur()));
@@ -1239,7 +1255,14 @@ async fn year_end_lands_and_carries(
     assert!(year.year_end_closed_at.is_some());
     assert_eq!(
         year.closing_entry_id.as_deref(),
-        Some(report.closing_entry.entry_id.as_str())
+        Some(
+            report
+                .closing_entry
+                .as_ref()
+                .expect("a closing entry")
+                .entry_id
+                .as_str()
+        )
     );
 
     // The carried-forward opening balances landed for 2027.
@@ -1319,7 +1342,15 @@ async fn year_end_rerun_writes_nothing(
     assert_eq!(event.outcome, Outcome::Allowed, "{event:?}");
     assert_eq!(
         event.objects,
-        vec!["2026".to_owned(), report.closing_entry.entry_id.clone()],
+        vec![
+            "2026".to_owned(),
+            report
+                .closing_entry
+                .as_ref()
+                .expect("a closing entry")
+                .entry_id
+                .clone()
+        ],
         "the year and the closing entry it posted: {event:?}"
     );
     assert_eq!(

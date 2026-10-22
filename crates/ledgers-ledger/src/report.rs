@@ -80,6 +80,27 @@ pub struct DimensionBalance {
     pub balance: Amount,
 }
 
+/// The company's base currency, read from the company row. Reports never
+/// infer it from posted entries: a company with no entries has one too.
+async fn company_currency(db: &dyn Database, company_id: &str) -> Result<Currency, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT base_currency FROM company WHERE id = ?".to_owned(),
+            vec![SeaValue::from(company_id)],
+        ))
+        .await?;
+    let code = rows
+        .rows
+        .first()
+        .and_then(|row| row.get::<String>("base_currency"))
+        .ok_or_else(|| {
+            JournalError::Database(DbError::Query(format!(
+                "company {company_id} has no base currency configured"
+            )))
+        })?;
+    Ok(Currency::from_str(&code)?)
+}
+
 /// Generates a trial balance for the given period: all accounts with their
 /// debit and credit totals, and the resulting balance.
 ///
@@ -283,27 +304,7 @@ pub async fn profit_and_loss(
         }
     }
 
-    // Query base currency from the period
-    let currency_sql = r"
-        SELECT DISTINCT je.base_currency
-        FROM journal_entry je
-        WHERE je.company_id = ? AND je.vat_period = ?
-        LIMIT 1
-    ";
-    let currency_statement = Statement::with_values(
-        currency_sql.to_string(),
-        vec![SeaValue::from(company_id), SeaValue::from(period)],
-    );
-    let currency_rows = db.query(&currency_statement).await?;
-    let currency = if let Some(row) = currency_rows.rows.first() {
-        let code: String = row
-            .get("base_currency")
-            .ok_or_else(|| required_column("base_currency"))?;
-        Currency::from_str(&code)?
-    } else {
-        // Default to EUR if no entries found
-        Currency::from_str("EUR")?
-    };
+    let currency = company_currency(db, company_id).await?;
 
     let revenue = Amount::from_i64(revenue_minor, currency);
     let expenses = Amount::from_i64(expenses_minor, currency);
@@ -406,27 +407,7 @@ pub async fn balance_sheet(
         }
     }
 
-    // Query base currency from the company
-    let currency_sql = r"
-        SELECT DISTINCT je.base_currency
-        FROM journal_entry je
-        WHERE je.company_id = ? AND je.posting_date <= ?
-        LIMIT 1
-    ";
-    let currency_statement = Statement::with_values(
-        currency_sql.to_string(),
-        vec![SeaValue::from(company_id), SeaValue::from(as_of_date)],
-    );
-    let currency_rows = db.query(&currency_statement).await?;
-    let currency = if let Some(row) = currency_rows.rows.first() {
-        let code: String = row
-            .get("base_currency")
-            .ok_or_else(|| required_column("base_currency"))?;
-        Currency::from_str(&code)?
-    } else {
-        // Default to EUR if no entries found
-        Currency::from_str("EUR")?
-    };
+    let currency = company_currency(db, company_id).await?;
 
     // The current year result: income and expense activity from the fiscal
     // year start up to the as-of date. Income is credit-normal, so the
@@ -522,27 +503,7 @@ pub async fn account_balance_by_dimension(
 
     let rows = db.query(&statement).await?;
 
-    // Query base currency
-    let currency_sql = r"
-        SELECT DISTINCT je.base_currency
-        FROM journal_entry je
-        WHERE je.company_id = ? AND je.vat_period = ?
-        LIMIT 1
-    ";
-    let currency_statement = Statement::with_values(
-        currency_sql.to_string(),
-        vec![SeaValue::from(company_id), SeaValue::from(period)],
-    );
-    let currency_rows = db.query(&currency_statement).await?;
-    let currency = if let Some(row) = currency_rows.rows.first() {
-        let code: String = row
-            .get("base_currency")
-            .ok_or_else(|| required_column("base_currency"))?;
-        Currency::from_str(&code)?
-    } else {
-        // Default to EUR if no entries found
-        Currency::from_str("EUR")?
-    };
+    let currency = company_currency(db, company_id).await?;
 
     // Aggregate by dimension value
     let mut dimension_totals: std::collections::BTreeMap<String, i64> =

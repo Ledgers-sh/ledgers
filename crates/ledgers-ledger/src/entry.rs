@@ -784,10 +784,7 @@ impl JournalError {
             JournalError::BaseCurrencyMismatch {
                 company_currency,
                 entry_currency,
-            } => Problem::new(&JOURNAL_ENTRY_REFUSED)
-                .with_detail(self.to_string())
-                .with_extension("companyCurrency", company_currency.clone())
-                .with_extension("entryCurrency", entry_currency.clone()),
+            } => base_currency_mismatch_problem(self, company_currency, entry_currency),
             JournalError::InvalidJournalCode { code, .. } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("code", code.clone()),
@@ -878,6 +875,18 @@ pub async fn reversed_by(
         .map(|row| row.get::<String>("id"))
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default())
+}
+
+/// The refusal for an entry whose base currency is not the company's.
+fn base_currency_mismatch_problem(
+    error: &JournalError,
+    company_currency: &str,
+    entry_currency: &str,
+) -> cratefield_core::Problem {
+    cratefield_core::Problem::new(&JOURNAL_ENTRY_REFUSED)
+        .with_detail(error.to_string())
+        .with_extension("companyCurrency", company_currency.to_owned())
+        .with_extension("entryCurrency", entry_currency.to_owned())
 }
 
 #[cfg(test)]

@@ -2127,6 +2127,7 @@ dependencies = [
  "ledgers-db",
  "ledgers-ledger",
  "ledgers-money",
+ "ledgers-storage",
  "pollster",
  "sea-query",
  "serde_json",

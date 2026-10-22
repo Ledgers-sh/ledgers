@@ -49,10 +49,12 @@ use common::{COMPANY_ID, FY, NOW, POSTED_AT, count, counter_value, create_chart,
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_db::{DbModule, RetryPolicy};
+use ledgers_ledger::close::CloseCheckRegistry;
 use ledgers_ledger::commands;
 use ledgers_ledger::entry::{Side, reversed_by};
+use ledgers_ledger::fiscal::FiscalYearSpec;
 use ledgers_ledger::journal::{self, JournalDraft, JournalKind};
-use ledgers_ledger::journal_port::Journal as JournalPort;
+use ledgers_ledger::period;
 use ledgers_ledger::posting::{
     PostContext, RawEntry, RawLine, TOPIC_ENTRY_POSTED, post_entry, post_raw_entry,
 };
@@ -105,6 +107,7 @@ pub async fn scenarios(db: &dyn Database) {
         .await;
 
     journal_lifecycle(db).await;
+    base_currency_is_fixed_once_entries_exist(db).await;
     balanced_posts_are_numbered_gaplessly(db).await;
     the_fx_bill_payment_posts_and_its_missing_leg_is_refused(db).await;
     closed_and_unknown_periods_refuse(db).await;
@@ -1121,31 +1124,91 @@ fn test_empty_company_can_be_closed() {
     }
 }
 
+/// A company with a USD base currency and no entries at all closes its
+/// fiscal year: the close reads the base currency from the company row, not
+/// from posted entries (there are none to read it from).
 async fn test_empty_company_can_be_closed_impl(db: &dyn Database) {
-    // Create a company with USD base currency
     let company_id = "01COMPANY_TEST_USD00000000000";
-    db.execute(&Statement::new(
-        format!(
-            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
-             VALUES ('{company_id}', 'Test Company USD', 'USD', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
-        ),
-    ))
+    db.execute(&Statement::new(format!(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+         VALUES ('{company_id}', 'Test Company USD', 'USD', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+    )))
     .await
-    .ok(); // Ignore if already exists
+    .expect("create the USD company");
 
-    let journal = EntryJournal;
-
-    // Verify that the test company has a base_currency configured
-    let currency = journal
-        .base_currency(db, company_id)
+    let template = ledgers_ledger::generic_sme_template().expect("the bundled chart parses");
+    commands::import_template(db, company_id, &template, NOW.to_owned(), &common::person())
         .await
-        .expect("company has a base currency");
-
-    // The test company should have USD as its base currency
-    assert_eq!(
-        currency.code(),
-        "USD",
-        "test company has USD as base currency"
+        .expect("import the chart");
+    journal::create_journal(
+        db,
+        company_id,
+        JournalDraft {
+            code: "GJ".to_owned(),
+            kind: JournalKind::General,
+            name: "General journal".to_owned(),
+        },
+        "01JEMPTYCLOSE0000000000000000",
+        NOW,
+        &common::person(),
+    )
+    .await
+    .expect("create the general journal");
+    period::open_fiscal_year(
+        db,
+        company_id,
+        FiscalYearSpec {
+            label: 2026,
+            start_month: 1,
+            has_adjustment_period: false,
+        },
+        NOW.to_owned(),
+        &common::person(),
+    )
+    .await
+    .expect("open fiscal 2026");
+    for month in 1..=11 {
+        period::close_period(
+            db,
+            company_id,
+            &format!("2026-{month:02}"),
+            &EntryJournal,
+            &CloseCheckRegistry::new(),
+            None,
+            NOW.to_owned(),
+            &common::person(),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("close 2026-{month:02}: {err}"));
+    }
+    period::open_fiscal_year(
+        db,
+        company_id,
+        FiscalYearSpec {
+            label: 2027,
+            start_month: 1,
+            has_adjustment_period: false,
+        },
+        NOW.to_owned(),
+        &common::person(),
+    )
+    .await
+    .expect("open fiscal 2027");
+    let report = period::close_fiscal_year(
+        db,
+        company_id,
+        2026,
+        &EntryJournal,
+        &CloseCheckRegistry::new(),
+        None,
+        NOW.to_owned(),
+        &common::person(),
+    )
+    .await
+    .expect("the empty company's fiscal year closes");
+    assert!(
+        report.closing_entry.is_none(),
+        "a year with nothing to clear posts no closing entry"
     );
 }
 
@@ -1172,7 +1235,7 @@ async fn test_post_with_mismatched_currency_is_refused_impl(db: &dyn Database) {
         ),
     ))
     .await
-    .ok(); // Ignore if already exists
+    .expect("create the company");
 
     // Create chart and journal for the scenario
     create_chart(db, &company_id).await;
@@ -1215,6 +1278,7 @@ async fn test_post_with_mismatched_currency_is_refused_impl(db: &dyn Database) {
         base_currency: "USD".to_owned(), // Mismatch: company is EUR
         description: "Currency mismatch test".to_owned(),
         source_documents: Vec::new(),
+        external_id: None,
         reverses: None,
         lines: vec![raw_line("1010", 100), raw_line("4000", -100)],
     };
@@ -1249,5 +1313,69 @@ async fn test_post_with_mismatched_currency_is_refused_impl(db: &dyn Database) {
         counter_value(db, &journal_id, FY).await.unwrap_or(0),
         0,
         "the refused batch consumed no number"
+    );
+}
+
+/// Issue #68: a company's base currency may be corrected while it has no
+/// entries, and is refused afterwards by the database itself (a trigger that
+/// holds on every dialect, not just the code path that writes the row).
+async fn base_currency_is_fixed_once_entries_exist(db: &dyn Database) {
+    let fresh = "01COMPANY_TEST_FIXED0000000000";
+    db.execute(&Statement::new(format!(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+         VALUES ('{fresh}', 'Fixed currency', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+    )))
+    .await
+    .expect("create the company");
+    db.execute(&Statement::new(format!(
+        "UPDATE company SET base_currency = 'USD' WHERE id = '{fresh}'"
+    )))
+    .await
+    .expect("with no entries the base currency may still be corrected");
+
+    // Once the company has an entry, the same correction is refused and the
+    // stored currency does not move.
+    let journal_id = fixtures(db, "UQ", "2026-04").await;
+    let entry = Entry::from_draft(
+        draft(
+            &journal_id,
+            vec![
+                eur_line("1010", Side::Debit, eur_major(12)),
+                eur_line("4000", Side::Credit, eur_major(12)),
+            ],
+        ),
+        COMPANY_ID,
+    )
+    .expect("the draft validates");
+    post_entry(
+        db,
+        &entry,
+        &ctx("UQ", 1),
+        RetryPolicy::default(),
+        no_sleep,
+        &common::person(),
+    )
+    .await
+    .expect("the first entry posts");
+
+    let refused = db
+        .execute(&Statement::new(format!(
+            "UPDATE company SET base_currency = 'USD' WHERE id = '{COMPANY_ID}'"
+        )))
+        .await;
+    assert!(
+        refused.is_err(),
+        "the database refuses a base-currency change once entries exist"
+    );
+    let rows = db
+        .query(&Statement::new(format!(
+            "SELECT base_currency FROM company WHERE id = '{COMPANY_ID}'"
+        )))
+        .await
+        .expect("read the company");
+    assert_eq!(
+        rows.rows[0].get::<String>("base_currency").as_deref(),
+        Some("EUR"),
+        "the stored base currency did not move"
     );
 }
