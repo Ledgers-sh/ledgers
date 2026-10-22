@@ -198,9 +198,8 @@ fn entries_reverse_posts_the_mirror_and_leaves_the_original_unchanged() {
         original["lines"][0]["side"], "debit",
         "the original is not edited"
     );
-    assert_eq!(
+    assert!(
         original["reversed_by"].is_string(),
-        true,
         "the original names its reversal"
     );
 }
@@ -348,10 +347,7 @@ fn entries_get_returns_the_entry_with_its_lines() {
     let body = json(&response);
     assert_eq!(body["external_id"], EXT);
     assert_eq!(body["lines"].as_array().map(Vec::len), Some(2));
-    assert_eq!(
-        body["description"],
-        "Invoice INV-1001 to Acme GmbH"
-    );
+    assert_eq!(body["description"], "Invoice INV-1001 to Acme GmbH");
 }
 
 #[test]

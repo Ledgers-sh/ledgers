@@ -66,7 +66,9 @@ pub async fn entry_by_id(
     let fiscal_year = row.get::<i64>("fiscal_year").unwrap_or_default();
     let number = row.get::<i64>("number").unwrap_or_default();
     let recorded_at = row.get::<String>("recorded_at").unwrap_or_default();
-    let actor = row.get::<String>("actor").unwrap_or_else(|| "agent".to_owned());
+    let actor = row
+        .get::<String>("actor")
+        .unwrap_or_else(|| "agent".to_owned());
 
     let (mut entry, lines) = read_entry_with_lines(db, company_id, id).await?;
     // The header row is the source of the idempotency key; the reader does not load it.

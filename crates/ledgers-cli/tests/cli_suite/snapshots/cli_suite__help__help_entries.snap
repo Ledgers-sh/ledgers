@@ -7,6 +7,7 @@ Commands under `ledgers entries`
 Usage: entries <COMMAND>
 
 Commands:
+  get      entries.get
   list     entries.list
   post     entries.post
   reverse  entries.reverse

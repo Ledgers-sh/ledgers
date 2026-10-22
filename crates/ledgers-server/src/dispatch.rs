@@ -41,6 +41,9 @@ use time::{Date, OffsetDateTime, UtcOffset};
 /// The company the development bootstrap creates when `LEDGERS_COMPANY_ID`
 /// is unset. Invented fixture id, never a real company.
 pub const DEV_COMPANY_ID: &str = "01DEVCOMPANY0000000000000A";
+/// The id of the dev bootstrap's general journal (code `GN`). The web app's
+/// journal field defaults to this id.
+pub const DEV_JOURNAL_ID: &str = "general";
 /// The owner recorded on dev bootstrap audit events and dev keys.
 const DEV_OWNER: &str = "dev-owner";
 /// The table the harness `ApiKeys` store keeps key hashes in.
@@ -469,7 +472,7 @@ pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, Stri
                 kind: JournalKind::General,
                 name: "General journal".to_owned(),
             },
-            &deps.id_gen.ulid(),
+            DEV_JOURNAL_ID,
             &stamp,
             &audit,
         )
@@ -778,7 +781,6 @@ pub struct EntriesReverseInput {
     /// The reversal's posting date, `YYYY-MM-DD`; defaults to today (UTC).
     pub posting_date: Option<String>,
 }
-
 
 /// `entries.reverse`: posts the mirror of a posted entry. Posted entries are
 /// never edited; a correction is a reversal plus new entries (`POST
