@@ -51,10 +51,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked --workspace
 
-  # The Postgres parity leg of the storage, ledger and guard matrices
-  # (issue #4): the crates' `postgres` feature plus FZ_TEST_POSTGRES_URL
-  # make `TestHarness::all_dialects` add a throwaway database on this
-  # service per harness. Without this job the leg is silently skipped.
+  # The Postgres parity leg of the storage, ledger, guard, audit and
+  # approvals matrices (issues #4 and #66): the crates' `postgres`
+  # feature plus FZ_TEST_POSTGRES_URL make `TestHarness::all_dialects`
+  # add a throwaway database on this service per harness. Without this
+  # job the leg is silently skipped.
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -81,8 +82,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: >-
           cargo test --locked
-          -p ledgers-storage -p ledgers-ledger -p ledgers-db
-          --features ledgers-storage/postgres,ledgers-ledger/postgres,ledgers-db/postgres
+          -p ledgers-storage -p ledgers-ledger -p ledgers-db -p ledgers-audit -p ledgers-approvals
+          --features ledgers-storage/postgres,ledgers-ledger/postgres,ledgers-db/postgres,ledgers-audit/postgres,ledgers-approvals/postgres
 
   wasm32:
     runs-on: ubuntu-latest
