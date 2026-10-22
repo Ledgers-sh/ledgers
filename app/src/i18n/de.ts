@@ -431,4 +431,7 @@ export const de: Messages = {
   'agentKeys.tier_draft_hint': 'Liest und entwirft Buchungen. Kann nicht buchen.',
   'agentKeys.tier_post': 'Buchen innerhalb der Grenzen',
   'agentKeys.tier_post_hint': 'Bucht Buchungen bis zu den Grenzen unten.',
+  'term.equity_accounts': 'Eigenkapitalkonten',
+  'term.current_year_result': 'Ergebnis des Geschäftsjahres',
+  'overview.equity_incl': 'Inkl. Ergebnis des Geschäftsjahres {amount}',
 };

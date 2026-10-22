@@ -431,4 +431,7 @@ export const id: Messages = {
   'agentKeys.tier_draft_hint': 'Membaca dan membuat draf entri. Tidak dapat memposting.',
   'agentKeys.tier_post': 'Posting dalam batas',
   'agentKeys.tier_post_hint': 'Memposting entri sampai batas di bawah.',
+  'term.equity_accounts': 'Akun ekuitas',
+  'term.current_year_result': 'Laba tahun berjalan',
+  'overview.equity_incl': 'Termasuk laba tahun berjalan {amount}',
 };

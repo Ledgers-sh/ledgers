@@ -434,4 +434,7 @@ export const ar: Messages = {
   'agentKeys.tier_draft_hint': 'يقرأ القيود ويكتب مسوداتها. لا يستطيع الترحيل.',
   'agentKeys.tier_post': 'ترحيل ضمن الحدود',
   'agentKeys.tier_post_hint': 'يرحّل القيود حتى الحدود أدناه.',
+  'term.equity_accounts': 'حسابات حقوق الملكية',
+  'term.current_year_result': 'نتيجة السنة الحالية',
+  'overview.equity_incl': 'بما فيها نتيجة السنة الحالية {amount}',
 };

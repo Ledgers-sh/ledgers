@@ -460,6 +460,9 @@ export const en = {
   'agentKeys.tier_draft_hint': 'Reads and drafts entries. Cannot post.',
   'agentKeys.tier_post': 'Post within limits',
   'agentKeys.tier_post_hint': 'Posts entries up to the limits below.',
+  'term.equity_accounts': 'Equity accounts',
+  'term.current_year_result': 'Current year result',
+  'overview.equity_incl': 'Incl. current year result {amount}',
 } as const;
 
 export type MessageKey = keyof typeof en;

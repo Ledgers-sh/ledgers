@@ -36,7 +36,6 @@ export function Overview() {
     totals.set(row.debit.currency, entry);
   }
   const hasActivity = trial.rows.length > 0;
-  const balanceSheetGap = BigInt(bs.assets.minor) - (BigInt(bs.liabilities.minor) + BigInt(bs.equity.minor));
   const asOf = t('overview.as_of', { date: formatDate(bs.as_of) });
   const locale = intlLocale();
 
@@ -100,7 +99,9 @@ export function Overview() {
           <div class="tile">
             <span class="label">{t('term.equity')}</span>
             <Money class="value" minor={bs.equity.minor} currency={bs.equity.currency} />
-            <span class="sub">{asOf}</span>
+            <span class="sub">
+              {tRich('overview.equity_incl', { amount: <Ltr>{formatMinor(bs.current_year_result.minor, bs.current_year_result.currency, locale)}</Ltr> })}
+            </span>
           </div>
         </div>
       </section>
@@ -157,11 +158,11 @@ export function Overview() {
             <p class="muted" style={{ marginBottom: '12px' }}>
               {t('overview.check_body')}
             </p>
-            <span class={`badge ${balanceSheetGap === 0n ? 'balanced' : 'reversed'}`}>
-              {balanceSheetGap === 0n ? (
+            <span class={`badge ${bs.balanced ? 'balanced' : 'reversed'}`}>
+              {bs.balanced ? (
                 t('overview.check_ok')
               ) : (
-                tRich('overview.check_gap', { amount: <Ltr>{formatMinor(balanceSheetGap, bs.assets.currency, locale)}</Ltr> })
+                tRich('overview.check_gap', { amount: <Ltr>{formatMinor(BigInt(bs.difference.minor), bs.difference.currency, locale)}</Ltr> })
               )}
             </span>
           </div>

@@ -73,6 +73,9 @@ LEDGERS_AUTH_ISSUER = "https://auth-staging.ledgers.sh"
 LEDGERS_AUTH_CLIENT_ID = "STAGING_AUTH_CLIENT_ID"
 LEDGERS_APP_URL = "https://app-staging.ledgers.sh"
 LEDGERS_COMPANY_ID = "STAGING_COMPANY_ID"
+# The demo seed route (POST /admin/seed-demo, docs/deploy.md) also needs the
+# SEED_TOKEN secret. Staging only: never set this flag in production.
+LEDGERS_ALLOW_DEMO_SEED = "1"
 DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
 
 [[env.staging.d1_databases]]

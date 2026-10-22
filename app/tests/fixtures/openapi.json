@@ -1150,15 +1150,35 @@
                       "$ref": "#/components/schemas/SerializableAmount"
                     },
                     "equity": {
-                      "description": "Total equity.",
+                      "description": "Total equity as presented: `equity_accounts` plus `current_year_result`.",
                       "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "equity_accounts": {
+                      "description": "The equity accounts alone (capital, reserves, retained earnings).",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "current_year_result": {
+                      "description": "Income minus expenses from the fiscal year start up to `as_of`\n(Jahresüberschuss, or Jahresfehlbetrag when negative).",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Assets minus liabilities minus equity. Zero when `balanced`.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "balanced": {
+                      "description": "Whether the sheet balances on its own: assets = liabilities + equity.",
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "as_of",
                     "assets",
                     "liabilities",
-                    "equity"
+                    "equity",
+                    "equity_accounts",
+                    "current_year_result",
+                    "difference",
+                    "balanced"
                   ]
                 }
               }
