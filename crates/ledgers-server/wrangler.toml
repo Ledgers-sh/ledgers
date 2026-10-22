@@ -4,6 +4,9 @@ name = "ledgers"
 main = "build/worker/shim.mjs"
 
 compatibility_date = "2024-12-01"
+# Run the Worker next to its D1 database: each request makes several D1 calls, so one long hop
+# from the visitor beats several long hops to the database.
+placement = { mode = "smart" }
 
 # D1 Database binding
 [[d1_databases]]
@@ -59,6 +62,7 @@ bucket_name = "ledgers-documents-prod"
 [env.staging]
 name = "ledgers-api-staging"
 compatibility_date = "2026-10-01"
+placement = { mode = "smart" }
 
 [env.staging.vars]
 ENV = "staging"
