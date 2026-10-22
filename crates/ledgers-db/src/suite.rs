@@ -20,12 +20,13 @@
 //!
 //! # The reference batch
 //!
-//! [`plan_post`] reads exactly one thing before the batch (the audit
-//! head) and returns the statements in the canonical order — the ADR
-//! example, and the shape every posting crate should keep:
+//! [`plan_post`] reads exactly two things before the batch (the audit
+//! head and the numbering counter) and returns the statements in the
+//! canonical order — the ADR example, and the shape every posting crate
+//! should keep:
 //!
 //! ```sql
-//! -- 1. numbering: provision (idempotent), bump, insert reading the counter
+//! -- 1. numbering: provision (idempotent), bump, insert with literal number (computed pre-batch), assert counter advanced
 //! -- 2. the entry's lines
 //! -- 3. period guard (open to all; soft-closed to people only;
 //! --    closed or unknown to no one)
@@ -160,6 +161,14 @@ pub async fn create_demo_tables(db: &dyn Database) -> Result<(), DbError> {
 /// built — when `entry_date` is not a real `"YYYY-MM-DD"` calendar
 /// date.
 pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<Statement>, DbError> {
+    // Read counter and audit head before the batch; the retry will re-read
+    // both, so a retry gets fresh counter and head values.
+    let current_number = numbering::read_counter(db, &input.journal_id, input.fiscal_year)
+        .await?
+        .unwrap_or(0);
+    let expected_number = current_number + 1;
+    let head = chain::read_head(db, &input.journal_id).await?;
+
     let derived_period = period::period_of_date(&input.entry_date).ok_or_else(|| {
         DbError::Query(format!(
             "entry_date {} is not a YYYY-MM-DD calendar date",
@@ -168,13 +177,11 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
     })?;
     let posting_period = input.period_override.clone().unwrap_or(derived_period);
     let day = meter_day(&input.created_at)?;
-    let head = chain::read_head(db, &input.journal_id).await?;
 
-    let mut statements = Vec::with_capacity(input.lines.len() + 8);
+    let mut statements = Vec::with_capacity(input.lines.len() + 9);
 
-    // 1. Gapless numbering: provision (idempotent), bump, insert reading
-    //    the counter — the entry's NOT NULL number comes from the row
-    //    this batch just advanced.
+    // 1. Gapless numbering: provision (idempotent), bump, insert with
+    //    literal number computed pre-batch, then guard to verify counter matches.
     statements.push(numbering::provision_statement(
         &input.journal_id,
         input.fiscal_year,
@@ -183,25 +190,32 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
         &input.journal_id,
         input.fiscal_year,
     ));
-    statements.push(numbering::insert_with_number(
-        "demo_entry",
-        &[
-            "entry_id",
-            "journal_id",
-            "fiscal_year",
-            "entry_date",
-            "created_at",
-        ],
+    statements.push(Statement::with_values(
+        "INSERT INTO demo_entry (entry_id, journal_id, fiscal_year, entry_date, created_at, number)\n\
+         VALUES (?, ?, ?, ?, ?, ?)"
+            .to_owned(),
         vec![
             SeaValue::from(input.entry_id.as_str()),
             SeaValue::from(input.journal_id.as_str()),
             SeaValue::BigInt(Some(input.fiscal_year)),
             SeaValue::from(input.entry_date.as_str()),
             SeaValue::from(input.created_at.as_str()),
+            SeaValue::BigInt(Some(expected_number)),
         ],
-        "number",
+    ));
+
+    // The guard after the insert verifies the counter equals expected_number:
+    // the counter only grows and every number ≤ counter is already taken in
+    // demo_entry for that (journal, fiscal year), so if another post won the
+    // race, the counter was already ≥ expected_number, our INSERT hit the
+    // unique constraint, and retry re-planned with fresh reads. This guard
+    // ensures the counter is exactly what we expected, preventing gaps.
+    let counter_guard_key = guard::guard_key(&["counter-advanced", &input.entry_id]);
+    statements.push(numbering::assert_counter_advanced_statement(
+        &counter_guard_key,
         &input.journal_id,
         input.fiscal_year,
+        expected_number,
     ));
 
     // 2. The lines.
@@ -277,6 +291,9 @@ pub async fn plan_post(db: &dyn Database, input: &PostInput) -> Result<Vec<State
         &input.entry_id,
         &input.created_at,
     ));
+
+    // 8. Release the counter guard at the very end.
+    statements.push(guard::release_statement(&counter_guard_key));
 
     Ok(statements)
 }
