@@ -15,6 +15,7 @@ Commands:
   approval-settings  Commands under `ledgers approval-settings`
   approvals          Commands under `ledgers approvals`
   audit              Commands under `ledgers audit`
+  bank               Commands under `ledgers bank`
   bills              Commands under `ledgers bills`
   company            Commands under `ledgers company`
   documents          Commands under `ledgers documents`

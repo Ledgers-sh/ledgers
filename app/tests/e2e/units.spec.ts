@@ -180,6 +180,25 @@ test('an agent key is pinned to a unit at creation, and the pin reaches the serv
   expect((await created).postDataJSON()).toMatchObject({ unit: 'LDG' });
 });
 
+test('a bank match to an income account needs a unit, and the unit reaches the post', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true, bank: true });
+  await signInPerson(page);
+  await page.goto('/#/bank');
+  await page.getByRole('link', { name: /Girokonto Halden/ }).click();
+  await page.locator('.bank-line').first().click();
+  const panel = page.locator('#bank-reconcile');
+  await panel.getByRole('radio', { name: 'Another account' }).check();
+  await choose(page, 'Other account', 'Sales');
+  const match = panel.getByRole('button', { name: 'Match', exact: true });
+  await match.click();
+  await expect(panel.getByText('Choose a unit for this line.')).toBeVisible();
+  const posted = page.waitForRequest((request) => request.url().includes('/v1/bank/transactions/') && request.url().endsWith('/post'));
+  await panel.getByRole('combobox', { name: 'Unit' }).click();
+  await page.getByRole('option', { name: 'LDG' }).click();
+  await match.click();
+  expect((await posted).postDataJSON()).toMatchObject({ counterparty_account: '4000', unit: 'LDG' });
+});
+
 test('the units and the switcher pass axe', async ({ page }) => {
   await openUnits(page);
   for (const route of ['/#/overview?unit=LDG', '/#/accounts/units']) {

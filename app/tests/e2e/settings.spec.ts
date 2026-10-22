@@ -205,6 +205,49 @@ test.describe('settings', () => {
     expect(body.split('\r\n').filter(Boolean)).toHaveLength(9);
   });
 
+  test('audit log: the From and To fields pick a day from the calendar, and Clear empties one', async ({ page }) => {
+    // The calendar opens on today; the clock is fixed so the October grid is the one shown.
+    await page.clock.setFixedTime(new Date('2026-10-23T12:00:00Z'));
+    await mockApi({ person: true });
+    await signInPerson(page);
+    await open(page, '#/settings/audit');
+    await expect(page.getByRole('row')).toHaveCount(9);
+
+    await page.getByRole('button', { name: /^From:/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('button', { name: '21 Oct 2026', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'From: 21 Oct 2026' })).toBeVisible();
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(page.getByRole('row')).toHaveCount(7);
+
+    await page.getByRole('button', { name: /^To:/ }).click();
+    await page.getByRole('button', { name: '21 Oct 2026', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(page.getByRole('row')).toHaveCount(4);
+
+    await page.getByRole('button', { name: /^To:/ }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Clear', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(page.getByRole('row')).toHaveCount(7);
+  });
+
+  test('audit log: the day calendar closes on Escape and moves by keyboard', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-23T12:00:00Z'));
+    await mockApi({ person: true });
+    await signInPerson(page);
+    await open(page, '#/settings/audit');
+    await page.getByRole('button', { name: /^From:/ }).click();
+    await expect(page.getByRole('button', { name: '23 Oct 2026', exact: true })).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByRole('button', { name: '22 Oct 2026', exact: true })).toBeFocused();
+    await page.keyboard.press('PageUp');
+    await expect(page.getByRole('button', { name: '22 Sept 2026', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^From: Any$/ })).toBeFocused();
+  });
+
   test('an agent key gets the explanation, not the forms', async ({ page }) => {
     await mockApi({ seed: true });
     await signIn(page);

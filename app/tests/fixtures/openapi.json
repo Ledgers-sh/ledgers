@@ -1131,6 +1131,1942 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/bank/accounts/{id}/archive": {
+      "post": {
+        "operationId": "bank_accounts_archive",
+        "description": "Execute command: bank.accounts.archive",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsArchiveInput",
+                "description": "`bank.accounts.archive`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The account id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.archive",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts archive",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts/{id}/archive\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/accounts": {
+      "post": {
+        "operationId": "bank_accounts_create",
+        "description": "Execute command: bank.accounts.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsCreateInput",
+                "description": "`bank.accounts.create`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "The name a person gives the account.",
+                    "type": "string"
+                  },
+                  "iban": {
+                    "description": "The IBAN, validated with its check digits.",
+                    "type": "string"
+                  },
+                  "bic": {
+                    "description": "The BIC, optional.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "currency": {
+                    "description": "The ISO 4217 currency of the account.",
+                    "type": "string"
+                  },
+                  "ledger_account_number": {
+                    "description": "The linked ledger account; it must carry the `bank` tag.",
+                    "type": "string"
+                  },
+                  "opening_amount": {
+                    "description": "The opening balance as decimal text in the account currency, e.g. `1250.00`.",
+                    "type": "string"
+                  },
+                  "opening_date": {
+                    "description": "The date of the opening balance, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "csv_mapping": {
+                    "description": "A CSV column mapping for this account's exports.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CsvMapping"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "iban",
+                  "currency",
+                  "ledger_account_number",
+                  "opening_amount",
+                  "opening_date"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "bank_accounts_list",
+        "description": "Execute command: bank.accounts.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsListOutput",
+                  "description": "Output of `bank.accounts.list`.",
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "description": "The accounts, by name.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccountView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts list",
+        "x-ledgers-mcp": "bank_accounts_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}": {
+      "get": {
+        "operationId": "bank_accounts_get",
+        "description": "Execute command: bank.accounts.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts get",
+        "x-ledgers-mcp": "bank_accounts_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}/reconciliation": {
+      "get": {
+        "operationId": "bank_accounts_reconcile",
+        "description": "Execute command: bank.accounts.reconcile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ReconciliationView",
+                  "description": "The reconciliation of an account as of a date.",
+                  "type": "object",
+                  "properties": {
+                    "account_id": {
+                      "description": "The account.",
+                      "type": "string"
+                    },
+                    "as_of": {
+                      "description": "The date the balances are compared at.",
+                      "type": "string"
+                    },
+                    "statement_balance": {
+                      "description": "The statement's closing balance at that date (the opening balance when no statement has been imported).",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "ledger_balance": {
+                      "description": "The ledger's balance of the linked account at that date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_total": {
+                      "description": "The part of the difference explained by unmatched lines.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "ignored_total": {
+                      "description": "The part explained by lines the person chose to ignore.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "residual": {
+                      "description": "The rest: entries on the account that no statement line explains.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "reconciled": {
+                      "description": "Whether nothing is left unexplained and no line is unmatched.",
+                      "type": "boolean"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines left out on purpose.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "account_id",
+                    "as_of",
+                    "statement_balance",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_total",
+                    "ignored_total",
+                    "residual",
+                    "reconciled",
+                    "unmatched_count",
+                    "ignored_count"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.reconcile",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank accounts reconcile",
+        "x-ledgers-mcp": "bank_accounts_reconcile",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/accounts/{id}/reconciliation\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/accounts/{id}/update": {
+      "post": {
+        "operationId": "bank_accounts_update",
+        "description": "Execute command: bank.accounts.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsUpdateInput",
+                "description": "`bank.accounts.update`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The account id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bic": {
+                    "description": "A new BIC; an empty string clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "csv_mapping": {
+                    "description": "A new CSV column mapping.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CsvMapping"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountView",
+                  "description": "A bank account as the app shows it, with its reconciliation summary.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The account id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "iban": {
+                      "description": "The IBAN, normalised.",
+                      "type": "string"
+                    },
+                    "bic": {
+                      "description": "The BIC, when given.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currency": {
+                      "description": "The account currency.",
+                      "type": "string"
+                    },
+                    "ledger_account_number": {
+                      "description": "The linked ledger account (chart tag `bank`).",
+                      "type": "string"
+                    },
+                    "opening": {
+                      "description": "The opening balance the account was set up with.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "opening_date": {
+                      "description": "The date of the opening balance.",
+                      "type": "string"
+                    },
+                    "csv_mapping": {
+                      "description": "The saved CSV column mapping, when one is set.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CsvMapping"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "description": "Whether the account is archived (no more imports or postings).",
+                      "type": "boolean"
+                    },
+                    "statement_balance": {
+                      "description": "The closing balance of the latest imported statement, when there is one.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/BalanceView"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ledger_balance": {
+                      "description": "The balance of the linked ledger account, as of the statement date.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "difference": {
+                      "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+                      "$ref": "#/components/schemas/SerializableAmount"
+                    },
+                    "unmatched_count": {
+                      "description": "Lines not matched yet.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "matched_count": {
+                      "description": "Lines matched to a journal entry or a bill.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ignored_count": {
+                      "description": "Lines a person chose to leave out of the books.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "description": "When the account was created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When the account last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "iban",
+                    "currency",
+                    "ledger_account_number",
+                    "opening",
+                    "opening_date",
+                    "archived",
+                    "ledger_balance",
+                    "difference",
+                    "unmatched_count",
+                    "matched_count",
+                    "ignored_count",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.accounts.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank accounts update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/accounts/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/rules": {
+      "post": {
+        "operationId": "bank_rules_create",
+        "description": "Execute command: bank.rules.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RulesCreateRequest",
+                "description": "The public request of `bank.rules.create`.",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "description": "The name.",
+                    "type": "string"
+                  },
+                  "conditions": {
+                    "description": "The conditions; at least one.",
+                    "$ref": "#/components/schemas/RuleConditions"
+                  },
+                  "account_number": {
+                    "description": "The account the rule posts to (postable, not a bank account).",
+                    "type": "string"
+                  },
+                  "tax_code": {
+                    "description": "The tax code to set.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "description": "The unit to set.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "conditions",
+                  "account_number"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RuleView",
+                  "description": "A bank rule as the app shows it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The rule id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name a person gave it.",
+                      "type": "string"
+                    },
+                    "conditions": {
+                      "description": "The conditions.",
+                      "$ref": "#/components/schemas/RuleConditions"
+                    },
+                    "account_number": {
+                      "description": "The account the rule posts to.",
+                      "type": "string"
+                    },
+                    "tax_code": {
+                      "description": "The tax code it sets.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "unit": {
+                      "description": "The unit it sets.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "description": "Whether it applies. An agent's rule waits here until a person enables it.",
+                      "type": "boolean"
+                    },
+                    "proposed_by": {
+                      "description": "Who proposed it.",
+                      "type": "string"
+                    },
+                    "enabled_by": {
+                      "description": "Who enabled it, once enabled.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When it was created.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "conditions",
+                    "account_number",
+                    "enabled",
+                    "proposed_by",
+                    "created_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank rules create",
+        "x-ledgers-mcp": "bank_rules_create",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/rules\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      },
+      "get": {
+        "operationId": "bank_rules_list",
+        "description": "Execute command: bank.rules.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RulesListOutput",
+                  "description": "Output of `bank.rules.list`.",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "The rules, oldest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RuleView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank rules list",
+        "x-ledgers-mcp": "bank_rules_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/rules\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/rules/{id}/enable": {
+      "post": {
+        "operationId": "bank_rules_enable",
+        "description": "Execute command: bank.rules.enable",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RulesEnableInput",
+                "description": "`bank.rules.enable`, a person only.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The rule id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RulesEnableOutput",
+                  "description": "Output of `bank.rules.enable`.",
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "description": "The rule, now enabled.",
+                      "$ref": "#/components/schemas/RuleView"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.rules.enable",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank rules enable",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/rules/{id}/enable\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bank/statements/import": {
+      "post": {
+        "operationId": "bank_statements_import",
+        "description": "Execute command: bank.statements.import",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "StatementsImportRequest",
+                "description": "The public request of `bank.statements.import`: the document is read by\nthe server, which parses it and fills the command's statements itself.",
+                "type": "object",
+                "properties": {
+                  "account_id": {
+                    "description": "The bank account the statement is for.",
+                    "type": "string"
+                  },
+                  "document_id": {
+                    "description": "The uploaded document (its id from `documents.register`).",
+                    "type": "string"
+                  },
+                  "format": {
+                    "description": "The format; detected from the bytes when omitted.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Format"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "account_id",
+                  "document_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "StatementsImportOutput",
+                  "description": "Output of `bank.statements.import`.",
+                  "type": "object",
+                  "properties": {
+                    "account_id": {
+                      "description": "The account.",
+                      "type": "string"
+                    },
+                    "document_id": {
+                      "description": "The document.",
+                      "type": "string"
+                    },
+                    "statements": {
+                      "description": "One summary per statement in the file.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StatementSummary"
+                      }
+                    },
+                    "new_transactions": {
+                      "description": "Lines stored by this import, over all statements.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "duplicate_transactions": {
+                      "description": "Lines already stored, over all statements.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "account_id",
+                    "document_id",
+                    "statements",
+                    "new_transactions",
+                    "duplicate_transactions"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.statements.import",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank statements import",
+        "x-ledgers-mcp": "bank_statements_import",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/statements/import\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions/{id}/ignore": {
+      "post": {
+        "operationId": "bank_transactions_ignore",
+        "description": "Execute command: bank.transactions.ignore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsIgnoreInput",
+                "description": "`bank.transactions.ignore`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionStatusOutput",
+                  "description": "Output of link and ignore.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line id.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched` or `ignored`.",
+                      "type": "string"
+                    },
+                    "matched_entry_id": {
+                      "description": "The entry it is matched to, when linked.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.ignore",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank transactions ignore",
+        "x-ledgers-mcp": "bank_transactions_ignore",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/ignore\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions/{id}/link": {
+      "post": {
+        "operationId": "bank_transactions_link",
+        "description": "Execute command: bank.transactions.link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsLinkInput",
+                "description": "`bank.transactions.link`: match the line to an entry already posted.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  },
+                  "entry_id": {
+                    "description": "The posted entry, with one line on the bank's ledger account of the same amount.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "entry_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionStatusOutput",
+                  "description": "Output of link and ignore.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line id.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched` or `ignored`.",
+                      "type": "string"
+                    },
+                    "matched_entry_id": {
+                      "description": "The entry it is matched to, when linked.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.link",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bank transactions link",
+        "x-ledgers-mcp": "bank_transactions_link",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/link\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bank/transactions": {
+      "get": {
+        "operationId": "bank_transactions_list",
+        "description": "Execute command: bank.transactions.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionsListOutput",
+                  "description": "Output of `bank.transactions.list`.",
+                  "type": "object",
+                  "properties": {
+                    "transactions": {
+                      "description": "The lines, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TransactionView"
+                      }
+                    },
+                    "next": {
+                      "description": "The cursor for the next page, when there is one.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transactions"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank transactions list",
+        "x-ledgers-mcp": "bank_transactions_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/transactions\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bank/transactions/{id}/post": {
+      "post": {
+        "operationId": "bank_transactions_post",
+        "description": "Execute command: bank.transactions.post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TransactionsPostInput",
+                "description": "`bank.transactions.post`: post the line as a journal entry.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bank line id.",
+                    "type": "string"
+                  },
+                  "counterparty_account": {
+                    "description": "The account the other side of the entry goes to. Give this or `bill_id`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bill_id": {
+                    "description": "An open bill this line pays. Give this or `counterparty_account`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tax_code": {
+                    "description": "The tax code on the counterparty line.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "description": "The unit (dimension) on the counterparty line.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "journal_id": {
+                    "description": "The journal; the general journal `GN` when omitted.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "fiscal_year": {
+                    "description": "The fiscal year; the booking date's year when omitted.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TransactionsPostOutput",
+                  "description": "Output of `bank.transactions.post`.",
+                  "type": "object",
+                  "properties": {
+                    "transaction_id": {
+                      "description": "The bank line.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`matched`.",
+                      "type": "string"
+                    },
+                    "entry": {
+                      "description": "The entry it posted.",
+                      "$ref": "#/components/schemas/PostedBankEntry"
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status",
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.transactions.post",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers bank transactions post",
+        "x-ledgers-mcp": "bank_transactions_post",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bank/transactions/{id}/post\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/bills/{id}/confirm": {
       "post": {
         "operationId": "bills_confirm",
@@ -5385,78 +7321,121 @@
   "components": {
     "schemas": {
       "AccountView": {
-        "description": "One account of the chart, as the app's `Account` types it, plus its balances.",
+        "description": "A bank account as the app shows it, with its reconciliation summary.",
         "type": "object",
         "properties": {
-          "number": {
-            "description": "The account number.",
+          "id": {
+            "description": "The account id.",
             "type": "string"
           },
-          "name_key": {
-            "description": "The translatable name key.",
+          "name": {
+            "description": "The name a person gave it.",
             "type": "string"
           },
-          "display_name": {
-            "description": "The custom name a person gave the account, or `null` to show the\ntranslated `name_key`.",
+          "iban": {
+            "description": "The IBAN, normalised.",
+            "type": "string"
+          },
+          "bic": {
+            "description": "The BIC, when given.",
             "type": [
               "string",
               "null"
             ]
-          },
-          "account_type": {
-            "description": "The account class: asset, liability, equity, income, expense.",
-            "type": "string"
-          },
-          "normal_balance": {
-            "description": "The normal balance side.",
-            "type": "string"
           },
           "currency": {
-            "description": "The account currency, or `null` for the company base currency.",
-            "type": [
-              "string",
-              "null"
+            "description": "The account currency.",
+            "type": "string"
+          },
+          "ledger_account_number": {
+            "description": "The linked ledger account (chart tag `bank`).",
+            "type": "string"
+          },
+          "opening": {
+            "description": "The opening balance the account was set up with.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "opening_date": {
+            "description": "The date of the opening balance.",
+            "type": "string"
+          },
+          "csv_mapping": {
+            "description": "The saved CSV column mapping, when one is set.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CsvMapping"
+              },
+              {
+                "type": "null"
+              }
             ]
-          },
-          "parent": {
-            "description": "The parent account number, if any.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tags": {
-            "description": "The chart tags of the account.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "is_postable": {
-            "description": "Whether the account accepts postings (a leaf of the chart).",
-            "type": "boolean"
           },
           "archived": {
-            "description": "Whether the account is archived: kept for history, no new postings.",
+            "description": "Whether the account is archived (no more imports or postings).",
             "type": "boolean"
           },
-          "balances": {
-            "description": "The balance per base currency, debit-positive (empty when no postings).",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SerializableAmount"
-            }
+          "statement_balance": {
+            "description": "The closing balance of the latest imported statement, when there is one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ledger_balance": {
+            "description": "The balance of the linked ledger account, as of the statement date.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "difference": {
+            "description": "Statement balance minus ledger balance; zero when no statement is imported.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "unmatched_count": {
+            "description": "Lines not matched yet.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "matched_count": {
+            "description": "Lines matched to a journal entry or a bill.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ignored_count": {
+            "description": "Lines a person chose to leave out of the books.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "created_at": {
+            "description": "When the account was created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the account last changed.",
+            "type": "string"
           }
         },
         "required": [
-          "number",
-          "name_key",
-          "account_type",
-          "normal_balance",
-          "tags",
-          "is_postable",
+          "id",
+          "name",
+          "iban",
+          "currency",
+          "ledger_account_number",
+          "opening",
+          "opening_date",
           "archived",
-          "balances"
+          "ledger_balance",
+          "difference",
+          "unmatched_count",
+          "matched_count",
+          "ignored_count",
+          "created_at",
+          "updated_at"
         ]
       },
       "SerializableAmount": {
@@ -5589,6 +7568,559 @@
           "outcome",
           "objects",
           "request_id"
+        ]
+      },
+      "CsvMapping": {
+        "description": "The mapping a bank account saves for its CSV exports.",
+        "type": "object",
+        "properties": {
+          "delimiter": {
+            "description": "The field delimiter: `;`, `,` or a tab.",
+            "type": "string"
+          },
+          "skip_rows": {
+            "description": "Lines before the header (or the first record when there is none).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "has_header": {
+            "description": "Whether the first record after `skip_rows` names the columns.",
+            "type": "boolean"
+          },
+          "decimal": {
+            "description": "The decimal separator: `.` or `,`.",
+            "type": "string"
+          },
+          "date_format": {
+            "description": "The date format: `YYYY-MM-DD`, `DD.MM.YYYY`, `DD/MM/YYYY` or `MM/DD/YYYY`.",
+            "type": "string"
+          },
+          "booking_date": {
+            "description": "The booking date column.",
+            "type": "string"
+          },
+          "value_date": {
+            "description": "The value date column, when the export has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "description": "A single signed amount column (negative is an outflow).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "debit": {
+            "description": "Outflows as positive numbers, when debits and credits are separate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credit": {
+            "description": "Inflows as positive numbers, when debits and credits are separate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "A currency column; without one the account's currency is used.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_name": {
+            "description": "The counterparty's name column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remittance": {
+            "description": "Remittance columns, joined with a space in the order given.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bank_reference": {
+            "description": "The bank's reference column.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "delimiter",
+          "skip_rows",
+          "has_header",
+          "decimal",
+          "date_format",
+          "booking_date",
+          "remittance"
+        ]
+      },
+      "BalanceView": {
+        "description": "A balance on a date.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "The date.",
+            "type": "string"
+          },
+          "amount": {
+            "description": "The amount.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "date",
+          "amount"
+        ]
+      },
+      "RuleConditions": {
+        "description": "The conditions of a rule. Unset conditions do not restrict the match.",
+        "type": "object",
+        "properties": {
+          "contains": {
+            "description": "Text the remittance or the counterparty name contains (case-insensitive).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN, normalised.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount_min": {
+            "description": "The smallest signed amount in minor units (inclusive).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "amount_max": {
+            "description": "The largest signed amount in minor units (inclusive).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "RuleView": {
+        "description": "A bank rule as the app shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The rule id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name a person gave it.",
+            "type": "string"
+          },
+          "conditions": {
+            "description": "The conditions.",
+            "$ref": "#/components/schemas/RuleConditions"
+          },
+          "account_number": {
+            "description": "The account the rule posts to.",
+            "type": "string"
+          },
+          "tax_code": {
+            "description": "The tax code it sets.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "description": "The unit it sets.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "description": "Whether it applies. An agent's rule waits here until a person enables it.",
+            "type": "boolean"
+          },
+          "proposed_by": {
+            "description": "Who proposed it.",
+            "type": "string"
+          },
+          "enabled_by": {
+            "description": "Who enabled it, once enabled.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When it was created.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "conditions",
+          "account_number",
+          "enabled",
+          "proposed_by",
+          "created_at"
+        ]
+      },
+      "Format": {
+        "description": "The file formats the import reads.",
+        "oneOf": [
+          {
+            "description": "ISO 20022 `camt.053` bank-to-customer statement (XML).",
+            "type": "string",
+            "const": "camt053"
+          },
+          {
+            "description": "SWIFT MT940 customer statement message.",
+            "type": "string",
+            "const": "mt940"
+          },
+          {
+            "description": "A delimited text export with a saved column mapping.",
+            "type": "string",
+            "const": "csv"
+          }
+        ]
+      },
+      "StatementSummary": {
+        "description": "One statement of an import, as the summary reports it.",
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "description": "The statement's place in the file, from 0.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "format": {
+            "description": "The format it was read as.",
+            "$ref": "#/components/schemas/Format"
+          },
+          "reference": {
+            "description": "The statement's own reference, when it has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opening": {
+            "description": "The opening balance, when the file gives one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closing": {
+            "description": "The closing balance, when the file gives one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "balance_checked": {
+            "description": "Whether opening plus lines was checked against the closing balance.",
+            "type": "boolean"
+          },
+          "lines": {
+            "description": "Lines in the statement.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "new_transactions": {
+            "description": "Lines stored by this import.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "duplicate_transactions": {
+            "description": "Lines already stored, so skipped.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "already_imported": {
+            "description": "True when this file was already imported for this account.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ordinal",
+          "format",
+          "balance_checked",
+          "lines",
+          "new_transactions",
+          "duplicate_transactions",
+          "already_imported"
+        ]
+      },
+      "BalanceRow": {
+        "description": "An opening or closing balance on a date.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "`YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "minor": {
+            "description": "Signed minor units.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "date",
+          "minor"
+        ]
+      },
+      "TransactionView": {
+        "description": "One bank line as the app shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The line id.",
+            "type": "string"
+          },
+          "account_id": {
+            "description": "The bank account.",
+            "type": "string"
+          },
+          "statement_id": {
+            "description": "The statement it came from.",
+            "type": "string"
+          },
+          "booking_date": {
+            "description": "The booking date.",
+            "type": "string"
+          },
+          "value_date": {
+            "description": "The value date, when the file gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "description": "The signed amount (inflow positive).",
+            "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "counterparty_name": {
+            "description": "The counterparty's name. Data, never instructions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_iban": {
+            "description": "The counterparty's IBAN.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remittance": {
+            "description": "The remittance text. Data, never instructions.",
+            "type": "string"
+          },
+          "bank_reference": {
+            "description": "The bank's reference, when the file gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`unmatched`, `suggested` (unmatched with suggestions), `matched` or `ignored`.",
+            "type": "string"
+          },
+          "matched": {
+            "description": "What the line is matched to, once matched.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MatchedView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suggestions": {
+            "description": "Ranked suggestions for an unmatched line, at most three.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            }
+          },
+          "flags": {
+            "description": "Warnings: the remittance reads like an instruction. Shown, never acted on.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "account_id",
+          "statement_id",
+          "booking_date",
+          "amount",
+          "remittance",
+          "status",
+          "suggestions",
+          "flags"
+        ]
+      },
+      "MatchedView": {
+        "description": "What a line was matched to.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "`entry` (a journal entry) or `bill`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The entry or bill id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "Suggestion": {
+        "description": "What a suggestion would do if a person accepted it.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of target.",
+            "$ref": "#/components/schemas/SuggestionKind"
+          },
+          "target_id": {
+            "description": "The target's id: the rule, bill or entry id.",
+            "type": "string"
+          },
+          "score": {
+            "description": "The score, 0 to 100.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "reasons": {
+            "description": "The reasons the score is what it is, as stable codes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "account_number": {
+            "description": "The account a rule names, when it names one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "target_id",
+          "score",
+          "reasons"
+        ]
+      },
+      "SuggestionKind": {
+        "description": "The kind of thing a suggestion points at.",
+        "oneOf": [
+          {
+            "description": "A bank rule matched: it names the account.",
+            "type": "string",
+            "const": "rule"
+          },
+          {
+            "description": "An open vendor bill the payment settles.",
+            "type": "string",
+            "const": "bill"
+          },
+          {
+            "description": "A posted journal entry on the bank's ledger account.",
+            "type": "string",
+            "const": "entry"
+          }
+        ]
+      },
+      "PostedBankEntry": {
+        "description": "The entry a bank line posted.",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year of the number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_at": {
+            "description": "When it was recorded.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "recorded_at"
         ]
       },
       "BillView": {

@@ -201,17 +201,29 @@ async fn upload(
             .instance(&request_id)
             .into_response();
     }
-    let text = if kind == sniff::Kind::Pdf {
-        match ledgers_extract::pdf::text_layer(&bytes) {
+    let text = match kind {
+        sniff::Kind::Pdf => match ledgers_extract::pdf::text_layer(&bytes) {
             Ok(text) => text,
             Err(err) => {
                 return Problem::validation_failed(format!("this PDF cannot be read: {err}"))
                     .instance(&request_id)
                     .into_response();
             }
+        },
+        // A bank statement is read from its stored text, so the whole file must
+        // fit the text layer: a truncated statement would lose lines.
+        sniff::Kind::Camt053 | sniff::Kind::Mt940 | sniff::Kind::BankCsv => {
+            if bytes.len() > ledgers_documents::commands::MAX_TEXT_LAYER_BYTES {
+                return Problem::validation_failed(
+                    "a bank statement is read up to 512 KiB: split the file by period",
+                )
+                .instance(&request_id)
+                .into_response();
+            }
+            // The sniffer accepted only UTF-8 text for these kinds.
+            Some(String::from_utf8_lossy(&bytes).into_owned())
         }
-    } else {
-        None
+        sniff::Kind::Png | sniff::Kind::Jpeg => None,
     };
     let sha256 = hex::encode(Sha256::digest(&bytes));
     let original_name = headers

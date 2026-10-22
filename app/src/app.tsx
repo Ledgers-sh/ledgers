@@ -34,6 +34,9 @@ import { NewEntry } from './ui/NewEntry';
 import { Reports } from './ui/Reports';
 import { Inbox } from './ui/Inbox';
 import { BillReview } from './ui/BillReview';
+import { BankAccounts, BankAccountNew } from './ui/BankAccounts';
+import { BankAccountPage } from './ui/BankAccount';
+import { BankRules } from './ui/BankRules';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
 import { Settings, settingsSectionOf } from './ui/Settings';
 import { badgeText } from './lib/approvals';
@@ -57,6 +60,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'accounts', label: 'nav.accounts', icon: 'accounts', match: (r) => r === 'accounts' || r.startsWith('accounts/') },
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' || r.startsWith('bills/') },
+  { hash: 'bank', label: 'nav.bank', icon: 'bank', match: (r) => r === 'bank' || r.startsWith('bank/') },
   { hash: 'settings', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
@@ -463,6 +467,10 @@ function renderRoute(route: string) {
   if (route.startsWith('approvals/')) return <ApprovalDetail approvalId={decodeURIComponent(route.slice('approvals/'.length))} />;
   if (route === 'bills') return <Inbox />;
   if (route.startsWith('bills/')) return <BillReview billId={decodeURIComponent(route.slice('bills/'.length))} />;
+  if (route === 'bank') return <BankAccounts />;
+  if (route === 'bank/new') return <BankAccountNew />;
+  if (route === 'bank/rules') return <BankRules />;
+  if (route.startsWith('bank/')) return <BankAccountPage id={decodeURIComponent(route.slice('bank/'.length))} />;
   if (route === 'new') return <NewEntry />;
   return (
     <div class="empty">

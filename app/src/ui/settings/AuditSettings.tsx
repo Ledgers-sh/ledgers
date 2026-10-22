@@ -5,6 +5,7 @@ import { useSession } from '../../session';
 import { auditCsv } from '../../lib/audit';
 import { describeError, Empty, Marker } from '../common';
 import { Select } from '../Select';
+import { DatePicker } from '../DatePicker';
 import { formatWhen } from '../AgentKeys';
 import { FormProblem, LoadingLine, SettingsPanel, StateBadge } from './common';
 
@@ -193,14 +194,14 @@ export function AuditSettings() {
             onChange={(value) => setDraft({ ...draft, outcome: value as Filters['outcome'] })}
           />
         </div>
-        <label class="field">
+        <div class="field">
           <span>{t('settings.filter_from')}</span>
-          <input class="input mono" type="date" name="from" aria-label={t('settings.filter_from')} value={draft.from} onInput={set('from')} />
-        </label>
-        <label class="field">
+          <DatePicker label={t('settings.filter_from')} value={draft.from} onChange={(value) => setDraft({ ...draft, from: value })} />
+        </div>
+        <div class="field">
           <span>{t('settings.filter_to')}</span>
-          <input class="input mono" type="date" name="to" aria-label={t('settings.filter_to')} value={draft.to} onInput={set('to')} />
-        </label>
+          <DatePicker label={t('settings.filter_to')} value={draft.to} onChange={(value) => setDraft({ ...draft, to: value })} />
+        </div>
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" onClick={() => {
             setDraft(NO_FILTERS);
