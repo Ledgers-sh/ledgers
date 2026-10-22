@@ -1,4 +1,5 @@
-//! Tax rates as dated data per jurisdiction.
+//! Tax rates as dated data per jurisdiction. The data itself lives in
+//! country packs (`templates/countries/<iso>/pack.toml`).
 //!
 //! A [`DatedRate`] carries the jurisdiction, category, rate, valid date
 //! range, and source. A [`RateTable`] validates that rates have no gaps
@@ -13,57 +14,38 @@ use ledgers_money::Rate;
 use std::collections::BTreeMap;
 use time::Date;
 
-/// A jurisdiction code: `"DE"` for Germany, `"generic"` for caller-supplied.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum Jurisdiction {
-    /// Germany (Deutschland).
-    Germany,
-    /// Caller-supplied rates for any jurisdiction.
-    Generic,
-}
+/// A jurisdiction: the ISO 3166-1 alpha-2 country whose rate a rate applies
+/// to (`"SG"`, `"NL"`, ...). Rates come from country packs (see
+/// [`crate::country`]); the core never special-cases a country.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Jurisdiction(String);
 
 impl Jurisdiction {
-    /// Parse from a string: `"DE"` for Germany, `"generic"` otherwise.
+    /// A jurisdiction for an ISO 3166-1 alpha-2 code, stored upper-case.
     #[must_use]
-    pub fn from_code(code: &str) -> Self {
-        match code {
-            "DE" => Jurisdiction::Germany,
-            _ => Jurisdiction::Generic,
-        }
+    pub fn new(code: &str) -> Self {
+        Jurisdiction(code.trim().to_ascii_uppercase())
     }
 
-    /// The jurisdiction code as a string.
+    /// The jurisdiction code, upper-case.
     #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Jurisdiction::Germany => "DE",
-            Jurisdiction::Generic => "generic",
-        }
-    }
-
-    /// The rounding scope this jurisdiction requires (per-line or
-    /// per-document).
-    #[must_use]
-    pub fn rounding_scope(self) -> crate::calc::RoundingScope {
-        match self {
-            Jurisdiction::Germany => crate::calc::RoundingScope::PerDocument,
-            Jurisdiction::Generic => crate::calc::RoundingScope::PerLine,
-        }
+    pub fn code(&self) -> &str {
+        &self.0
     }
 }
 
 impl std::fmt::Display for Jurisdiction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.code())
+        f.write_str(&self.0)
     }
 }
 
 /// A tax rate category.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RateCategory {
-    /// Standard rate (e.g., 19% in Germany).
+    /// Standard rate (e.g., 19% under a 19/7 regime).
     Standard,
-    /// Reduced rate (e.g., 7% in Germany).
+    /// Reduced rate (e.g., 7% under a 19/7 regime).
     Reduced,
     /// Zero rate.
     Zero,
@@ -154,7 +136,7 @@ impl RateTable {
 
         for rate in rates {
             by_key
-                .entry((rate.jurisdiction, rate.category))
+                .entry((rate.jurisdiction.clone(), rate.category))
                 .or_default()
                 .push(rate);
         }
@@ -225,127 +207,18 @@ impl RateTable {
     /// or the date is outside the valid range.
     pub fn rate_on(
         &self,
-        jurisdiction: Jurisdiction,
+        jurisdiction: &Jurisdiction,
         category: RateCategory,
         date: Date,
     ) -> Result<&DatedRate, TaxError> {
+        let not_found = || TaxError::RateNotFound {
+            jurisdiction: jurisdiction.code().to_owned(),
+            category: category.code().to_owned(),
+            date: date.to_string(),
+        };
         self.rates
-            .get(&(jurisdiction, category))
+            .get(&(jurisdiction.clone(), category))
             .and_then(|seqs| seqs.iter().find(|r| r.is_valid_on(date)))
-            .ok_or_else(|| TaxError::RateNotFound {
-                jurisdiction: jurisdiction.code().to_owned(),
-                category: category.code().to_owned(),
-                date: date.to_string(),
-            })
+            .ok_or_else(not_found)
     }
-}
-
-/// Helper to create a German [`DatedRate`].
-fn german_rate(
-    rate_str: &str,
-    category: RateCategory,
-    from_y: i32,
-    from_m: u8,
-    from_d: u8,
-    to: Option<(i32, u8, u8)>,
-    source: &str,
-) -> Result<DatedRate, TaxError> {
-    let rate = rate_str
-        .parse()
-        .map_err(|e: ledgers_money::MoneyError| TaxError::Invalid {
-            reason: format!("failed to parse rate {rate_str}: {e}"),
-        })?;
-
-    let month_from = time::Month::try_from(from_m).map_err(|_| TaxError::Invalid {
-        reason: format!("invalid month {from_m}"),
-    })?;
-    let valid_from =
-        Date::from_calendar_date(from_y, month_from, from_d).map_err(|_| TaxError::Invalid {
-            reason: format!("invalid date {from_y:04}-{from_m:02}-{from_d:02}"),
-        })?;
-
-    let valid_to = if let Some((to_y, to_m, to_d)) = to {
-        let month_to = time::Month::try_from(to_m).map_err(|_| TaxError::Invalid {
-            reason: format!("invalid month {to_m}"),
-        })?;
-        Some(
-            Date::from_calendar_date(to_y, month_to, to_d).map_err(|_| TaxError::Invalid {
-                reason: format!("invalid date {to_y:04}-{to_m:02}-{to_d:02}"),
-            })?,
-        )
-    } else {
-        None
-    };
-
-    Ok(DatedRate {
-        jurisdiction: Jurisdiction::Germany,
-        category,
-        rate,
-        valid_from,
-        valid_to,
-        source: source.to_string(),
-    })
-}
-
-/// Build the German VAT rate table with real historical rates.
-///
-/// Rates from 2020-07-01 to 2020-12-31 (temporary reduction):
-/// - Standard: 16%
-/// - Reduced: 5%
-///
-/// Rates from 2007-01-01 to 2020-06-30 and from 2021-01-01 onwards:
-/// - Standard: 19%
-/// - Reduced: 7%
-///
-/// # Errors
-///
-/// Returns [`TaxError::Invalid`] if rate parsing fails or a date is invalid.
-///
-/// # Sources
-/// - "§12 `UStG`; Zweites Corona-Steuerhilfegesetz, `BGBl`. I 2020 S. 1512" (temporary)
-/// - "§12 `UStG`" (standard)
-pub fn germany_rates() -> Result<RateTable, TaxError> {
-    let rates = vec![
-        german_rate(
-            "0.19",
-            RateCategory::Standard,
-            2007,
-            1,
-            1,
-            Some((2020, 6, 30)),
-            "§12 UStG",
-        )?,
-        german_rate(
-            "0.07",
-            RateCategory::Reduced,
-            2007,
-            1,
-            1,
-            Some((2020, 6, 30)),
-            "§12 UStG",
-        )?,
-        german_rate(
-            "0.16",
-            RateCategory::Standard,
-            2020,
-            7,
-            1,
-            Some((2020, 12, 31)),
-            "§12 UStG; Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512",
-        )?,
-        german_rate(
-            "0.05",
-            RateCategory::Reduced,
-            2020,
-            7,
-            1,
-            Some((2020, 12, 31)),
-            "§12 UStG; Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512",
-        )?,
-        german_rate("0.19", RateCategory::Standard, 2021, 1, 1, None, "§12 UStG")?,
-        german_rate("0.07", RateCategory::Reduced, 2021, 1, 1, None, "§12 UStG")?,
-        german_rate("0", RateCategory::Zero, 2007, 1, 1, None, "§12 UStG")?,
-    ];
-
-    RateTable::new(rates)
 }

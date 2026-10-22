@@ -4690,6 +4690,55 @@
                       "items": {
                         "$ref": "#/components/schemas/TaxRateView"
                       }
+                    },
+                    "pack": {
+                      "description": "The pack id that applies (`sg`, `de`, `generic`); empty without a country.",
+                      "type": "string"
+                    },
+                    "pack_name": {
+                      "description": "The pack's English name.",
+                      "type": "string"
+                    },
+                    "regime": {
+                      "description": "`vat`, `gst`, `sales_tax` or `none`.",
+                      "type": "string"
+                    },
+                    "user_rates_allowed": {
+                      "description": "True when the company defines its own rates for this pack.",
+                      "type": "boolean"
+                    },
+                    "rates_status": {
+                      "description": "`complete`, or `pending` while some statutory rates are still unverified.",
+                      "type": "string"
+                    },
+                    "registration_label": {
+                      "description": "The registration number's name (`UEN`, `NPWP`, `USt-IdNr.`).",
+                      "type": "string"
+                    },
+                    "registration_note": {
+                      "description": "What the registration check covers.",
+                      "type": "string"
+                    },
+                    "returns": {
+                      "description": "The returns the pack can draft, generic first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReturnView"
+                      }
+                    },
+                    "tax_codes": {
+                      "description": "The tax codes entries and bills use.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxCodeView"
+                      }
+                    },
+                    "user_rates": {
+                      "description": "The company's own rates as stored.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserRate"
+                      }
                     }
                   },
                   "required": [
@@ -4697,7 +4746,17 @@
                     "vat_basis",
                     "country",
                     "rate_table",
-                    "rates"
+                    "rates",
+                    "pack",
+                    "pack_name",
+                    "regime",
+                    "user_rates_allowed",
+                    "rates_status",
+                    "registration_label",
+                    "registration_note",
+                    "returns",
+                    "tax_codes",
+                    "user_rates"
                   ]
                 }
               }
@@ -4766,6 +4825,17 @@
                   "vat_basis": {
                     "description": "The VAT reporting method: `accrual` or `cash`.",
                     "type": "string"
+                  },
+                  "user_rates": {
+                    "description": "The company's own rates. Only for packs that allow them (generic and\nUS sales tax); omitted leaves the stored rates as they are.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/UserRate"
+                    },
+                    "default": null
                   }
                 },
                 "required": [
@@ -4809,6 +4879,55 @@
                       "items": {
                         "$ref": "#/components/schemas/TaxRateView"
                       }
+                    },
+                    "pack": {
+                      "description": "The pack id that applies (`sg`, `de`, `generic`); empty without a country.",
+                      "type": "string"
+                    },
+                    "pack_name": {
+                      "description": "The pack's English name.",
+                      "type": "string"
+                    },
+                    "regime": {
+                      "description": "`vat`, `gst`, `sales_tax` or `none`.",
+                      "type": "string"
+                    },
+                    "user_rates_allowed": {
+                      "description": "True when the company defines its own rates for this pack.",
+                      "type": "boolean"
+                    },
+                    "rates_status": {
+                      "description": "`complete`, or `pending` while some statutory rates are still unverified.",
+                      "type": "string"
+                    },
+                    "registration_label": {
+                      "description": "The registration number's name (`UEN`, `NPWP`, `USt-IdNr.`).",
+                      "type": "string"
+                    },
+                    "registration_note": {
+                      "description": "What the registration check covers.",
+                      "type": "string"
+                    },
+                    "returns": {
+                      "description": "The returns the pack can draft, generic first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReturnView"
+                      }
+                    },
+                    "tax_codes": {
+                      "description": "The tax codes entries and bills use.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaxCodeView"
+                      }
+                    },
+                    "user_rates": {
+                      "description": "The company's own rates as stored.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserRate"
+                      }
                     }
                   },
                   "required": [
@@ -4816,7 +4935,17 @@
                     "vat_basis",
                     "country",
                     "rate_table",
-                    "rates"
+                    "rates",
+                    "pack",
+                    "pack_name",
+                    "regime",
+                    "user_rates_allowed",
+                    "rates_status",
+                    "registration_label",
+                    "registration_note",
+                    "returns",
+                    "tax_codes",
+                    "user_rates"
                   ]
                 }
               }
@@ -6705,25 +6834,104 @@
         ]
       },
       "TaxRateView": {
-        "description": "One statutory VAT rate the company's country has on the given day.",
+        "description": "One rate the company's country has on the given day.",
         "type": "object",
         "properties": {
           "category": {
-            "description": "`standard` or `reduced`.",
+            "description": "`standard`, `reduced` or `zero`.",
             "type": "string"
           },
           "percent": {
             "description": "The rate as a percentage, for example `19`.",
             "type": "string"
           },
+          "valid_from": {
+            "description": "The day the rate took effect, `YYYY-MM-DD`.",
+            "type": "string"
+          },
           "source": {
-            "description": "The statute the rate comes from.",
+            "description": "The statute the rate comes from, or the company's own note.",
             "type": "string"
           }
         },
         "required": [
           "category",
           "percent",
+          "valid_from",
+          "source"
+        ]
+      },
+      "ReturnView": {
+        "description": "One return the pack can draft.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The layout id (`generic`, `sg-gst-f5`, `ustva`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The English title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "TaxCodeView": {
+        "description": "One tax code entries use, as the company's pack defines it.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The stable id (`SG-GST-SR-9`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The English label.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`output_vat`, `input_vat`, `reverse_charge`, `exempt`, `zero` or `import_vat`.",
+            "type": "string"
+          },
+          "category": {
+            "description": "`standard`, `reduced`, `zero` or `exempt`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "kind",
+          "category"
+        ]
+      },
+      "UserRate": {
+        "description": "A rate the company defines for a pack that allows it.",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "`standard`, `reduced` or `zero`.",
+            "type": "string"
+          },
+          "percent": {
+            "description": "The rate as a percentage, for example `8.25`.",
+            "type": "string"
+          },
+          "valid_from": {
+            "description": "The first day the rate applies, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "source": {
+            "description": "What the company says the rate is based on (free text, required).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "percent",
+          "valid_from",
           "source"
         ]
       },

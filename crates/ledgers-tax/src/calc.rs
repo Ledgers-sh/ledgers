@@ -77,8 +77,10 @@ pub struct CalculateParams<'a> {
     pub lines: &'a [TaxLineInput],
     /// The document date; used to look up rates in the table.
     pub date: Date,
-    /// The rate table (e.g., from [`crate::rate::germany_rates`]).
+    /// The rate table of the company's country pack (see [`crate::country::CountryPack::rate_table`]).
     pub table: &'a RateTable,
+    /// The country whose rates apply to these lines.
+    pub jurisdiction: &'a crate::rate::Jurisdiction,
     /// Function to look up a [`TaxCode`] by string.
     pub code_lookup: &'a dyn Fn(&str) -> Result<TaxCode, TaxError>,
     /// Whether amounts are net or gross.
@@ -128,7 +130,7 @@ pub fn calculate(params: &CalculateParams) -> Result<TaxCalculation, TaxError> {
     let mut rates = Vec::new();
     for line in lines {
         let code = code_lookup(&line.tax_code)?;
-        let rate = table.rate_on(crate::rate::Jurisdiction::Germany, code.category, date)?;
+        let rate = table.rate_on(params.jurisdiction, code.category, date)?;
         codes.push(code);
         rates.push(rate.rate);
     }

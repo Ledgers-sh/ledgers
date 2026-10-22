@@ -7,8 +7,10 @@
 //!
 //! This crate provides:
 //!
-//! - [`rate`]: Tax rates as dated data per jurisdiction (Germany first;
-//!   generic builder for caller-supplied rates). Rates are validated at
+//! - [`country`]: country packs (`templates/countries/<iso>/pack.toml`):
+//!   regime, dated rates with sources, tax codes, return layouts.
+//! - [`validate`]: registration-number validators named by the packs.
+//! - [`rate`]: Tax rates as dated data per jurisdiction. Rates are validated at
 //!   construction for gaps and overlaps.
 //! - [`code`]: Tax codes and kinds (output VAT, input VAT, reverse charge,
 //!   etc.) with account mappings and non-deductible shares.
@@ -37,21 +39,25 @@
 
 pub mod calc;
 pub mod code;
+pub mod country;
 pub mod error;
 pub mod module;
 pub mod posting;
 pub mod rate;
 pub mod settings;
+pub mod validate;
 pub mod vat_return;
 
 pub use calc::{
     Basis, CalculateParams, RoundingScope, TaxCalculation, TaxLine, TaxLineInput, calculate,
 };
 pub use code::{TaxCode, TaxKind, TaxSettings, VatBasis};
+pub use country::{CountryPack, Regime, bundled_packs, generic_pack, pack_by_id, pack_for_country};
 pub use error::TaxError;
 pub use module::TaxModule;
 pub use rate::{DatedRate, Jurisdiction, RateCategory, RateTable};
 pub use settings::{SettingsError, set_tax_settings, tax_settings};
+pub use validate::Validator;
 pub use vat_return::{
     EcSalesListRow, GenericReturn, OssRow, ReturnClass, UstvaBox, UstvaReturn, VatRecord,
     VatReturnError, prepare_ec_sales_list, prepare_generic_return, prepare_oss, prepare_ustva,

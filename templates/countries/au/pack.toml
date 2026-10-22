@@ -1,0 +1,59 @@
+# Australia: Goods and Services Tax (GST).
+#
+# Sources:
+#   GST 10%: ATO, https://www.ato.gov.au (rate confirmed by search snippet; valid_from not fetched)
+#   ABN format (11 digits, first digit not zero): ATO, https://www.ato.gov.au/businesses-and-organisations
+#   ABN check algorithm (subtract 1 from the first digit, weights 10,1,3,5,7,9,11,13,15,17,19,
+#     sum divisible by 89): the ATO DSP guide describes the same routine for File Nos;
+#     the ABR example ABN was not retrieved.
+#
+# TODO (rate left out, not verified): the 10% GST rate needs its valid_from from the ATO
+#   (GST started 2000-07-01 per the ATO; not yet sourced).
+# TODO: the ABR example ABN for the test vector is not retrieved; the test uses the
+#   algorithm with the ABN 51 824 753 556 widely published in ABR material, marked as unverified.
+# TODO: the BAS return layout (G1, 1A, 1B) is not drafted; the generic return only.
+
+id = "au"
+iso = "AU"
+covers = ["AU"]
+name = "Australia"
+native_name = "Australia"
+currency = "AUD"
+fiscal_year_start_month = 7
+decimal_separator = "."
+thousands_separator = ","
+date_format = "DD/MM/YYYY"
+chart = "generic-sme"
+regime = "gst"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "ABN"
+validator = "au-abn"
+note = "Eleven digits with the ATO check (subtract 1 from the first digit, weights 10,1,3,5,7,9,11,13,15,17,19, divisible by 89). Existence is not checked against the ABR."
+
+[[tax_codes]]
+code = "AU-GST-10"
+label = "Taxable supply (GST 10%)"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "AU-GST-FREE"
+label = "GST-free supply"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "AU-INPUT"
+label = "Taxable purchase (input tax credit)"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "GST return (generic)"
+kind = "generic"

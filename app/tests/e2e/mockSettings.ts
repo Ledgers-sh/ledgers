@@ -138,10 +138,20 @@ function taxView() {
     rate_table: german,
     rates: german
       ? [
-          { category: 'standard', percent: '19', source: '§12 UStG' },
-          { category: 'reduced', percent: '7', source: '§12 UStG; Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512' },
+          { category: 'standard', percent: '19', valid_from: '2021-01-01', source: '§12 UStG' },
+          { category: 'reduced', percent: '7', valid_from: '2021-01-01', source: '§12 UStG' },
         ]
       : [],
+    pack: german ? 'de' : '',
+    pack_name: german ? 'Germany' : '',
+    regime: german ? 'vat' : '',
+    user_rates_allowed: false,
+    rates_status: german ? 'complete' : '',
+    registration_label: german ? 'USt-IdNr.' : '',
+    registration_note: german ? 'DE plus nine digits, with the ISO 7064 check digit.' : '',
+    returns: german ? [{ id: 'ustva', label: 'Umsatzsteuer-Voranmeldung (UStVA)' }] : [],
+    tax_codes: german ? [{ code: '19-U', label: 'Output VAT, standard', kind: 'output_vat', category: 'standard' }] : [],
+    user_rates: [],
   };
 }
 

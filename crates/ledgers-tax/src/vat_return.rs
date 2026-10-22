@@ -14,8 +14,15 @@ use time::Date;
 pub enum ReturnClass {
     DomesticStandard,
     DomesticReduced,
-    IntraEuSupply { vat_id: String },
-    IntraEuService { vat_id: String },
+    /// A domestic supply taxed at 0% (GST zero-rated, VAT zero rate); the input
+    /// VAT on it is still deductible.
+    ZeroRated,
+    IntraEuSupply {
+        vat_id: String,
+    },
+    IntraEuService {
+        vat_id: String,
+    },
     ExemptWithDeduction,
     ExemptWithoutDeduction,
     IntraEuAcquisitionStandard,
@@ -24,7 +31,10 @@ pub enum ReturnClass {
     ReverseChargeOther,
     InputVat,
     ImportVat,
-    OssDistanceSale { country: String, rate: Rate },
+    OssDistanceSale {
+        country: String,
+        rate: Rate,
+    },
 }
 
 /// One VAT transaction record.
@@ -60,6 +70,7 @@ fn in_period(record: &VatRecord, from: Date, to: Date, basis: VatBasis) -> bool 
                 record.class,
                 ReturnClass::DomesticStandard
                     | ReturnClass::DomesticReduced
+                    | ReturnClass::ZeroRated
                     | ReturnClass::ExemptWithDeduction
                     | ReturnClass::ExemptWithoutDeduction
             );
@@ -114,14 +125,55 @@ impl UstvaReturn {
     }
 }
 
-/// Generic VAT/GST return.
+/// Generic VAT/GST return for one period, in the pack's currency.
+///
+/// `output_vat` includes reverse-charge VAT and `input_vat` includes the same
+/// amount, so `net_payable` is the amount to pay (negative: to reclaim).
 #[derive(Clone, Debug)]
 pub struct GenericReturn {
+    /// The currency every figure is in.
+    pub currency: Currency,
+    /// Net value of domestic taxable supplies at any positive rate.
     pub taxable_sales: Amount,
+    /// Output VAT, all rates, including reverse-charge VAT.
     pub output_vat: Amount,
+    /// Net value of zero-rated, exempt and intra-EU supplies.
     pub zero_rated_and_exempt_sales: Amount,
+    /// Input VAT, all sources, including reverse-charge VAT.
     pub input_vat: Amount,
+    /// Output VAT minus input VAT.
     pub net_payable: Amount,
+    /// Net value of standard-rated sales.
+    pub standard_net: Amount,
+    /// VAT on standard-rated sales.
+    pub standard_vat: Amount,
+    /// Net value of reduced-rated sales.
+    pub reduced_net: Amount,
+    /// VAT on reduced-rated sales.
+    pub reduced_vat: Amount,
+    /// Net value of zero-rated domestic sales.
+    pub zero_rated_net: Amount,
+    /// Net value of exempt sales.
+    pub exempt_net: Amount,
+}
+
+impl GenericReturn {
+    /// The figure a layout box shows.
+    #[must_use]
+    pub fn figure(&self, figure: crate::country::Figure) -> Amount {
+        use crate::country::Figure;
+        match figure {
+            Figure::StandardNet => self.standard_net,
+            Figure::StandardVat => self.standard_vat,
+            Figure::ReducedNet => self.reduced_net,
+            Figure::ReducedVat => self.reduced_vat,
+            Figure::ZeroRatedNet => self.zero_rated_net,
+            Figure::ExemptNet => self.exempt_net,
+            Figure::OutputVat => self.output_vat,
+            Figure::InputVat => self.input_vat,
+            Figure::NetPayable => self.net_payable,
+        }
+    }
 }
 
 /// EC Sales List row.
@@ -230,6 +282,9 @@ impl UstvaAccumulator {
         match &rec.class {
             ReturnClass::DomesticStandard => self.kz81 += rec.net.minor(),
             ReturnClass::DomesticReduced => self.kz86 += rec.net.minor(),
+            // Zero-rated domestic supplies have no UStVA box of their own here;
+            // the German packs do not produce them.
+            ReturnClass::ZeroRated | ReturnClass::OssDistanceSale { .. } => {}
             ReturnClass::IntraEuSupply { .. } => self.kz41 += rec.net.minor(),
             ReturnClass::IntraEuService { .. } => self.kz21 += rec.net.minor(),
             ReturnClass::ExemptWithDeduction => self.kz43 += rec.net.minor(),
@@ -254,7 +309,6 @@ impl UstvaAccumulator {
             }
             ReturnClass::InputVat => self.kz66 += rec.vat.minor(),
             ReturnClass::ImportVat => self.kz62 += rec.vat.minor(),
-            ReturnClass::OssDistanceSale { .. } => {}
         }
     }
 
@@ -403,12 +457,24 @@ pub fn prepare_generic_return(
     from: Date,
     to: Date,
     basis: VatBasis,
+    currency: &str,
 ) -> Result<GenericReturn, VatReturnError> {
-    let eur = Currency::from_code("EUR").expect("EUR");
-    let mut taxable = Amount::new(0, eur);
-    let mut output = Amount::new(0, eur);
-    let mut exempt = Amount::new(0, eur);
-    let mut input = Amount::new(0, eur);
+    if from > to {
+        return Err(VatReturnError::InvalidPeriod);
+    }
+    let currency = Currency::from_code(currency)
+        .map_err(|e| VatReturnError::Currency(format!("{currency}: {e}")))?;
+    let zero = Amount::new(0, currency);
+    let mut taxable = zero;
+    let mut output = zero;
+    let mut exempt = zero;
+    let mut zero_rated = zero;
+    let mut input = zero;
+    let mut standard_net = zero;
+    let mut standard_vat = zero;
+    let mut reduced_net = zero;
+    let mut reduced_vat = zero;
+    let mut exempt_net = zero;
 
     for rec in records {
         if !in_period(rec, from, to, basis) {
@@ -416,15 +482,27 @@ pub fn prepare_generic_return(
         }
 
         match &rec.class {
-            ReturnClass::DomesticStandard | ReturnClass::DomesticReduced => {
+            ReturnClass::DomesticStandard => {
                 taxable = taxable.checked_add(rec.net)?;
                 output = output.checked_add(rec.vat)?;
+                standard_net = standard_net.checked_add(rec.net)?;
+                standard_vat = standard_vat.checked_add(rec.vat)?;
             }
-            ReturnClass::IntraEuSupply { .. }
-            | ReturnClass::IntraEuService { .. }
-            | ReturnClass::ExemptWithDeduction
-            | ReturnClass::ExemptWithoutDeduction => {
+            ReturnClass::DomesticReduced => {
+                taxable = taxable.checked_add(rec.net)?;
+                output = output.checked_add(rec.vat)?;
+                reduced_net = reduced_net.checked_add(rec.net)?;
+                reduced_vat = reduced_vat.checked_add(rec.vat)?;
+            }
+            ReturnClass::ZeroRated => {
+                zero_rated = zero_rated.checked_add(rec.net)?;
+            }
+            ReturnClass::IntraEuSupply { .. } | ReturnClass::IntraEuService { .. } => {
                 exempt = exempt.checked_add(rec.net)?;
+            }
+            ReturnClass::ExemptWithDeduction | ReturnClass::ExemptWithoutDeduction => {
+                exempt = exempt.checked_add(rec.net)?;
+                exempt_net = exempt_net.checked_add(rec.net)?;
             }
             ReturnClass::ReverseChargeEuService | ReturnClass::ReverseChargeOther => {
                 output = output.checked_add(rec.vat)?;
@@ -441,11 +519,18 @@ pub fn prepare_generic_return(
     }
 
     Ok(GenericReturn {
+        currency,
         taxable_sales: taxable,
         output_vat: output,
-        zero_rated_and_exempt_sales: exempt,
+        zero_rated_and_exempt_sales: exempt.checked_add(zero_rated)?,
         input_vat: input,
         net_payable: output.checked_sub(input)?,
+        standard_net,
+        standard_vat,
+        reduced_net,
+        reduced_vat,
+        zero_rated_net: zero_rated,
+        exempt_net,
     })
 }
 
