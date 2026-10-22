@@ -363,6 +363,8 @@ fn test_acceptance_posted_fx_lines_are_immutable_when_rates_change() {
                     base_currency: eur_currency,
                     description: "FX bill payment".to_owned(),
                     source_documents: Vec::new(),
+                    external_id: None,
+                    source_app: None,
                     reverses: None,
                     lines: vec![payables_line, bank_line],
                 },

@@ -75,6 +75,8 @@ pub async fn reverse_entry(
         base_currency: original.base_currency,
         description: format!("Reversal of entry #{}", original.number.unwrap_or(0)),
         source_documents: vec![format!("reversal:{}", reverse_ctx.entry_id)],
+        external_id: None,
+        source_app: None,
         reverses: Some(reverse_ctx.entry_id.clone()),
         lines: mirror_lines,
     };
@@ -226,6 +228,8 @@ async fn read_entry_with_lines(
         vat_period: crate::entry::vat_period_of(header.tax_point_date),
         description: String::new(),
         source_documents: vec![],
+        external_id: None,
+        source_app: None,
         reverses: header.reverses,
         lines: lines.clone(),
         number: header.number,

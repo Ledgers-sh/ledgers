@@ -154,6 +154,10 @@ pub struct EntryDraft {
     /// Links to source documents (`"invoice:INV-2026-042"`), data not
     /// instructions.
     pub source_documents: Vec<String>,
+    /// External ID from the source application (for idempotency).
+    pub external_id: Option<String>,
+    /// The application that posted this entry.
+    pub source_app: Option<String>,
     /// When set, this entry reverses that one (a posted entry id);
     /// corrections are reversals (§3 rule 3).
     pub reverses: Option<String>,
@@ -185,6 +189,10 @@ pub struct Entry {
     pub description: String,
     /// Source-document links.
     pub source_documents: Vec<String>,
+    /// External ID from the source application (for idempotency).
+    pub external_id: Option<String>,
+    /// The application that posted this entry.
+    pub source_app: Option<String>,
     /// The entry this one reverses, when it is a reversal.
     pub reverses: Option<String>,
     /// The lines, in order, validated.
@@ -285,6 +293,8 @@ impl Entry {
             base_currency,
             description: draft.description,
             source_documents: draft.source_documents,
+            external_id: draft.external_id,
+            source_app: draft.source_app,
             reverses: draft.reverses,
             lines: draft.lines,
             number: None,
@@ -831,6 +841,8 @@ mod tests {
             base_currency: eur(),
             description: "Opening test entry".to_owned(),
             source_documents: Vec::new(),
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines,
         }

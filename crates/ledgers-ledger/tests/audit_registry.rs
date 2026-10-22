@@ -679,6 +679,8 @@ fn registry_entry(company: &str, journal_id: &str, entry_id: &str, year: i32) ->
             base_currency: eur,
             description: "Registry post".to_owned(),
             source_documents: vec![format!("registry:{entry_id}")],
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines: vec![
                 Line {
