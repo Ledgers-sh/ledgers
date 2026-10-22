@@ -165,6 +165,21 @@ test('an income or expense line needs a unit once the company has units', async 
   await expect(page.getByText('Choose a unit for this line.')).toHaveCount(0);
 });
 
+test('an agent key is pinned to a unit at creation, and the pin reaches the server', async ({ page }) => {
+  await signInPerson(page);
+  await page.goto('/#/settings/agent-keys');
+  await page.getByRole('button', { name: 'Create key', exact: true }).click();
+  const form = page.getByRole('dialog', { name: 'Create an agent key' });
+  await form.getByLabel('Name', { exact: true }).fill('Ledgers bot');
+  await form.getByLabel('Most per entry in EUR').fill('1000.00');
+  await form.getByLabel('Most per day in EUR').fill('5000.00');
+  await form.getByRole('combobox', { name: 'Business unit' }).click();
+  await page.getByRole('option', { name: 'LDG' }).click();
+  const created = page.waitForRequest((request) => request.url().endsWith('/v1/keys') && request.method() === 'POST');
+  await form.getByRole('button', { name: 'Create key', exact: true }).click();
+  expect((await created).postDataJSON()).toMatchObject({ unit: 'LDG' });
+});
+
 test('the units and the switcher pass axe', async ({ page }) => {
   await openUnits(page);
   for (const route of ['/#/overview?unit=LDG', '/#/accounts/units']) {
