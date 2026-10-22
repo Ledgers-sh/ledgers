@@ -83,6 +83,12 @@ export function saveRange(range: MonthRange): void {
   writeSession(KEY_RANGE, `${range.from}/${range.to}`);
 }
 
+/** Puts the period and the unit scope back at their defaults: this year to date, the whole company. */
+export function resetScope(): void {
+  writeSession(KEY_PERIOD, null);
+  writeSession(KEY_RANGE, null);
+}
+
 export function loadCurrency(): string {
   const stored = readSession(KEY_CURRENCY);
   return stored && /^[A-Z]{3}$/.test(stored) ? stored : 'EUR';

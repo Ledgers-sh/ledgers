@@ -128,7 +128,7 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
             .set("access-control-allow-methods", "GET, POST, OPTIONS")?;
         response.headers_mut().set(
             "access-control-allow-headers",
-            "Content-Type, Authorization",
+            "Content-Type, Authorization, X-Ledgers-Company",
         )?;
         response
             .headers_mut()

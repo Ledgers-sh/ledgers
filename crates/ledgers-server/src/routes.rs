@@ -75,6 +75,14 @@ pub trait Dispatch: Send + Sync {
         }
     }
 
+    /// The company the agent key behind `credential` belongs to, for surfaces
+    /// that name no company (MCP). `None` when the credential is no key this
+    /// dispatch can place; the surface then authenticates against this dispatch
+    /// as it is, so a credential that verifies nowhere is refused there.
+    async fn key_company(&self, _deps: &Deps, _credential: &str) -> Option<String> {
+        None
+    }
+
     /// This dispatch serving `company_id` instead. A request names its company
     /// with the `X-Ledgers-Company` header (docs/permissions.md, "Companies"); the membership
     /// or agent key check then runs against that company, so a person or key
@@ -85,27 +93,51 @@ pub trait Dispatch: Send + Sync {
 /// The header that names the company a request acts for.
 pub const COMPANY_HEADER: &str = "x-ledgers-company";
 
-/// The dispatch a request runs on: the company its `X-Ledgers-Company` header
-/// names, or `base` (the deployment's company) when the header is absent.
+/// The company a request names with its `X-Ledgers-Company` header, or
+/// `None` when it names none.
 ///
 /// # Errors
 /// A 400 problem when the header is not a company id (ASCII letters and digits,
 /// at most 64 characters), so an unusable value never reaches a query.
-pub fn company_dispatch(
-    base: &Arc<dyn Dispatch>,
-    headers: &axum::http::HeaderMap,
-) -> Result<Arc<dyn Dispatch>, Problem> {
+pub fn named_company(headers: &axum::http::HeaderMap) -> Result<Option<String>, Problem> {
     let Some(value) = headers.get(COMPANY_HEADER) else {
-        return Ok(Arc::clone(base));
+        return Ok(None);
     };
-    let company = value
+    value
         .to_str()
         .ok()
         .filter(|id| {
             !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
         })
-        .ok_or_else(|| Problem::new(&INVALID_COMPANY))?;
-    Ok(Arc::clone(base).scoped(company))
+        .map(|id| Some(id.to_owned()))
+        .ok_or_else(|| Problem::new(&INVALID_COMPANY))
+}
+
+/// The company a request acts for: the one its header names, or `default`
+/// (the deployment's company) when the header is absent.
+///
+/// # Errors
+/// The 400 problem of [`named_company`].
+pub fn requested_company(
+    default: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<String, Problem> {
+    Ok(named_company(headers)?.unwrap_or_else(|| default.to_owned()))
+}
+
+/// The dispatch a request runs on: the company its `X-Ledgers-Company` header
+/// names, or `base` (the deployment's company) when the header is absent.
+///
+/// # Errors
+/// The 400 problem of [`named_company`].
+pub fn company_dispatch(
+    base: &Arc<dyn Dispatch>,
+    headers: &axum::http::HeaderMap,
+) -> Result<Arc<dyn Dispatch>, Problem> {
+    match named_company(headers)? {
+        Some(company) => Ok(Arc::clone(base).scoped(&company)),
+        None => Ok(Arc::clone(base)),
+    }
 }
 
 /// 400: the `X-Ledgers-Company` header is not a company id.

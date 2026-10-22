@@ -20,7 +20,7 @@ function fakeFetch(status: number, body: unknown = {}) {
 const person: Person = {
   personId: 'person-42',
   email: 'owner@halden.test',
-  companyId: 'co_halden',
+  companyId: 'HALDEN01',
   role: 'owner',
   roles: ['owner'],
   csrfToken: 'csrf',

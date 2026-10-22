@@ -9,7 +9,11 @@
 //! - `GET /v1/companies`: the companies the session's person belongs to, with
 //!   their role. Cookie sessions only; agent keys are not people.
 //! - `POST /v1/companies`: create a company. The creator becomes its owner.
-//!   Cookie sessions only, with an allowed Origin.
+//!   Cookie sessions only, with an allowed Origin. A person may create at most
+//!   `LEDGERS_COMPANIES_PER_PERSON` companies (default 10); past that the
+//!   answer is 429.
+//! - `GET /v1/companies/packs`: the bundled country packs a company can start
+//!   from, for the create dialog.
 //!
 //! Commands pick their company with the `X-Ledgers-Company` header
 //! ([`crate::routes::company_dispatch`]); this module only lists and creates.
@@ -44,20 +48,34 @@ pub const SETTING_COUNTRY_PACK: &str = "country_pack";
 /// The fiscal year's first month, 1 to 12.
 pub const SETTING_FISCAL_YEAR_START: &str = "fiscal_year_start_month";
 
+/// The most companies one person may create, unless the deployment says otherwise.
+pub const DEFAULT_COMPANIES_PER_PERSON: usize = 10;
+
 /// The ports the companies routes need.
 pub const COMPANIES_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
 
-/// The companies module: `GET` and `POST` at `/v1/companies`.
+/// The companies module: `GET` and `POST` at `/v1/companies`, and the packs list.
 pub struct CompaniesModule {
     app_origins: Vec<String>,
+    per_person_limit: usize,
 }
 
 impl CompaniesModule {
     /// The module, with `app_origins` the origins a cookie-authenticated
-    /// creation may come from.
+    /// creation may come from and the default per-person limit.
     #[must_use]
     pub fn new(app_origins: Vec<String>) -> Self {
-        Self { app_origins }
+        Self {
+            app_origins,
+            per_person_limit: DEFAULT_COMPANIES_PER_PERSON,
+        }
+    }
+
+    /// The same module with `limit` companies allowed per person (at least 1).
+    #[must_use]
+    pub fn with_company_limit(mut self, limit: usize) -> Self {
+        self.per_person_limit = limit.max(1);
+        self
     }
 }
 
@@ -80,9 +98,11 @@ impl Module for CompaniesModule {
         let state = Arc::new(CompaniesState {
             deps,
             app_origins: self.app_origins.clone(),
+            per_person_limit: self.per_person_limit,
         });
         axum::Router::new()
             .route("/", get(list_companies).post(create_company))
+            .route("/packs", get(list_packs))
             .with_state(state)
     }
 
@@ -100,7 +120,16 @@ impl Module for CompaniesModule {
 struct CompaniesState {
     deps: Deps,
     app_origins: Vec<String>,
+    per_person_limit: usize,
 }
+
+/// 429: the person has created as many companies as the deployment allows.
+static COMPANY_LIMIT: ProblemDef = ProblemDef {
+    slug: "company-limit-reached",
+    status: StatusCode::TOO_MANY_REQUESTS,
+    title: "Company limit reached",
+    description: "This person has created the most companies the deployment allows. Ask the operator to raise LEDGERS_COMPANIES_PER_PERSON.",
+};
 
 /// 401: no valid person session on the request.
 static SESSION_NEEDED: ProblemDef = ProblemDef {
@@ -118,13 +147,13 @@ static INVALID_COMPANY: ProblemDef = ProblemDef {
     description: "The company needs a name of 1 to 200 characters, an ISO 4217 base currency, a bundled country pack and a fiscal year start month from 1 to 12.",
 };
 
-/// 500: the company was created but its chart could not be seeded. The
-/// company stays; a second run of the seed would finish it.
+/// 500: the company could not be created; nothing it wrote is left behind
+/// except the audit events, which the audit chain never removes.
 static SEED_FAILED: ProblemDef = ProblemDef {
     slug: "company-seed-failed",
     status: StatusCode::INTERNAL_SERVER_ERROR,
-    title: "Company chart not created",
-    description: "The company row was stored but its chart could not be created. The details are in the server log.",
+    title: "Company not created",
+    description: "The company could not be set up: its chart or journal failed. Nothing was kept; try again.",
 };
 
 /// One company the person belongs to.
@@ -262,16 +291,87 @@ async fn create_company(
             .with_detail(detail)
             .into_response();
     }
+    match companies_created_by(state.deps.db.as_ref(), &person, state.per_person_limit).await {
+        Ok(count) if count >= state.per_person_limit => {
+            return Problem::new(&COMPANY_LIMIT)
+                .with_detail(format!(
+                    "You have already created {count} companies, the most one person may create here."
+                ))
+                .into_response();
+        }
+        Ok(_) => {}
+        Err(err) => {
+            return Problem::internal()
+                .with_detail(err.to_string())
+                .into_response();
+        }
+    }
     match create(&state.deps, &person, &input).await {
         Ok(summary) => (StatusCode::CREATED, axum::Json(summary)).into_response(),
         Err(problem) => problem.into_response(),
     }
 }
 
+/// `GET /v1/companies/packs`: the bundled country packs, for the create dialog.
+async fn list_packs(State(state): State<Arc<CompaniesState>>, headers: HeaderMap) -> Response {
+    if let Err(problem) = session_person(&state.deps, &headers).await {
+        return problem.into_response();
+    }
+    let packs = match ledgers_tax::country::bundled_packs() {
+        Ok(packs) => packs,
+        Err(err) => {
+            return Problem::internal()
+                .with_detail(err.to_string())
+                .into_response();
+        }
+    };
+    let list: Vec<serde_json::Value> = packs
+        .iter()
+        .map(|pack| {
+            json!({
+                "id": pack.id,
+                "name": pack.name,
+                "iso": pack.iso,
+                "currency": pack.currency.map(ledgers_money::Currency::code),
+                "fiscalYearStartMonth": pack.fiscal_year_start_month,
+            })
+        })
+        .collect();
+    (StatusCode::OK, axum::Json(json!({ "packs": list }))).into_response()
+}
+
+/// How many companies `person_id` has created, counted up to `limit` (the
+/// count stops there, so the query never reads more rows than the limit).
+///
+/// # Errors
+/// The database error.
+pub async fn companies_created_by(
+    db: &dyn Database,
+    person_id: &str,
+    limit: usize,
+) -> Result<usize, cratefield_core::DbError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id FROM orgs WHERE created_by = ? ORDER BY id LIMIT ?".to_owned(),
+            vec![
+                Value::from(person_id.to_owned()),
+                Value::from(i64::try_from(limit).unwrap_or(i64::MAX)),
+            ],
+        ))
+        .await?;
+    Ok(rows.rows.len())
+}
+
 /// Creates a company for `creator`: the company row, its organization with
 /// the creator as owner, its country and fiscal settings, and its chart and
-/// general journal. The membership rows commit in one batch; the chart is
-/// seeded after it, and the seed is idempotent by the chart's existence.
+/// general journal.
+///
+/// The chart is checked before anything is written. The company rows commit in
+/// one batch; the chart, journal and fiscal year follow it. If seeding fails,
+/// the company's rows are removed again, so a failed creation leaves no company,
+/// membership, setting, account, journal or fiscal year behind. The audit
+/// events the seed wrote stay: the audit chain is append-only by design, so
+/// they are the record that the attempt happened.
 ///
 /// # Errors
 /// A problem for a database failure or a chart that could not be seeded.
@@ -280,6 +380,9 @@ pub async fn create(
     creator: &str,
     input: &CreateCompany,
 ) -> Result<CompanySummary, Problem> {
+    // Nothing is written before the chart is known to load.
+    let chart = chart_for_pack(&input.country_pack)
+        .map_err(|err| Problem::new(&SEED_FAILED).with_detail(err))?;
     let company_id = deps.id_gen.ulid();
     let journal_id = deps.id_gen.ulid();
     let name = input.name.trim().to_owned();
@@ -329,9 +432,7 @@ pub async fn create(
         .batch_atomic(&statements)
         .await
         .map_err(|err| Problem::new(&SEED_FAILED).with_detail(err.to_string()))?;
-    let chart = chart_for_pack(&input.country_pack)
-        .map_err(|err| Problem::new(&SEED_FAILED).with_detail(err))?;
-    seed_company_chart(
+    if let Err(detail) = seed_company_chart(
         deps,
         &company_id,
         creator,
@@ -340,11 +441,61 @@ pub async fn create(
         input.fiscal_year_start_month,
     )
     .await
-    .map_err(|err| Problem::new(&SEED_FAILED).with_detail(err))?;
+    {
+        if let Err(err) = remove_company_rows(deps.db.as_ref(), &company_id).await {
+            tracing::error!(
+                "company {company_id}: could not remove the rows of a failed creation: {err}"
+            );
+        }
+        return Err(Problem::new(&SEED_FAILED).with_detail(detail));
+    }
     Ok(CompanySummary {
         id: company_id,
         name,
         base_currency: input.base_currency.clone(),
         role: "owner".to_owned(),
     })
+}
+
+/// Removes every row a failed creation wrote for `company_id`: the chart,
+/// journal and fiscal year the seed inserted, its settings and membership, and
+/// the company and organization rows. Audit events are not removed (see
+/// [`create`]).
+///
+/// # Errors
+/// The database error of the removing batch.
+pub async fn remove_company_rows(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<(), cratefield_core::DbError> {
+    let scoped = [
+        "accounting_period",
+        "account_change",
+        "account",
+        "journal",
+        "fiscal_year",
+        "company_setting",
+    ];
+    let mut statements: Vec<Statement> = scoped
+        .iter()
+        .map(|table| {
+            Statement::with_values(
+                format!("DELETE FROM {table} WHERE company_id = ?"),
+                vec![Value::from(company_id.to_owned())],
+            )
+        })
+        .collect();
+    statements.push(Statement::with_values(
+        "DELETE FROM org_members WHERE org_id = ?".to_owned(),
+        vec![Value::from(company_id.to_owned())],
+    ));
+    statements.push(Statement::with_values(
+        "DELETE FROM orgs WHERE id = ?".to_owned(),
+        vec![Value::from(company_id.to_owned())],
+    ));
+    statements.push(Statement::with_values(
+        "DELETE FROM company WHERE id = ?".to_owned(),
+        vec![Value::from(company_id.to_owned())],
+    ));
+    db.batch_atomic(&statements).await
 }

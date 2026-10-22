@@ -20,6 +20,8 @@ export interface SelectOption {
   swatch?: string;
   /** The shorter text the trigger shows once chosen, when the label is too long for a compact control. */
   trigger?: string;
+  /** A small badge after the label (a role, for example). Decorative: its text is read with the label. */
+  badge?: { label: string; className: string };
 }
 
 export interface SelectProps {
@@ -279,6 +281,7 @@ export function Select(props: SelectProps) {
                     <span class="sel-label" lang={option.lang} dir={option.dir}>
                       {option.label}
                     </span>
+                    {option.badge && <span class={option.badge.className}>{option.badge.label}</span>}
                     {option.hint && <span class="sel-hint">{option.hint}</span>}
                     <span class="sel-check" aria-hidden="true">
                       {option.value === value && <Icon name="check" />}

@@ -110,20 +110,35 @@ another one.
 - `GET /v1/companies` lists the companies the signed-in person holds a
   membership in, with their role. `POST /v1/companies` creates one (name, base
   currency, country pack, fiscal year start month). The creator becomes its
-  owner. Both need a person session; agent keys are refused.
+  owner. Both need a person session; agent keys are refused. `GET
+  /v1/companies/packs` lists the bundled country packs the create dialog offers.
+  A person may create at most `LEDGERS_COMPANIES_PER_PERSON` companies (default
+  10); past that the answer is `429 company-limit-reached`.
+- Creating a company is atomic in effect: the company rows are written first,
+  then the chart, journal and fiscal year. If the chart cannot be seeded, the
+  company, organization, membership, settings, accounts, journal and fiscal
+  year rows are removed again and the answer is `500 company-seed-failed`. The
+  audit events of the attempt stay, because the audit chain is append-only.
 - A company command names its company with the `X-Ledgers-Company` header
   (letters and digits, at most 64 characters). Without the header the request
   acts for the deployment's own company, `LEDGERS_COMPANY_ID`, as before.
 - The membership check runs against the named company. A person who is not a
   member gets `403 not-a-member`; an agent key is bound to the company that
   issued it, so the same key named against another company gets `401`.
+- The people routes (`/v1/auth/session`, `/people`, `/invitations`, `/roles`)
+  serve the company the request names, with the membership check in that
+  company.
 - The `owner` sign-in claim bootstraps the deployment's own company only. A
   company created later gets its owner from its creator, never from a claim
   presented against it.
 - The country pack chooses the starting chart: `nl` the RGS chart for a
   BV, `de` the HGB chart, any other pack the generic SME chart.
-- The MCP endpoint serves the deployment's own company. Document download
-  links are signed for the deployment's company only.
+- The MCP endpoint serves the company its agent key belongs to, found from the
+  key itself; the header is not needed there.
+- A document download link names its company (`company=`) and the signature
+  covers it. A link never serves another company: a request that names another
+  company with the header gets `403`, and a link whose company was changed fails
+  its signature.
 
 ## Agent keys
 

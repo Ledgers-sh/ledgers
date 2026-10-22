@@ -7,8 +7,10 @@
 //! and the audit trail are the executor's. A file already stored is not
 //! stored twice: the response says so and the upload is still recorded.
 //!
-//! `GET /v1/documents/{id}/file?expires=&signature=` serves the original to
-//! anyone holding a link made by `documents.download_url` before it expires.
+//! `GET /v1/documents/{id}/file?company=&expires=&signature=` serves the original
+//! to anyone holding a link made by `documents.download_url` before it expires.
+//! The link names its company and the signature covers it, so a link made for
+//! one company never serves a document of another.
 
 use crate::dispatch::Deps;
 use crate::people::presented_from;
@@ -48,31 +50,28 @@ struct DocState {
     clock: Arc<dyn Clock>,
     deps: Arc<Deps>,
     dispatch: Arc<dyn Dispatch>,
-    company_id: String,
     signing_key: Arc<Vec<u8>>,
 }
 
 /// The documents module: the upload and download routes, and the command
 /// routes of the `documents` domain (`routes` from [`routes::domain_routes`]).
 pub struct DocumentsModule {
-    company_id: String,
     signing_key: Vec<u8>,
     dispatch: Arc<dyn Dispatch>,
     routes: Vec<crate::routes::CommandRoute>,
 }
 
 impl DocumentsModule {
-    /// A module serving `company_id` through `dispatch`, signing download
-    /// links with `signing_key`, and mounting the `documents` command routes.
+    /// A module signing download links with `signing_key` and mounting the
+    /// `documents` command routes through `dispatch`. Each request's company
+    /// comes from its `X-Ledgers-Company` header, or from the signed link.
     #[must_use]
     pub fn new(
-        company_id: impl Into<String>,
         signing_key: Vec<u8>,
         dispatch: Arc<dyn Dispatch>,
         routes: Vec<crate::routes::CommandRoute>,
     ) -> Self {
         Self {
-            company_id: company_id.into(),
             signing_key,
             dispatch,
             routes,
@@ -101,7 +100,6 @@ impl Module for DocumentsModule {
             clock: deps.clock.clone(),
             deps: Arc::new(deps),
             dispatch: self.dispatch.clone(),
-            company_id: self.company_id.clone(),
             signing_key: Arc::new(self.signing_key.clone()),
         };
         let commands =
@@ -311,6 +309,7 @@ fn blob_failure(err: BlobError) -> axum::response::Response {
 async fn download(
     State(state): State<DocState>,
     axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
     // Links are off until LEDGERS_DOCUMENT_SIGNING_KEY is set. An empty key
@@ -324,24 +323,35 @@ async fn download(
             .with_detail(detail)
             .into_response()
     };
-    let (Some(expires), Some(signature)) = (query.get("expires"), query.get("signature")) else {
-        return forbidden("the link has no expiry or signature");
+    let (Some(company), Some(expires), Some(signature)) = (
+        query.get("company"),
+        query.get("expires"),
+        query.get("signature"),
+    ) else {
+        return forbidden("the link has no company, expiry or signature");
     };
+    // A link serves only the company it was made for. A request that names
+    // another company with its header is refused before anything is read.
+    if let Some(named) = headers.get(crate::routes::COMPANY_HEADER)
+        && named.to_str().ok() != Some(company.as_str())
+    {
+        return forbidden("the link belongs to another company");
+    }
     let Ok(expires_at) = expires.parse::<i64>() else {
         return forbidden("the link expiry is not a timestamp");
     };
-    let document =
-        match ledgers_documents::store::get(state.db.as_ref(), &state.company_id, &id).await {
-            Ok(Some(document)) => document,
-            Ok(None) => return Problem::not_found().into_response(),
-            Err(err) => {
-                tracing::error!("document read failed: {err:?}");
-                return Problem::internal().into_response();
-            }
-        };
+    let document = match ledgers_documents::store::get(state.db.as_ref(), company, &id).await {
+        Ok(Some(document)) => document,
+        Ok(None) => return Problem::not_found().into_response(),
+        Err(err) => {
+            tracing::error!("document read failed: {err:?}");
+            return Problem::internal().into_response();
+        }
+    };
     let now = state.clock.now().unix_timestamp();
     match sign::verify(
         &state.signing_key,
+        company,
         &id,
         &document.sha256,
         expires_at,
@@ -433,7 +443,7 @@ mod tests {
                 Err(Problem::internal())
             }
         }
-        let module = DocumentsModule::new("c", b"k".to_vec(), Arc::new(NoDispatch), Vec::new());
+        let module = DocumentsModule::new(b"k".to_vec(), Arc::new(NoDispatch), Vec::new());
         assert_eq!(module.name(), "documents");
         assert!(module.requires().contains(&Port::Blob));
         let routes = module.streaming_routes();

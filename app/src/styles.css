@@ -309,7 +309,8 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
-  .topbar { padding: 0 14px; gap: 8px; }
+  /* Above the bottom nav, so a top-bar select's sheet is not hidden behind it. */
+  .topbar { padding: 0 14px; gap: 8px; z-index: 7; }
   .topbar .mobile-brand { display: flex; align-items: center; gap: 8px; font: 600 15px var(--mono); }
   .topbar .mobile-brand img { width: 24px; height: 24px; }
   .topbar .ledger-id, .topbar .kbd-hint { display: none; }
@@ -1052,6 +1053,13 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
 .unit-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .unit-switch-label { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .unit-switch .sel { min-width: 170px; }
+/* Companies: the switcher in the top bar, and the create dialog */
+.company-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.company-switch-label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.company-switch .sel { min-width: 200px; max-width: 260px; }
+.company-switch .sel.compact .sel-popup { width: 300px; }
+.sel-option .role-badge { margin-inline-start: 8px; }
+.create-company-dialog .create-company-form { display: flex; flex-direction: column; gap: 14px; }
 .sel-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; margin-inline-end: 8px; vertical-align: middle; }
 .unit-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; margin-inline-end: 8px; vertical-align: middle; }
 .note { font-size: 14px; color: var(--muted); }
@@ -1109,6 +1117,9 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
   .line-row.with-units .field.memo { grid-column: 1 / -1; }
   .unit-switch-label { display: none; }
   .unit-switch .sel { min-width: 0; }
+  .company-switch-label { display: none; }
+  .company-switch .sel { min-width: 0; max-width: 170px; }
+  .company-switch .sel.compact .sel-popup { width: 260px; max-width: calc(100vw - 32px); }
 }
 @media (max-width: 640px) {
   .unit-card-figures { grid-template-columns: 1fr 1fr 1fr; }

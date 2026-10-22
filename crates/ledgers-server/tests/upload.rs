@@ -197,7 +197,9 @@ fn a_download_link_serves_the_original_until_it_expires() {
         String::from_utf8_lossy(link.body().as_ref())
     );
     let url = link.json()["url"].as_str().expect("url").to_owned();
-    assert!(url.starts_with(&format!("/v1/documents/{id}/file?expires=")));
+    assert!(url.starts_with(&format!(
+        "/v1/documents/{id}/file?company={COMPANY}&expires="
+    )));
 
     // The link works without any credential: the signature is the credential.
     let served = fx.send_anonymous(Method::GET, &url, None);
@@ -206,10 +208,12 @@ fn a_download_link_serves_the_original_until_it_expires() {
 
     // Once the expiry passes, the same signature is refused.
     let expired_at = 1_000;
-    let expired_sig = sign::sign(DOC_KEY, &id, &sha, expired_at);
+    let expired_sig = sign::sign(DOC_KEY, COMPANY, &id, &sha, expired_at);
     let expired = fx.send_anonymous(
         Method::GET,
-        &format!("/v1/documents/{id}/file?expires={expired_at}&signature={expired_sig}"),
+        &format!(
+            "/v1/documents/{id}/file?company={COMPANY}&expires={expired_at}&signature={expired_sig}"
+        ),
         None,
     );
     assert_eq!(expired.status, StatusCode::FORBIDDEN);
@@ -224,10 +228,81 @@ fn a_download_link_serves_the_original_until_it_expires() {
     let forged = fx.send_anonymous(
         Method::GET,
         &format!(
-            "/v1/documents/{id}/file?expires={}&signature=00",
+            "/v1/documents/{id}/file?company={COMPANY}&expires={}&signature=00",
             4_000_000_000i64
         ),
         None,
     );
     assert_eq!(forged.status, StatusCode::FORBIDDEN);
+}
+
+/// One anonymous download through the router, naming `company` with the
+/// `X-Ledgers-Company` header when given. Returns the status and body bytes.
+fn download_as(fx: &Fixture, path: &str, company: Option<&str>) -> Got {
+    let mut builder = cratefield_core::axum::http::Request::builder()
+        .method(Method::GET)
+        .uri(path);
+    if let Some(company) = company {
+        builder = builder.header("x-ledgers-company", company);
+    }
+    let request = builder
+        .body(cratefield_core::axum::body::Body::empty())
+        .expect("request builds");
+    let response = pollster::block_on(tower::ServiceExt::oneshot(fx.router().clone(), request))
+        .expect("router answers");
+    let status = response.status();
+    let bytes = pollster::block_on(cratefield_core::axum::body::to_bytes(
+        response.into_body(),
+        usize::MAX,
+    ))
+    .expect("body");
+    Got {
+        status,
+        body: bytes.to_vec(),
+    }
+}
+
+#[test]
+fn a_download_link_serves_only_the_company_it_was_made_for() {
+    let fx = fx();
+    let pdf = invoice_pdf();
+    let body = json_of(&upload(&fx, &fx.keys.draft, &pdf, "application/pdf"));
+    let id = body["document"]["id"].as_str().expect("id").to_owned();
+    let link = fx.send(
+        Method::GET,
+        &format!("/v1/documents/{id}/url"),
+        &fx.keys.read,
+        None,
+    );
+    let url = link.json()["url"].as_str().expect("url").to_owned();
+
+    // The link serves its own company, named or not.
+    assert_eq!(download_as(&fx, &url, Some(COMPANY)).status, StatusCode::OK);
+    assert_eq!(download_as(&fx, &url, None).status, StatusCode::OK);
+
+    // Named against another company, the link is refused before any read.
+    let other = download_as(&fx, &url, Some("01OTHERCOMPANY"));
+    assert_eq!(other.status, StatusCode::FORBIDDEN);
+
+    // Moving the link's company to another one breaks the signature: the
+    // company is part of what was signed.
+    let moved = url.replace(&format!("company={COMPANY}"), "company=01OTHERCOMPANY");
+    let refused = download_as(&fx, &moved, Some("01OTHERCOMPANY"));
+    // The document is not in the other company, so it is not found there;
+    // either way no bytes of the original are served.
+    assert_ne!(refused.status, StatusCode::OK);
+    assert_ne!(refused.body, pdf);
+    // A link signed for another company's id never verifies here.
+    let sig = sign::sign(
+        DOC_KEY,
+        "01OTHERCOMPANY",
+        &id,
+        body["document"]["sha256"].as_str().expect("sha"),
+        4_000_000_000,
+    );
+    let foreign =
+        format!("/v1/documents/{id}/file?company={COMPANY}&expires=4000000000&signature={sig}");
+    let foreign_reply = download_as(&fx, &foreign, None);
+    assert_eq!(foreign_reply.status, StatusCode::FORBIDDEN);
+    assert!(String::from_utf8_lossy(&foreign_reply.body).contains("signature"));
 }

@@ -51,7 +51,7 @@ export interface PeopleState {
   requests: string[];
 }
 
-export const COMPANY_ID = 'co_halden';
+export const COMPANY_ID = 'HALDEN01';
 
 /** The signed-in owner in the fixtures (see PERSON in mockApi.ts). */
 export const SELF_ID = 'person_01';
@@ -185,7 +185,7 @@ export function handlePeople(method: string, url: URL, bodyText: string, asPerso
     peopleState.notMember = false;
     return { status: 200, body: { companyId: COMPANY_ID, role: 'viewer' } };
   }
-  const member = /^\/v1\/orgs\/co_halden\/members\/([^/]+)$/.exec(path);
+  const member = /^\/v1\/orgs\/HALDEN01\/members\/([^/]+)$/.exec(path);
   if (member && method === 'PATCH') {
     if (!managers) return problem(403, 'forbidden', 'Forbidden', 'Only an owner or admin may change roles.');
     const target = peopleState.members.find((row) => row.personId === member[1]);

@@ -436,12 +436,16 @@ impl ServerDispatch {
         let expires_at = deps.clock.now().unix_timestamp() + sign::LINK_TTL_SECONDS;
         let signature = sign::sign(
             &self.document_key,
+            &self.company_id,
             &document.id,
             &document.sha256,
             expires_at,
         );
         Ok(json!({
-            "url": format!("/v1/documents/{}/file?expires={expires_at}&signature={signature}", document.id),
+            "url": format!(
+                "/v1/documents/{}/file?company={}&expires={expires_at}&signature={signature}",
+                document.id, self.company_id
+            ),
             "expires_at": expires_at,
         }))
     }

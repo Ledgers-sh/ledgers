@@ -562,6 +562,10 @@ fn fill_server_fields(input: &mut Value, deps: &Deps, id_field: &str, caller: &s
 
 #[async_trait]
 impl Dispatch for ServerDispatch {
+    async fn key_company(&self, deps: &Deps, credential: &str) -> Option<String> {
+        key_company(deps, credential).await
+    }
+
     fn scoped(self: Arc<Self>, company_id: &str) -> Arc<dyn Dispatch> {
         Arc::new(ServerDispatch {
             company_id: company_id.to_owned(),
@@ -911,6 +915,26 @@ impl Authenticator for KeyStore {
             limits: principal_limits(&key)?,
         })
     }
+}
+
+/// The company an agent key belongs to, found by the key's id. The key's secret
+/// is checked against the deployment-wide key table; the company whose
+/// `agent_key` row carries the verified id is the one the key acts for. `None`
+/// for a credential that verifies to no key of any company.
+pub(crate) async fn key_company(deps: &Deps, credential: &str) -> Option<String> {
+    let verified = api_keys(&deps.db, &deps.clock)
+        .verify(credential)
+        .await
+        .ok()??;
+    let rows = deps
+        .db
+        .query(&Statement::with_values(
+            "SELECT company_id FROM agent_key WHERE id = ?".to_owned(),
+            vec![sea_query::Value::from(verified.subject)],
+        ))
+        .await
+        .ok()?;
+    rows.rows.first()?.get("company_id")
 }
 
 /// The harness API-key store on the Ledgers table, with the OS entropy

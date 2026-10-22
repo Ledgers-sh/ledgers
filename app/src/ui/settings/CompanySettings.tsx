@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { companyGet, companyUpdate, type CompanyProfile, type CompanyView } from '../../api/settings';
+import { CreateCompanyDialog } from '../CreateCompany';
 import { useAsync } from '../../hooks';
 import { t, type MessageKey } from '../../i18n';
 import { useSession } from '../../session';
@@ -50,6 +51,8 @@ export function CompanySettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const { person } = useSession();
 
   useEffect(() => {
     if (state.data) setForm(formOf(state.data));
@@ -164,6 +167,18 @@ export function CompanySettings() {
         </dl>
         <p class="hint">{t('settings.base_currency_why')}</p>
       </SettingsPanel>
+
+      {person ? (
+        <SettingsPanel id="company-create-title" title={t('companies.settings_title')}>
+          <p class="hint">{t('companies.settings_body')}</p>
+          <div class="form-actions">
+            <button type="button" class="btn" onClick={() => setCreating(true)}>
+              {t('companies.create_title')}
+            </button>
+          </div>
+          <CreateCompanyDialog open={creating} onClose={() => setCreating(false)} />
+        </SettingsPanel>
+      ) : null}
     </>
   );
 }
