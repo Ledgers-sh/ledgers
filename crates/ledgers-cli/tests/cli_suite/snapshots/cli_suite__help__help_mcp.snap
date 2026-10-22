@@ -1,0 +1,11 @@
+---
+source: crates/ledgers-cli/tests/cli_suite/help.rs
+expression: help_for(path)
+---
+Serve MCP over stdio, relaying to the server with your agent key
+
+Usage: mcp [OPTIONS]
+
+Options:
+      --read-only  Read-only mode: only list and allow read tools
+  -h, --help       Print help (see more with '--help')

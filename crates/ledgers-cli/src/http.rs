@@ -1,116 +1,187 @@
-//! HTTP client for communicating with the Ledgers server.
+//! HTTP session: sends a planned request and maps the response to an outcome.
+//!
+//! Response mapping (the contract agents rely on):
+//! - 2xx with `{"status":"needs-approval","approval":{...}}` → [`CallOutcome::NeedsApproval`] (exit 2)
+//! - 2xx with `dry_run` requested → [`CallOutcome::DryRun`] (exit 0)
+//! - 2xx otherwise → [`CallOutcome::Done`] (exit 0)
+//! - 403 → [`CallOutcome::Denied`] (exit 3)
+//! - any other status → [`CliError`] (exit 1)
 
-use crate::CallOutcome;
 use crate::error::{CliError, Result};
+use crate::request::PlannedRequest;
+use reqwest::StatusCode;
 use serde_json::Value;
+use std::time::Duration;
 
-/// An HTTP session: URL and authentication.
+/// The outcome of a command call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CallOutcome {
+    /// The command ran; the body is its output.
+    Done(Value),
+    /// A dry run; the body is the preview. Nothing was written.
+    DryRun(Value),
+    /// Policy needs a human approval first.
+    NeedsApproval {
+        /// The approval request id.
+        approval_id: String,
+        /// Where a person approves the request.
+        url: String,
+        /// Why approval is needed.
+        reason: String,
+        /// The journal preview the approval covers.
+        preview: Value,
+    },
+    /// Policy denied the command; the string is the server's reason.
+    Denied(String),
+}
+
+/// An HTTP session: a server URL and the API key.
 pub struct Session {
-    /// The server base URL (e.g., "http://localhost:3000").
+    /// The server base URL, e.g. `http://localhost:3000`.
     pub url: String,
-    /// The API key.
+    /// The API key, sent as a Bearer token.
     pub key: String,
-    /// The HTTP client (uses rustls for TLS).
     client: reqwest::Client,
 }
 
 impl Session {
-    /// Creates a new session.
+    /// Creates a session.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP client cannot be built.
     pub fn new(url: String, key: String) -> Result<Self> {
         let client = reqwest::Client::builder()
             .use_rustls_tls()
+            .timeout(Duration::from_secs(60))
             .build()
             .map_err(|e| CliError::Network(format!("cannot create HTTP client: {e}")))?;
-
         Ok(Session { url, key, client })
     }
 
-    /// Builds the full URL for a command.
-    /// If the command has a target parameter ({id}), the id positional is substituted.
-    pub fn url_for_command(
-        &self,
-        descriptor: &ledgers_commands::CommandDescriptor,
-        id: Option<&str>,
-    ) -> Result<String> {
-        let path = if let Some(id) = id {
-            descriptor
-                .http_path
-                .replace("{id}", id)
-                .replace("{target}", id)
-        } else {
-            descriptor.http_path.clone()
-        };
-
-        Ok(format!("{}{}", self.url, path))
-    }
-
-    /// Sends an HTTP request to the server.
+    /// Sends a planned request and maps the response to a [`CallOutcome`].
     ///
-    /// Returns the parsed response, handling NeedsApproval and Denied outcomes.
-    pub async fn send_request(
-        &self,
-        url: &str,
-        method: &str,
-        params: &[(&str, &str)],
-        body: &Value,
-    ) -> Result<CallOutcome> {
-        let request = match method {
-            "GET" => self.client.get(url).query(params),
-            "POST" => self.client.post(url).query(params).json(body),
-            _ => {
-                return Err(CliError::Internal(format!(
-                    "unsupported HTTP method: {method}"
-                )));
-            }
-        };
+    /// # Errors
+    /// Returns an error for network failures, unparseable responses, and
+    /// non-403 error statuses.
+    pub async fn execute(&self, plan: &PlannedRequest, dry_run: bool) -> Result<CallOutcome> {
+        let url = format!("{}{}", self.url.trim_end_matches('/'), plan.path);
+        let query: Vec<(&str, &str)> = plan
+            .query
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
 
-        let request = request.header("Authorization", format!("Bearer {}", self.key));
+        let mut request = if plan.method == "GET" {
+            self.client.get(&url)
+        } else {
+            self.client.post(&url)
+        };
+        request = request.query(&query).bearer_auth(&self.key);
+        if let Some(body) = &plan.body {
+            request = request.json(body);
+        }
 
         let response = request
             .send()
             .await
-            .map_err(|e| CliError::Network(format!("{e}")))?;
-
+            .map_err(|e| CliError::Network(e.to_string()))?;
         let status = response.status();
         let text = response
             .text()
             .await
             .map_err(|e| CliError::Network(format!("cannot read response body: {e}")))?;
 
-        // Try to parse as JSON first
-        let json: Value = serde_json::from_str(&text).map_err(|_| CliError::Http {
-            status: status.as_u16(),
-            body: text.clone(),
-        })?;
-
-        // Check for error status
-        if !status.is_success() {
-            // Try to parse as RFC 9457 Problem
-            if let Some(slug) = json.get("type").and_then(|t| t.as_str()) {
-                let detail = json
-                    .get("detail")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("(no detail)")
-                    .to_string();
-                return Err(CliError::Problem {
-                    slug: slug.to_string(),
-                    detail,
-                    status: Some(status.as_u16()),
-                });
+        let body: Value = if text.trim().is_empty() {
+            Value::Null
+        } else {
+            match serde_json::from_str(&text) {
+                Ok(value) => value,
+                Err(_) if status.is_success() => {
+                    return Err(CliError::Json(format!(
+                        "response is not JSON (HTTP {status})"
+                    )));
+                }
+                Err(_) => {
+                    return Err(CliError::Http {
+                        status: status.as_u16(),
+                        body: text,
+                    });
+                }
             }
+        };
 
-            return Err(CliError::Http {
-                status: status.as_u16(),
-                body: text,
-            });
-        }
-
-        // Success (2xx). Check if it's a special outcome or regular response.
-        // For now, assume success responses are always Done (unless the command
-        // specifically handles DryRun or NeedsApproval at the dispatch level).
-        // This is the main assumption we'll document: NeedsApproval/Denied would
-        // come back in the JSON but we're treating them as errors from the HTTP layer.
-
-        Ok(CallOutcome::Done(json))
+        map_response(status, body, dry_run)
     }
+}
+
+/// Maps an HTTP status and parsed body to a [`CallOutcome`]. Pure, so it can be tested.
+///
+/// # Errors
+/// Returns an error for statuses other than 2xx and 403, and for a malformed
+/// approval object.
+pub fn map_response(status: StatusCode, body: Value, dry_run: bool) -> Result<CallOutcome> {
+    if status.is_success() {
+        if body.get("status").and_then(Value::as_str) == Some("needs-approval") {
+            return approval_outcome(&body);
+        }
+        return Ok(if dry_run {
+            CallOutcome::DryRun(body)
+        } else {
+            CallOutcome::Done(body)
+        });
+    }
+
+    if status == StatusCode::FORBIDDEN {
+        let reason = problem_detail(&body).unwrap_or_else(|| "policy denied".to_string());
+        return Ok(CallOutcome::Denied(reason));
+    }
+
+    match problem_slug(&body) {
+        Some(slug) => Err(CliError::Problem {
+            slug,
+            detail: problem_detail(&body).unwrap_or_else(|| "(no detail)".to_string()),
+            status: status.as_u16(),
+        }),
+        None => Err(CliError::Http {
+            status: status.as_u16(),
+            body: body.to_string(),
+        }),
+    }
+}
+
+fn approval_outcome(body: &Value) -> Result<CallOutcome> {
+    let approval = body
+        .get("approval")
+        .and_then(Value::as_object)
+        .ok_or_else(|| CliError::Json("needs-approval response has no approval object".into()))?;
+    let text = |key: &str| {
+        approval
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let approval_id =
+        text("approval_id").ok_or_else(|| CliError::Json("approval has no approval_id".into()))?;
+    let url = text("url").ok_or_else(|| CliError::Json("approval has no url".into()))?;
+    Ok(CallOutcome::NeedsApproval {
+        approval_id,
+        url,
+        reason: text("reason").unwrap_or_default(),
+        preview: approval.get("preview").cloned().unwrap_or(Value::Null),
+    })
+}
+
+/// The last path segment of an RFC 9457 `type` URI: `.../problems/policy-denied`
+/// becomes `policy-denied`.
+fn problem_slug(body: &Value) -> Option<String> {
+    let problem_type = body.get("type")?.as_str()?;
+    let slug = problem_type.rsplit('/').next()?;
+    (!slug.is_empty()).then(|| slug.to_string())
+}
+
+fn problem_detail(body: &Value) -> Option<String> {
+    body.get("detail")
+        .and_then(Value::as_str)
+        .or_else(|| body.get("title").and_then(Value::as_str))
+        .map(str::to_string)
 }
