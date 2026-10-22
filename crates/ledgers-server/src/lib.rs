@@ -2,8 +2,12 @@
 //! Ledgers server composition: harness and modules.
 
 pub mod config;
+pub mod dispatch;
 pub mod documents;
 pub mod mcp;
+/// The native (SQLite) composition `ledgers-server` and `ledgers serve` share.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native;
 pub mod openapi;
 pub mod routes;
 
@@ -12,6 +16,7 @@ pub mod routes;
 pub mod worker;
 
 pub use config::LedgersConfig;
+pub use dispatch::{Deps, ServerDispatch};
 pub use mcp::McpModule;
 pub use routes::Dispatch;
 
@@ -43,11 +48,27 @@ pub fn harness(
         .get("LEDGERS_PUBLIC_URL")
         .unwrap_or_else(|| format!("http://{domain}"));
 
-    // Default CORS origins for development
+    // LEDGERS_DEV=1 is the local development mode: a local web app on Vite's
+    // default port may call the API, and the dev bootstrap runs at start.
+    let dev = is_dev(cfg);
+    let mut default_origins = vec![public_url.clone(), "http://localhost:3000".to_string()];
+    if dev {
+        default_origins.push(DEV_WEB_ORIGIN.to_string());
+    }
     let cors_origins = cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
-        || vec![public_url.clone(), "http://localhost:3000".to_string()],
+        || default_origins,
         |s| s.split(',').map(|s| s.trim().to_string()).collect(),
     );
+
+    let company_id = match cfg.get("LEDGERS_COMPANY_ID") {
+        Some(id) => id,
+        None if dev => dispatch::DEV_COMPANY_ID.to_string(),
+        None => {
+            let mut errors = ConfigError::default();
+            errors.push("LEDGERS_COMPANY_ID is required unless LEDGERS_DEV=1".to_string());
+            return Err(errors);
+        }
+    };
 
     let venture = Venture::new("ledgers", &domain)
         .public_url(public_url.clone())
@@ -55,7 +76,7 @@ pub fn harness(
         .env(VentureEnv::Development);
 
     // Create dispatch
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(routes::Unwired);
+    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(dispatch::ServerDispatch::new(company_id));
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {
@@ -68,6 +89,7 @@ pub fn harness(
     let builder = Harness::builder().venture(venture).runtime(runtime);
 
     let builder = builder.module(ledgers_storage::StorageModule);
+    let builder = builder.module(dispatch::ApiKeysModule);
     let builder = builder.module(ledgers_db::module::DbModule);
     let builder = builder.module(ledgers_ledger::module::LedgerModule);
     let builder = builder.module(ledgers_policy::module::PolicyModule);
@@ -97,4 +119,15 @@ pub fn harness(
     let builder = builder.module(mcp_module);
 
     builder.build()
+}
+
+/// The web app origin the development mode allows (Vite's default port).
+pub const DEV_WEB_ORIGIN: &str = "http://localhost:5173";
+
+/// Whether the server runs in local development mode (`LEDGERS_DEV=1`).
+/// Development mode alone enables the dev bootstrap and the dev CORS origin;
+/// nothing else is relaxed by it.
+#[must_use]
+pub fn is_dev(cfg: &dyn Config) -> bool {
+    cfg.get("LEDGERS_DEV").as_deref() == Some("1")
 }

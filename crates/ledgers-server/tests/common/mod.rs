@@ -1,0 +1,193 @@
+//! Shared fixture for the dispatch tests: the real registry, the real
+//! domain modules and the real `ServerDispatch`, over the harness's
+//! migrated SQLite database. Only the clock and the id generator are fixed,
+//! so periods and ids are deterministic.
+#![allow(dead_code)]
+
+use cratefield_core::{IdGen, Module, Ports};
+use cratefield_testing::{TestHarness, request, request_as};
+use ledgers_commands::auth::Tier;
+use ledgers_ledger::LedgerModule;
+use ledgers_policy::key::CurrencyLimit;
+use ledgers_server::dispatch::{self, ApiKeysModule, Deps, ServerDispatch};
+use ledgers_server::routes::{self, Dispatch};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub use cratefield_core::axum::http::Method;
+pub use cratefield_testing::TestResponse;
+
+/// The company every fixture serves: the dev bootstrap's fixture id.
+pub const COMPANY: &str = dispatch::DEV_COMPANY_ID;
+/// The fixed clock: a date inside the bootstrap's fiscal year.
+pub const NOW: &str = "2026-10-22T10:00:00Z";
+
+/// Deterministic ids: a counter behind a fixed prefix.
+#[derive(Default)]
+pub struct Ids(AtomicU64);
+
+impl IdGen for Ids {
+    fn ulid(&self) -> String {
+        let n = self.0.fetch_add(1, Ordering::Relaxed) + 1;
+        format!("01TESTID{n:018X}")
+    }
+}
+
+/// The keys a fixture issues.
+pub struct Keys {
+    /// The dev key: full tier, EUR limits (what `LEDGERS_DEV=1` prints).
+    pub full: String,
+    /// A draft-tier key: may read and draft, may not post.
+    pub draft: String,
+    /// A read-tier key: may only read.
+    pub read: String,
+    /// A post-tier key with no limit in any currency: every post is denied.
+    pub unlimited: String,
+}
+
+/// One running fixture.
+pub struct Fixture {
+    /// The router the HTTP tests send requests through.
+    pub kit: TestHarness,
+    /// The ports the dispatch runs on (same database as the router).
+    pub deps: Deps,
+    /// The issued keys.
+    pub keys: Keys,
+}
+
+impl Fixture {
+    pub fn router(&self) -> &cratefield_core::axum::Router {
+        &self.kit.router
+    }
+
+    /// Sends `path` with the bearer `key`.
+    pub fn send(&self, method: Method, path: &str, key: &str, json: Option<&str>) -> TestResponse {
+        pollster::block_on(request_as(self.router(), method, path, key, json))
+    }
+
+    /// Sends `path` with no credential at all.
+    pub fn send_anonymous(&self, method: Method, path: &str, json: Option<&str>) -> TestResponse {
+        pollster::block_on(request(self.router(), method, path, json))
+    }
+
+    /// Posts a balanced entry of `amount` minor units, debit `debit` and
+    /// credit `credit`, under `external_id`, as the full key.
+    pub fn post(&self, external_id: &str, debit: &str, credit: &str, minor: &str) -> TestResponse {
+        self.send(
+            Method::POST,
+            "/v1/entries",
+            &self.keys.full,
+            Some(&entry_json(external_id, debit, credit, minor).to_string()),
+        )
+    }
+}
+
+/// The JSON body of a two-line EUR entry dated in the fixture's period.
+pub fn entry_json(external_id: &str, debit: &str, credit: &str, minor: &str) -> serde_json::Value {
+    serde_json::json!({
+        "entry": {
+            "journal_id": "",
+            "document_date": "2026-10-15",
+            "posting_date": "2026-10-15",
+            "tax_point_date": null,
+            "base_currency": "EUR",
+            "description": "Invoice INV-1001 to Acme GmbH",
+            "source_documents": [],
+            "external_id": external_id,
+            "source_app": "fixture",
+            "reverses": null,
+            "lines": [
+                {"account_number": debit, "side": "debit", "base": {"minor": minor, "currency": "EUR"},
+                 "fx": null, "tax_code": null, "dimensions": {}, "memo": null},
+                {"account_number": credit, "side": "credit", "base": {"minor": minor, "currency": "EUR"},
+                 "fx": null, "tax_code": null, "dimensions": {}, "memo": null}
+            ]
+        }
+    })
+}
+
+/// Builds the fixture: the harness, the bootstrap, and the four keys.
+pub fn fixture() -> Fixture {
+    fixture_with(Vec::new())
+}
+
+/// [`fixture`] with extra modules mounted beside the domain modules.
+pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
+    let registry = dispatch::registry();
+    let dispatch: Arc<dyn Dispatch> = Arc::new(ServerDispatch::new(COMPANY));
+    let mut domain = routes::domain_modules(&registry, &dispatch).expect("domain modules");
+    domain.extend(extra);
+
+    let clock = Arc::new(cratefield_testing::FixedClock(
+        time::OffsetDateTime::parse(NOW, &time::format_description::well_known::Rfc3339)
+            .expect("fixed clock time"),
+    ));
+    let ids = Arc::new(Ids::default());
+    let builtin: Vec<Box<dyn Module>> = vec![
+        Box::new(LedgerModule),
+        Box::new(ledgers_db::module::DbModule),
+        Box::new(ledgers_policy::module::PolicyModule),
+        Box::new(ApiKeysModule),
+    ];
+    let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
+    let kit = TestHarness::with_builder(
+        builtin,
+        move |builder| {
+            domain
+                .into_iter()
+                .fold(builder, cratefield_core::HarnessBuilder::module_arc)
+        },
+        move |ports: &mut Ports| {
+            ports.clock = Some(patch_clock as Arc<dyn cratefield_core::Clock>);
+            ports.id_gen = Some(patch_ids as Arc<dyn IdGen>);
+        },
+    );
+    let deps = Deps {
+        db: kit.db.clone(),
+        clock,
+        id_gen: ids,
+    };
+
+    let full = pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("bootstrap");
+    let draft = issue(&deps, Tier::Draft, eur_limits());
+    let read = issue(&deps, Tier::Read, eur_limits());
+    let unlimited = issue(&deps, Tier::PostWithinLimits, BTreeMap::new());
+    Fixture {
+        kit,
+        deps,
+        keys: Keys {
+            full,
+            draft,
+            read,
+            unlimited,
+        },
+    }
+}
+
+/// Generous EUR limits, as the dev bootstrap grants.
+pub fn eur_limits() -> BTreeMap<String, CurrencyLimit> {
+    BTreeMap::from([(
+        "EUR".to_owned(),
+        CurrencyLimit {
+            per_entry: 100_000_000_000_000,
+            per_day: 1_000_000_000_000_000,
+        },
+    )])
+}
+
+fn issue(deps: &Deps, tier: Tier, limits: BTreeMap<String, CurrencyLimit>) -> String {
+    pollster::block_on(dispatch::issue_key(
+        deps,
+        COMPANY,
+        "fixture key",
+        tier,
+        limits,
+    ))
+    .expect("issue key")
+}
+
+/// The body of a response, parsed.
+pub fn json(response: &TestResponse) -> serde_json::Value {
+    response.json()
+}

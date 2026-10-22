@@ -1,6 +1,7 @@
 //! MCP HTTP endpoint: `/v1/mcp` POST with auth and scope filtering.
 //! RFC 9728 protected-resource metadata at `/.well-known/oauth-protected-resource`.
 
+use crate::dispatch::{DISPATCH_PORTS, Deps};
 use crate::routes::Dispatch;
 use axum::extract::Query;
 use axum::http::header;
@@ -10,7 +11,7 @@ use cratefield_core::axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use cratefield_core::{Config, ConfigError, Migrations, Module, ModuleContext, Port};
+use cratefield_core::{Config, ConfigError, Migrations, Module, ModuleContext};
 use ledgers_commands::{Principal, Registry, Tier, mcp};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -69,22 +70,25 @@ impl Module for McpModule {
         env!("CARGO_PKG_VERSION")
     }
     fn requires(&self) -> &'static [cratefield_core::Port] {
-        &[Port::IdGen]
+        DISPATCH_PORTS
     }
 
     fn router(&self, ctx: ModuleContext) -> axum::Router {
         let state = self.state.clone();
-        let id_gen = ctx.ports.id_gen.clone().expect("id_gen port is required");
+        let deps = Arc::new(
+            Deps::from_ports(&ctx.ports)
+                .expect("the dispatch ports (db, clock, id_gen) are declared in requires()"),
+        );
 
         axum::Router::new().route(
             "/",
             post({
                 let state = state.clone();
-                let id_gen = id_gen.clone();
+                let deps = Arc::clone(&deps);
                 move |headers: HeaderMap, Query(query): Query<McpQuery>, body: String| {
                     let state = state.clone();
-                    let id_gen = id_gen.clone();
-                    async move { mcp_post(state, headers, query, body, id_gen).await }
+                    let deps = Arc::clone(&deps);
+                    async move { mcp_post(state, headers, query, body, deps).await }
                 }
             })
             .get(move || async { method_not_allowed() }),
@@ -169,7 +173,7 @@ async fn mcp_post(
     headers: HeaderMap,
     query: McpQuery,
     body: String,
-    id_gen: Arc<dyn cratefield_core::IdGen>,
+    deps: Arc<Deps>,
 ) -> (StatusCode, HeaderMap, String) {
     // (a) Check Origin header if present
     if let Some(origin) = headers.get("origin")
@@ -191,7 +195,7 @@ async fn mcp_post(
     };
 
     // (c) Authenticate the bearer token
-    let Ok(principal) = state.dispatch.principal(&bearer).await else {
+    let Ok(principal) = state.dispatch.principal(&deps, &bearer).await else {
         return unauthorized_response(&state.public_url);
     };
 
@@ -217,11 +221,12 @@ async fn mcp_post(
     let scope = scope_for(&principal, &query, &headers);
 
     // Generate request ID using id_gen
-    let request_id = format!("mcp-{}", id_gen.ulid());
+    let request_id = format!("mcp-{}", deps.id_gen.ulid());
 
     // Build a ToolCaller that uses dispatch
     let caller = ServerToolCaller {
         dispatch: Arc::clone(&state.dispatch),
+        deps: Arc::clone(&deps),
         credential: Some(bearer),
         request_id,
     };
@@ -241,6 +246,7 @@ async fn mcp_post(
 /// Implements `ToolCaller` by calling the dispatch trait.
 struct ServerToolCaller {
     dispatch: Arc<dyn Dispatch>,
+    deps: Arc<Deps>,
     credential: Option<String>,
     request_id: String,
 }
@@ -256,6 +262,7 @@ impl mcp::ToolCaller for ServerToolCaller {
         match self
             .dispatch
             .dispatch(
+                &self.deps,
                 &descriptor.name,
                 input,
                 &self.request_id,

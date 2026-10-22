@@ -1,0 +1,1469 @@
+//! The server's [`Dispatch`]: every registry command, run through the
+//! command executor against the harness database.
+//!
+//! Each command here is a thin adapter: it reads the input, resolves
+//! defaults, and calls the domain crate that owns the rule (ledgers-ledger
+//! for entries, reversals, accounts and reports; ledgers-policy for agent
+//! keys; ledgers-audit for the audit row the executor appends). The
+//! executor authenticates the credential, checks the tier, asks the policy,
+//! and writes the audit event in the same guard batch as the change
+//! (docs/PLAN.md sections 3 and 5).
+
+use crate::routes::Dispatch;
+use async_trait::async_trait;
+use cratefield_core::{ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, Statement};
+use ledgers_audit::{Actor, AuditContext};
+use ledgers_auth::AgentKeys;
+use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
+use ledgers_commands::{
+    Command, CommandContext, CommandError, ExecToken, Execute, Executed, Executor, JournalPreview,
+    Plan, Registry,
+};
+use ledgers_ledger::journal::{JournalDraft, JournalKind};
+use ledgers_ledger::query::{self, EntryRecord};
+use ledgers_ledger::report;
+use ledgers_ledger::reversal::ReverseContext;
+use ledgers_ledger::surface::SerializableAmount;
+use ledgers_ledger::surface::{
+    PostEntry, PostEntryInput, PostEntryOutput, SerializableEntryDraft, SerializablePostedEntry,
+};
+use ledgers_policy::KeyPolicy;
+use ledgers_policy::key::{AgentKey, CurrencyLimit};
+use ledgers_policy::store::{deserialize_key, parse_keys, serialize_key};
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use time::format_description::well_known::Iso8601;
+use time::{Date, OffsetDateTime, UtcOffset};
+
+/// The company the development bootstrap creates when `LEDGERS_COMPANY_ID`
+/// is unset. Invented fixture id, never a real company.
+pub const DEV_COMPANY_ID: &str = "01DEVCOMPANY0000000000000A";
+/// The owner recorded on dev bootstrap audit events and dev keys.
+const DEV_OWNER: &str = "dev-owner";
+/// The table the harness `ApiKeys` store keeps key hashes in.
+pub const API_KEYS_TABLE: &str = "api_keys";
+/// Chart tags whose accounts only a person may move money through: an
+/// agent posting to one of them needs approval (docs/PLAN.md section 5).
+const PROTECTED_TAGS: &[&str] = &[
+    "cash",
+    "bank",
+    "ar",
+    "ap",
+    "vat-input",
+    "vat-output",
+    "suspense",
+    "retained-earnings",
+    "fx-gain",
+    "fx-loss",
+    "rounding",
+];
+/// Rows a list query returns when the caller names no limit, and the cap.
+const DEFAULT_LIST_LIMIT: u32 = 50;
+const MAX_LIST_LIMIT: u32 = 200;
+
+/// The harness ports the dispatch needs, taken from a module's context.
+#[derive(Clone)]
+pub struct Deps {
+    /// The harness database every command reads and writes.
+    pub db: Arc<dyn Database>,
+    /// The clock: command timestamps and key expiry.
+    pub clock: Arc<dyn Clock>,
+    /// Ids for audit events, entries and keys.
+    pub id_gen: Arc<dyn IdGen>,
+}
+
+impl Deps {
+    /// Takes the dependencies from a port set; `None` when the database,
+    /// clock or id generator is missing.
+    #[must_use]
+    pub fn from_ports(ports: &Ports) -> Option<Self> {
+        Some(Deps {
+            db: ports.db.clone()?,
+            clock: ports.clock.clone()?,
+            id_gen: ports.id_gen.clone()?,
+        })
+    }
+}
+
+/// The ports a dispatch-serving module must declare.
+pub const DISPATCH_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
+
+/// The server's command dispatch for one company.
+pub struct ServerDispatch {
+    company_id: String,
+}
+
+impl ServerDispatch {
+    /// A dispatch serving `company_id`.
+    #[must_use]
+    pub fn new(company_id: impl Into<String>) -> Self {
+        Self {
+            company_id: company_id.into(),
+        }
+    }
+
+    /// The company this dispatch serves.
+    #[must_use]
+    pub fn company_id(&self) -> &str {
+        &self.company_id
+    }
+
+    /// Runs one command through the executor and maps its outcome to JSON.
+    async fn execute<C: Command>(
+        &self,
+        deps: &Deps,
+        cmd: &C,
+        credential: Option<String>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let credential = credential.ok_or_else(|| {
+            CommandError::Unauthenticated
+                .to_problem()
+                .instance(request_id)
+        })?;
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+
+        let now_at = deps.clock.now();
+        let ctx = CommandContext {
+            company_id: self.company_id.clone(),
+            request_id: request_id.to_owned(),
+            event_id: deps.id_gen.ulid(),
+            now: rfc3339_utc(now_at),
+        };
+        let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
+            .await
+            .map_err(fail)?;
+        let authenticator = KeyStore {
+            db: Arc::clone(&deps.db),
+            clock: Arc::clone(&deps.clock),
+            company_id: self.company_id.clone(),
+        };
+        let input: C::Input = serde_json::from_value(input)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+
+        let executor = Executor::new(deps.db.as_ref(), authenticator, policy);
+        match executor
+            .run(cmd, credential, ctx, &input, Execute::Run)
+            .await
+            .map_err(fail)?
+        {
+            Executed::Done(output) => serde_json::to_value(output)
+                .map_err(|err| fail(CommandError::InvalidInput(err.to_string()))),
+            Executed::NeedsApproval {
+                request_hash,
+                preview,
+                reason,
+                reads,
+            } => Ok(json!({
+                "status": "needs-approval",
+                "reason": reason,
+                "request_hash": request_hash,
+                "preview": preview,
+                "reads": reads,
+            })),
+            Executed::DryRun(preview) => Ok(json!({ "status": "dry-run", "preview": preview })),
+        }
+    }
+}
+
+#[async_trait]
+impl Dispatch for ServerDispatch {
+    async fn dispatch(
+        &self,
+        deps: &Deps,
+        command: &str,
+        input: Value,
+        request_id: &str,
+        credential: Option<String>,
+    ) -> Result<Value, Problem> {
+        match command {
+            "entries.post" => {
+                self.execute(deps, &EntriesPost, credential, request_id, input)
+                    .await
+            }
+            "entries.reverse" => {
+                self.execute(deps, &EntriesReverse, credential, request_id, input)
+                    .await
+            }
+            "entries.list" => {
+                self.execute(deps, &EntriesList, credential, request_id, input)
+                    .await
+            }
+            "entries.get" => {
+                self.execute(deps, &EntriesGet, credential, request_id, input)
+                    .await
+            }
+            "accounts.list" => {
+                self.execute(deps, &AccountsList, credential, request_id, input)
+                    .await
+            }
+            "reports.trial_balance" => {
+                self.execute(deps, &ReportsTrialBalance, credential, request_id, input)
+                    .await
+            }
+            "reports.profit_and_loss" => {
+                self.execute(deps, &ReportsProfitAndLoss, credential, request_id, input)
+                    .await
+            }
+            "reports.balance_sheet" => {
+                self.execute(deps, &ReportsBalanceSheet, credential, request_id, input)
+                    .await
+            }
+            "reports.account_balance_by_dimension" => {
+                self.execute(
+                    deps,
+                    &ReportsAccountBalanceByDimension,
+                    credential,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            other => Err(
+                Problem::validation_failed(format!("unknown command {other:?}"))
+                    .instance(request_id),
+            ),
+        }
+    }
+
+    async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem> {
+        let authenticator = KeyStore {
+            db: Arc::clone(&deps.db),
+            clock: Arc::clone(&deps.clock),
+            company_id: self.company_id.clone(),
+        };
+        authenticator
+            .authenticate(&credential.to_owned())
+            .await
+            .map_err(|err| err.to_problem())
+    }
+}
+
+/// Authenticates a bearer credential as an agent key: the harness `ApiKeys`
+/// verifies the secret (no caching, so a revoked key fails at once), and the
+/// key's policy row in `agent_key` gives its tier and limits.
+struct KeyStore {
+    db: Arc<dyn Database>,
+    clock: Arc<dyn Clock>,
+    company_id: String,
+}
+
+#[async_trait]
+impl Authenticator for KeyStore {
+    async fn authenticate(&self, credential: &Credential) -> Result<Principal, CommandError> {
+        let verified = api_keys(&self.db, &self.clock)
+            .verify(credential)
+            .await?
+            .ok_or(CommandError::Unauthenticated)?;
+        let key = load_key(self.db.as_ref(), &self.company_id, &verified.subject)
+            .await?
+            .ok_or(CommandError::Unauthenticated)?;
+        let now = self.clock.now();
+        if key.revoked_at.is_some_and(|at| at <= now) || key.expires_at.is_some_and(|at| at <= now)
+        {
+            return Err(CommandError::Unauthenticated);
+        }
+        Ok(Principal::Agent {
+            key_id: verified.subject,
+            tier: key.tier,
+            limits: principal_limits(&key)?,
+        })
+    }
+}
+
+/// The harness API-key store on the Ledgers table, with the OS entropy
+/// source.
+fn api_keys(db: &Arc<dyn Database>, clock: &Arc<dyn Clock>) -> ApiKeys {
+    ApiKeys::new(
+        Arc::clone(db),
+        Arc::clone(clock),
+        Arc::new(OsRandom),
+        API_KEYS_TABLE,
+    )
+}
+
+/// Entropy for key ids and secrets: the operating system's source.
+struct OsRandom;
+
+impl cratefield_core::RandomBytes for OsRandom {
+    fn fill(&self, dest: &mut [u8]) -> Result<(), cratefield_core::RandomError> {
+        // The OS source is the only one the key format allows; a host without
+        // one cannot mint or verify keys safely, so it stops here.
+        getrandom::fill(dest).expect("the operating system entropy source is available");
+        Ok(())
+    }
+}
+
+fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
+    key.limits
+        .iter()
+        .try_fold(Limits::new(), |limits, (code, limit)| {
+            limits
+                .insert(
+                    code,
+                    Limit {
+                        base_ceiling: limit.per_entry,
+                        transaction_ceiling: limit.per_entry,
+                    },
+                )
+                .map_err(CommandError::InvalidInput)
+        })
+}
+
+/// Loads one agent key's policy row for `company_id`.
+async fn load_key(
+    db: &dyn Database,
+    company_id: &str,
+    key_id: &str,
+) -> Result<Option<AgentKey>, CommandError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT policy FROM agent_key WHERE company_id = ? AND id = ?".to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(key_id),
+            ],
+        ))
+        .await?;
+    let Some(json) = rows.first().and_then(|row| row.get::<String>("policy")) else {
+        return Ok(None);
+    };
+    deserialize_key(&json)
+        .map(Some)
+        .map_err(|err| CommandError::InvalidInput(format!("agent key policy: {err}")))
+}
+
+/// The policy for one request: every agent key of the company, the chart's
+/// protected accounts, and the clock for expiry and rolling days.
+async fn load_policy(
+    db: &dyn Database,
+    company_id: &str,
+    now: OffsetDateTime,
+) -> Result<KeyPolicy, CommandError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id, policy FROM agent_key WHERE company_id = ?".to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await?;
+    let pairs = rows
+        .rows
+        .iter()
+        .filter_map(|row| Some((row.get::<String>("id")?, row.get::<String>("policy")?)))
+        .collect::<Vec<_>>();
+    let keys = parse_keys(pairs)
+        .map_err(|err| CommandError::InvalidInput(format!("agent key policy: {err}")))?;
+
+    let accounts = ledgers_ledger::commands::list_accounts(db, company_id, true)
+        .await
+        .map_err(|err| CommandError::Domain(err.to_problem()))?;
+    let protected: BTreeSet<String> = accounts
+        .iter()
+        .filter(|entry| {
+            entry
+                .account
+                .tags
+                .iter()
+                .any(|tag| PROTECTED_TAGS.contains(&tag.as_str()))
+        })
+        .map(|entry| entry.account.number.clone())
+        .collect();
+
+    Ok(KeyPolicy::new(keys, protected, now, UtcOffset::UTC))
+}
+
+/// Issues an agent key of `tier` with per-currency `limits` for the company,
+/// storing its policy row and minting its secret. The secret is returned once.
+///
+/// # Errors
+/// A message naming the failed step (database, policy encoding, key store).
+pub async fn issue_key(
+    deps: &Deps,
+    company_id: &str,
+    label: &str,
+    tier: Tier,
+    limits: BTreeMap<String, CurrencyLimit>,
+) -> Result<String, String> {
+    let key_id = deps.id_gen.ulid();
+    let now = deps.clock.now();
+    let key = AgentKey {
+        id: key_id.clone(),
+        label: label.to_owned(),
+        owner: DEV_OWNER.to_owned(),
+        tier,
+        limits,
+        allowed_journals: None,
+        allowed_accounts: None,
+        expires_at: None,
+        created_at: now,
+        last_used_at: None,
+        revoked_at: None,
+    };
+    let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
+    deps.db
+        .execute(&Statement::with_values(
+            "INSERT INTO agent_key (company_id, id, policy, updated_at) VALUES (?, ?, ?, ?)"
+                .to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(key_id.as_str()),
+                sea_query::Value::from(policy),
+                sea_query::Value::from(rfc3339_utc(now)),
+            ],
+        ))
+        .await
+        .map_err(|err| format!("store key policy: {err}"))?;
+
+    let audit = AuditContext::new(
+        Actor::Person {
+            person_id: DEV_OWNER.to_owned(),
+        },
+        deps.id_gen.ulid(),
+        deps.id_gen.ulid(),
+    );
+    let agent_keys = AgentKeys::new(Arc::new(api_keys(&deps.db, &deps.clock)), deps.db.clone());
+    let issued = agent_keys
+        .issue(&key_id, company_id, &audit, &rfc3339_utc(now))
+        .await
+        .map_err(|err| format!("issue key: {err}"))?;
+    Ok(issued.key())
+}
+
+/// Development bootstrap for `company_id`: when the company has no chart,
+/// imports the generic SME chart, opens the general journal `GN` and the
+/// current calendar year; then issues one local key with full tier
+/// (post within limits) and returns its secret.
+///
+/// # Errors
+/// A message naming the failed step.
+pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+    let now = deps.clock.now();
+    let stamp = rfc3339_utc(now);
+    let db = deps.db.as_ref();
+    let audit = AuditContext::new(
+        Actor::Person {
+            person_id: DEV_OWNER.to_owned(),
+        },
+        deps.id_gen.ulid(),
+        deps.id_gen.ulid(),
+    );
+
+    let existing = ledgers_ledger::commands::list_accounts(db, company_id, true)
+        .await
+        .map_err(|err| format!("read chart: {err}"))?;
+    if existing.is_empty() {
+        let template = ledgers_ledger::generic_sme_template()
+            .map_err(|err| format!("bundled chart: {err}"))?;
+        ledgers_ledger::commands::import_template(db, company_id, &template, stamp.clone(), &audit)
+            .await
+            .map_err(|err| format!("import chart: {err}"))?;
+        ledgers_ledger::journal::create_journal(
+            db,
+            company_id,
+            JournalDraft {
+                code: "GN".to_owned(),
+                kind: JournalKind::General,
+                name: "General journal".to_owned(),
+            },
+            &deps.id_gen.ulid(),
+            &stamp,
+            &audit,
+        )
+        .await
+        .map_err(|err| format!("create journal: {err}"))?;
+        ledgers_ledger::period::open_fiscal_year(
+            db,
+            company_id,
+            ledgers_ledger::FiscalYearSpec {
+                label: i64::from(now.year()),
+                start_month: 1,
+                has_adjustment_period: false,
+            },
+            stamp.clone(),
+            &audit,
+        )
+        .await
+        .map_err(|err| format!("open fiscal year: {err}"))?;
+    }
+
+    let mut limits = BTreeMap::new();
+    limits.insert(
+        "EUR".to_owned(),
+        CurrencyLimit {
+            per_entry: 100_000_000_000_000,
+            per_day: 1_000_000_000_000_000,
+        },
+    );
+    issue_key(
+        deps,
+        company_id,
+        "dev local key",
+        Tier::PostWithinLimits,
+        limits,
+    )
+    .await
+}
+
+/// The registry of every command the server serves: the descriptors of
+/// `ledgers_commands::default_commands()` with the input and output schemas
+/// of the typed commands filled in.
+///
+/// # Panics
+/// Never in practice: the command names are fixed and unique.
+#[must_use]
+pub fn registry() -> Registry {
+    let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
+        (
+            "accounts.list",
+            (
+                schema_of::<AccountsListInput>(),
+                schema_of::<AccountsListOutput>(),
+            ),
+        ),
+        (
+            "entries.get",
+            (
+                schema_of::<EntriesGetInput>(),
+                schema_of::<EntriesGetOutput>(),
+            ),
+        ),
+        (
+            "entries.list",
+            (
+                schema_of::<EntriesListInput>(),
+                schema_of::<EntriesListOutput>(),
+            ),
+        ),
+        (
+            "entries.post",
+            (
+                schema_of::<EntriesPostInput>(),
+                schema_of::<PostEntryOutput>(),
+            ),
+        ),
+        (
+            "entries.reverse",
+            (
+                schema_of::<EntriesReverseInput>(),
+                schema_of::<PostEntryOutput>(),
+            ),
+        ),
+        (
+            "reports.account_balance_by_dimension",
+            (
+                schema_of::<DimensionBalanceInput>(),
+                schema_of::<DimensionBalanceOutput>(),
+            ),
+        ),
+        (
+            "reports.balance_sheet",
+            (
+                schema_of::<BalanceSheetInput>(),
+                schema_of::<BalanceSheetOutput>(),
+            ),
+        ),
+        (
+            "reports.profit_and_loss",
+            (
+                schema_of::<PeriodInput>(),
+                schema_of::<ProfitAndLossOutput>(),
+            ),
+        ),
+        (
+            "reports.trial_balance",
+            (
+                schema_of::<PeriodInput>(),
+                schema_of::<TrialBalanceOutput>(),
+            ),
+        ),
+    ]);
+    let mut registry = Registry::new();
+    for mut descriptor in ledgers_commands::default_commands() {
+        if let Some((input, output)) = schemas.get(descriptor.name.as_str()) {
+            descriptor.input_schema = input.clone();
+            descriptor.output_schema = output.clone();
+        }
+        registry
+            .register(descriptor)
+            .expect("command names are unique");
+    }
+    registry
+}
+
+fn schema_of<T: JsonSchema>() -> Value {
+    serde_json::to_value(
+        schemars::generate::SchemaSettings::default()
+            .into_generator()
+            .into_root_schema_for::<T>(),
+    )
+    .unwrap_or(Value::Null)
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` in UTC: fixed width, so text order is time order.
+#[must_use]
+pub fn rfc3339_utc(now: OffsetDateTime) -> String {
+    let u = now.to_offset(UtcOffset::UTC);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        u.year(),
+        u8::from(u.month()),
+        u.day(),
+        u.hour(),
+        u.minute(),
+        u.second()
+    )
+}
+
+fn ymd(date: Date) -> String {
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
+fn parse_date(text: &str) -> Result<Date, CommandError> {
+    Date::parse(text, &Iso8601::DEFAULT)
+        .map_err(|_| CommandError::InvalidInput(format!("{text:?} is not a YYYY-MM-DD date")))
+}
+
+fn check_period(period: &str) -> Result<(), CommandError> {
+    let bytes = period.as_bytes();
+    let valid = bytes.len() == 7
+        && bytes[4] == b'-'
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..].iter().all(u8::is_ascii_digit);
+    if valid {
+        Ok(())
+    } else {
+        Err(CommandError::InvalidInput(format!(
+            "{period:?} is not a YYYY-MM period"
+        )))
+    }
+}
+
+fn domain(err: &ledgers_ledger::JournalError) -> CommandError {
+    CommandError::Domain(err.to_problem())
+}
+
+/// The preview of a validated entry: one line per entry line.
+fn preview_of(entry: &ledgers_ledger::Entry) -> Result<JournalPreview, CommandError> {
+    let mut preview = JournalPreview::empty();
+    for line in &entry.lines {
+        let side = line.side.to_string().to_lowercase();
+        let txn = line.fx.as_ref().map(|fx| fx.transaction);
+        preview
+            .add_line(line.account_number.clone(), &side, line.base, txn)
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    }
+    Ok(preview)
+}
+
+/// Deserializes a numeric query or body field sent as a number or a string.
+fn de_opt_u32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u32>, D::Error> {
+    use serde::de::Error;
+    match Option::<Value>::deserialize(deserializer)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| D::Error::custom("expected a non-negative 32-bit integer")),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(s)) => s
+            .parse::<u32>()
+            .map(Some)
+            .map_err(|_| D::Error::custom("expected a non-negative integer")),
+        Some(_) => Err(D::Error::custom("expected an integer")),
+    }
+}
+
+// ----------------------------------------------------------------- entries
+
+/// The input of `entries.post`: a balanced entry and, optionally, the
+/// journal and fiscal year to post it to (defaults: journal `GN`, and the
+/// fiscal year of the posting date).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EntriesPostInput {
+    /// The journal to post into; defaults to the general journal `GN`.
+    pub journal_id: Option<String>,
+    /// The fiscal year the entry number is scoped to; defaults to the
+    /// posting date's year.
+    pub fiscal_year: Option<i64>,
+    /// The entry: header, dates and lines.
+    pub entry: SerializableEntryDraft,
+}
+
+/// `entries.post`: posts one balanced entry (`POST /v1/entries`).
+pub struct EntriesPost;
+
+#[async_trait]
+impl Command for EntriesPost {
+    const NAME: &'static str = "entries.post";
+    const TIER: Tier = Tier::PostWithinLimits;
+    const IDEMPOTENT: bool = true;
+
+    type Input = EntriesPostInput;
+    type Output = PostEntryOutput;
+
+    async fn preview(
+        &self,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        let resolved = resolve_post(db, ctx, input).await?;
+        PostEntry.preview(db, ctx, &resolved).await
+    }
+
+    async fn plan(
+        &self,
+        token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let resolved = resolve_post(db, ctx, input).await?;
+        PostEntry.plan(token, db, ctx, &resolved).await
+    }
+}
+
+/// Fills the journal and fiscal year defaults of an `entries.post` input.
+async fn resolve_post(
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &EntriesPostInput,
+) -> Result<PostEntryInput, CommandError> {
+    let journal_id = match &input.journal_id {
+        Some(id) => id.clone(),
+        None => ledgers_ledger::journal::find_journal(db, &ctx.company_id, "GN")
+            .await
+            .map_err(|err| domain(&err))?
+            .map(|journal| journal.id)
+            .ok_or_else(|| {
+                CommandError::InvalidInput("no general journal GN exists for this company".into())
+            })?,
+    };
+    let fiscal_year = if let Some(year) = input.fiscal_year {
+        year
+    } else {
+        let posting = &input.entry.posting_date;
+        posting
+            .get(..4)
+            .and_then(|year| year.parse::<i64>().ok())
+            .ok_or_else(|| {
+                CommandError::InvalidInput(format!("{posting:?} is not a YYYY-MM-DD date"))
+            })?
+    };
+    let mut entry = input.entry.clone();
+    entry.journal_id.clone_from(&journal_id);
+    Ok(PostEntryInput {
+        journal_id,
+        fiscal_year,
+        entry,
+    })
+}
+
+/// The input of `entries.reverse`: the external id of the entry to reverse
+/// (from the path) and the posting date of the reversal (default: today).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EntriesReverseInput {
+    /// The `external_id` the reversed entry was posted with.
+    pub external_id: String,
+    /// The reversal's posting date, `YYYY-MM-DD`; defaults to today (UTC).
+    pub posting_date: Option<String>,
+}
+
+
+/// `entries.reverse`: posts the mirror of a posted entry. Posted entries are
+/// never edited; a correction is a reversal plus new entries (`POST
+/// /v1/entries/{external_id}/reverse`).
+pub struct EntriesReverse;
+
+/// Resolves the entry a reversal targets and builds its mirror.
+async fn reversal_of(
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &EntriesReverseInput,
+) -> Result<(String, ReverseContext), CommandError> {
+    let original = query::entry_by_external_id(db, &ctx.company_id, &input.external_id)
+        .await
+        .map_err(|err| domain(&err))?
+        .ok_or_else(|| {
+            CommandError::InvalidInput(format!("no entry with external_id {:?}", input.external_id))
+        })?;
+    let requested = match &input.posting_date {
+        Some(text) => parse_date(text)?,
+        None => parse_date(&ctx.now[..10])?,
+    };
+    let reverse_ctx = ReverseContext {
+        company_id: ctx.company_id.clone(),
+        entry_id: original.id.clone(),
+        requested_posting_date: requested,
+        human: false,
+    };
+    Ok((original.id, reverse_ctx))
+}
+
+#[async_trait]
+impl Command for EntriesReverse {
+    const NAME: &'static str = "entries.reverse";
+    const TIER: Tier = Tier::PostWithinLimits;
+    const IDEMPOTENT: bool = true;
+    const TARGET: Option<&'static str> = Some("external_id");
+
+    type Input = EntriesReverseInput;
+    type Output = PostEntryOutput;
+
+    async fn preview(
+        &self,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        let (_, reverse_ctx) = reversal_of(db, ctx, input).await?;
+        let mirror = ledgers_ledger::reversal_entry(db, &reverse_ctx)
+            .await
+            .map_err(|err| domain(&err))?;
+        preview_of(&mirror)
+    }
+
+    async fn plan(
+        &self,
+        token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let (original_id, reverse_ctx) = reversal_of(db, ctx, input).await?;
+        let (statements, posted) =
+            ledgers_ledger::plan_reverse_entry(token, db, &reverse_ctx, &ctx.now, &ctx.request_id)
+                .await
+                .map_err(|err| domain(&err))?;
+        let objects = vec![posted.entry_id.clone(), original_id.clone()];
+        Ok(Plan {
+            statements,
+            output: PostEntryOutput {
+                entry: SerializablePostedEntry::from(posted),
+            },
+            objects,
+        })
+    }
+}
+
+/// One entry line, as the app's `EntryLineRecord` types it.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct EntryLineRecordView {
+    /// The account number.
+    pub account_number: String,
+    /// `debit` or `credit`.
+    pub side: String,
+    /// The base amount, in minor units of the entry's base currency.
+    pub base: SerializableAmount,
+    /// The memo, if any.
+    pub memo: Option<String>,
+}
+
+/// One posted entry, as the app's `EntryRecord` types it.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct EntryRecordView {
+    /// The source application's idempotency key, if it gave one.
+    pub external_id: Option<String>,
+    /// The entry id.
+    pub entry_id: String,
+    /// The journal it posted into.
+    pub journal_id: String,
+    /// The fiscal year its number is scoped to.
+    pub fiscal_year: i64,
+    /// The gapless number within the journal and fiscal year.
+    pub number: i64,
+    /// The document date, `YYYY-MM-DD`.
+    pub document_date: String,
+    /// The posting date, `YYYY-MM-DD`.
+    pub posting_date: String,
+    /// The base currency code.
+    pub base_currency: String,
+    /// The description.
+    pub description: String,
+    /// Who posted it: `agent` (an agent key) or `person`.
+    pub posted_by: String,
+    /// The entry this one reverses, when it is a reversal.
+    pub reverses: Option<String>,
+    /// The entry that reverses this one, if any.
+    pub reversed_by: Option<String>,
+    /// When it was recorded (UTC).
+    pub recorded_at: String,
+    /// The lines.
+    pub lines: Vec<EntryLineRecordView>,
+}
+
+impl From<EntryRecord> for EntryRecordView {
+    fn from(record: EntryRecord) -> Self {
+        let entry = record.entry;
+        EntryRecordView {
+            entry_id: record.id,
+            external_id: entry.external_id.clone(),
+            journal_id: entry.journal_id.clone(),
+            fiscal_year: record.fiscal_year,
+            number: record.number,
+            document_date: ymd(entry.document_date),
+            posting_date: ymd(entry.posting_date),
+            base_currency: entry.base_currency.code().to_string(),
+            description: entry.description.clone(),
+            posted_by: if record.actor == "human" {
+                "person".to_owned()
+            } else {
+                "agent".to_owned()
+            },
+            reverses: entry.reverses.clone(),
+            reversed_by: record.reversed_by.first().cloned(),
+            recorded_at: record.recorded_at,
+            lines: record
+                .lines
+                .into_iter()
+                .map(|line| EntryLineRecordView {
+                    account_number: line.account_number,
+                    side: line.side.to_string().to_lowercase(),
+                    base: SerializableAmount::from(line.base),
+                    memo: line.memo,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The input of `entries.list`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EntriesListInput {
+    /// Only entries of this VAT period (`YYYY-MM`); all periods when absent.
+    pub period: Option<String>,
+    /// At most this many entries, newest first (default 50, cap 200).
+    #[serde(default, deserialize_with = "de_opt_u32")]
+    #[schemars(with = "Option<u32>")]
+    pub limit: Option<u32>,
+}
+
+/// The output of `entries.list`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct EntriesListOutput {
+    /// The entries, newest posting first.
+    pub entries: Vec<EntryRecordView>,
+}
+
+/// `entries.list`: lists posted entries (`GET /v1/entries`).
+pub struct EntriesList;
+
+#[async_trait]
+impl Command for EntriesList {
+    const NAME: &'static str = "entries.list";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = EntriesListInput;
+    type Output = EntriesListOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        if let Some(period) = &input.period {
+            check_period(period)?;
+        }
+        let limit = input
+            .limit
+            .unwrap_or(DEFAULT_LIST_LIMIT)
+            .clamp(1, MAX_LIST_LIMIT);
+        let records = query::list_entries(db, &ctx.company_id, input.period.as_deref(), limit)
+            .await
+            .map_err(|err| domain(&err))?;
+        Ok(Plan::with_output(EntriesListOutput {
+            entries: records.into_iter().map(EntryRecordView::from).collect(),
+        }))
+    }
+}
+
+/// The input of `entries.get`: the entry's external id (from the path).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EntriesGetInput {
+    /// The `external_id` the entry was posted with.
+    pub external_id: String,
+}
+
+/// The output of `entries.get`: the entry record itself.
+pub type EntriesGetOutput = EntryRecordView;
+
+/// `entries.get`: one posted entry by its external id (`GET /v1/entries/{external_id}`).
+pub struct EntriesGet;
+
+#[async_trait]
+impl Command for EntriesGet {
+    const NAME: &'static str = "entries.get";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+    const TARGET: Option<&'static str> = Some("external_id");
+
+    type Input = EntriesGetInput;
+    type Output = EntriesGetOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let record = query::entry_by_external_id(db, &ctx.company_id, &input.external_id)
+            .await
+            .map_err(|err| domain(&err))?
+            .ok_or_else(|| CommandError::Domain(cratefield_core::Problem::not_found()))?;
+        Ok(Plan::with_output(EntryRecordView::from(record)))
+    }
+}
+
+// ---------------------------------------------------------------- accounts
+
+/// The input of `accounts.list`: none.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct AccountsListInput {}
+
+/// One account of the chart, as the app's `Account` types it, plus its balances.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct AccountView {
+    /// The account number.
+    pub number: String,
+    /// The translatable name key.
+    pub name_key: String,
+    /// The account class: asset, liability, equity, income, expense.
+    pub account_type: String,
+    /// The normal balance side.
+    pub normal_balance: String,
+    /// The account currency, or `null` for the company base currency.
+    pub currency: Option<String>,
+    /// The parent account number, if any.
+    pub parent: Option<String>,
+    /// The chart tags of the account.
+    pub tags: Vec<String>,
+    /// Whether the account accepts postings (a leaf of the chart).
+    pub is_postable: bool,
+    /// The balance per base currency, debit-positive (empty when no postings).
+    pub balances: Vec<SerializableAmount>,
+}
+
+/// The output of `accounts.list`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct AccountsListOutput {
+    /// The accounts, by number.
+    pub accounts: Vec<AccountView>,
+}
+
+/// `accounts.list`: the chart with each account's balance (`GET /v1/accounts`).
+pub struct AccountsList;
+
+#[async_trait]
+impl Command for AccountsList {
+    const NAME: &'static str = "accounts.list";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = AccountsListInput;
+    type Output = AccountsListOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let accounts = ledgers_ledger::commands::list_accounts(db, &ctx.company_id, true)
+            .await
+            .map_err(|err| CommandError::Domain(err.to_problem()))?;
+        let balances = query::account_balances(db, &ctx.company_id)
+            .await
+            .map_err(|err| domain(&err))?;
+        let mut by_account: BTreeMap<String, Vec<SerializableAmount>> = BTreeMap::new();
+        for balance in balances {
+            by_account
+                .entry(balance.account_number)
+                .or_default()
+                .push(SerializableAmount::from(balance.balance));
+        }
+        let accounts = accounts
+            .into_iter()
+            .map(|entry| {
+                let is_postable = entry.is_postable();
+                let account = entry.account;
+                AccountView {
+                    balances: by_account.remove(&account.number).unwrap_or_default(),
+                    number: account.number,
+                    name_key: account.name_key,
+                    account_type: account.account_type.to_string(),
+                    normal_balance: account.normal_balance.to_string(),
+                    currency: account.currency.map(|c| c.code().to_string()),
+                    parent: account.parent,
+                    tags: account.tags,
+                    is_postable,
+                }
+            })
+            .collect();
+        Ok(Plan::with_output(AccountsListOutput { accounts }))
+    }
+}
+
+// ----------------------------------------------------------------- reports
+
+/// The input of the period reports: `YYYY-MM`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PeriodInput {
+    /// The VAT period, `YYYY-MM`.
+    pub period: String,
+}
+
+/// One trial-balance row.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrialBalanceRowView {
+    /// The account number.
+    pub account_code: String,
+    /// The debit total of the period.
+    pub debit: SerializableAmount,
+    /// The credit total of the period.
+    pub credit: SerializableAmount,
+    /// The balance (debit positive).
+    pub balance: SerializableAmount,
+}
+
+/// The output of `reports.trial_balance`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TrialBalanceOutput {
+    /// The period reported.
+    pub period: String,
+    /// The rows, by account.
+    pub rows: Vec<TrialBalanceRowView>,
+}
+
+/// `reports.trial_balance`: debit and credit totals per account for a
+/// period (`GET /v1/reports/trial-balance?period=YYYY-MM`).
+pub struct ReportsTrialBalance;
+
+#[async_trait]
+impl Command for ReportsTrialBalance {
+    const NAME: &'static str = "reports.trial_balance";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = PeriodInput;
+    type Output = TrialBalanceOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        check_period(&input.period)?;
+        let rows = report::trial_balance(db, &ctx.company_id, &input.period)
+            .await
+            .map_err(|err| domain(&err))?;
+        Ok(Plan::with_output(TrialBalanceOutput {
+            period: input.period.clone(),
+            rows: rows
+                .into_iter()
+                .map(|row| TrialBalanceRowView {
+                    account_code: row.account_code,
+                    debit: SerializableAmount::from(row.debit),
+                    credit: SerializableAmount::from(row.credit),
+                    balance: SerializableAmount::from(row.balance),
+                })
+                .collect(),
+        }))
+    }
+}
+
+/// The output of `reports.profit_and_loss`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ProfitAndLossOutput {
+    /// The period reported.
+    pub period: String,
+    /// Total income.
+    pub revenue: SerializableAmount,
+    /// Total expenses.
+    pub expenses: SerializableAmount,
+    /// Revenue minus expenses.
+    pub net_income: SerializableAmount,
+}
+
+/// `reports.profit_and_loss`: income, expenses and net income for a period
+/// (`GET /v1/reports/p-and-l?period=YYYY-MM`).
+pub struct ReportsProfitAndLoss;
+
+#[async_trait]
+impl Command for ReportsProfitAndLoss {
+    const NAME: &'static str = "reports.profit_and_loss";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = PeriodInput;
+    type Output = ProfitAndLossOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        check_period(&input.period)?;
+        let pnl = report::profit_and_loss(db, &ctx.company_id, &input.period)
+            .await
+            .map_err(|err| domain(&err))?;
+        Ok(Plan::with_output(ProfitAndLossOutput {
+            period: input.period.clone(),
+            revenue: SerializableAmount::from(pnl.revenue),
+            expenses: SerializableAmount::from(pnl.expenses),
+            net_income: SerializableAmount::from(pnl.net_income),
+        }))
+    }
+}
+
+/// The input of `reports.balance_sheet`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BalanceSheetInput {
+    /// The date the balance sheet is as of, `YYYY-MM-DD`.
+    pub as_of: String,
+}
+
+/// The output of `reports.balance_sheet`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct BalanceSheetOutput {
+    /// The date reported.
+    pub as_of: String,
+    /// Total assets.
+    pub assets: SerializableAmount,
+    /// Total liabilities.
+    pub liabilities: SerializableAmount,
+    /// Total equity.
+    pub equity: SerializableAmount,
+}
+
+/// `reports.balance_sheet`: assets, liabilities and equity as of a date
+/// (`GET /v1/reports/balance-sheet?as_of=YYYY-MM-DD`).
+pub struct ReportsBalanceSheet;
+
+#[async_trait]
+impl Command for ReportsBalanceSheet {
+    const NAME: &'static str = "reports.balance_sheet";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = BalanceSheetInput;
+    type Output = BalanceSheetOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        parse_date(&input.as_of)?;
+        let sheet = report::balance_sheet(db, &ctx.company_id, &input.as_of)
+            .await
+            .map_err(|err| domain(&err))?;
+        Ok(Plan::with_output(BalanceSheetOutput {
+            as_of: input.as_of.clone(),
+            assets: SerializableAmount::from(sheet.assets),
+            liabilities: SerializableAmount::from(sheet.liabilities),
+            equity: SerializableAmount::from(sheet.equity),
+        }))
+    }
+}
+
+/// The input of `reports.account_balance_by_dimension`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DimensionBalanceInput {
+    /// The account number.
+    pub account: String,
+    /// The dimension key, for example `cost-centre`.
+    pub dimension: String,
+    /// The VAT period, `YYYY-MM`.
+    pub period: String,
+}
+
+/// One dimension value's balance.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DimensionValueView {
+    /// The dimension value.
+    pub dimension_value: String,
+    /// The balance (debit positive).
+    pub balance: SerializableAmount,
+}
+
+/// The output of `reports.account_balance_by_dimension`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DimensionBalanceOutput {
+    /// The account reported.
+    pub account: String,
+    /// The dimension key.
+    pub dimension: String,
+    /// The period reported.
+    pub period: String,
+    /// One row per dimension value.
+    pub rows: Vec<DimensionValueView>,
+}
+
+/// `reports.account_balance_by_dimension`: an account's balance split by a
+/// dimension, for a period.
+pub struct ReportsAccountBalanceByDimension;
+
+#[async_trait]
+impl Command for ReportsAccountBalanceByDimension {
+    const NAME: &'static str = "reports.account_balance_by_dimension";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = DimensionBalanceInput;
+    type Output = DimensionBalanceOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        check_period(&input.period)?;
+        let rows = report::account_balance_by_dimension(
+            db,
+            &ctx.company_id,
+            &input.account,
+            &input.dimension,
+            &input.period,
+        )
+        .await
+        .map_err(|err| domain(&err))?;
+        Ok(Plan::with_output(DimensionBalanceOutput {
+            account: input.account.clone(),
+            dimension: input.dimension.clone(),
+            period: input.period.clone(),
+            rows: rows
+                .into_iter()
+                .map(|row| DimensionValueView {
+                    dimension_value: row.dimension_value,
+                    balance: SerializableAmount::from(row.balance),
+                })
+                .collect(),
+        }))
+    }
+}
+
+/// Migrations of the harness API-key table, shipped with the server.
+pub const API_KEY_MIGRATIONS: &[cratefield_core::SqlMigration] =
+    &[cratefield_core::SqlMigration::new(
+        "0001",
+        "api_keys",
+        include_str!("../migrations/sqlite/0001_api_keys.sql"),
+    )];
+
+/// The module that declares the API-key table to the harness.
+pub struct ApiKeysModule;
+
+impl cratefield_core::Module for ApiKeysModule {
+    fn name(&self) -> &'static str {
+        "ledgers-api-keys"
+    }
+
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+
+    fn requires(&self) -> &'static [Port] {
+        &[]
+    }
+
+    fn router(&self, _ctx: cratefield_core::ModuleContext) -> cratefield_core::axum::Router {
+        cratefield_core::axum::Router::new()
+    }
+
+    fn migrations(&self) -> cratefield_core::Migrations {
+        cratefield_core::Migrations::sqlite(API_KEY_MIGRATIONS)
+    }
+
+    fn validate_config(
+        &self,
+        _cfg: &dyn cratefield_core::Config,
+    ) -> Result<(), cratefield_core::ConfigError> {
+        Ok(())
+    }
+}

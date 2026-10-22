@@ -127,6 +127,9 @@ pub struct RawEntry {
     pub source_documents: Vec<String>,
     /// The entry this one reverses, when it is a reversal.
     pub reverses: Option<String>,
+    /// The source application's idempotency key, stored for lookup by
+    /// `external_id` (unique per company when set).
+    pub external_id: Option<String>,
     /// The lines, as storage sees them.
     pub lines: Vec<RawLine>,
 }
@@ -155,6 +158,7 @@ impl RawEntry {
             description: entry.description.clone(),
             source_documents: entry.source_documents.clone(),
             reverses: entry.reverses.clone(),
+            external_id: entry.external_id.clone(),
             lines,
         })
     }
@@ -438,8 +442,8 @@ fn entry_insert_statement(
     let actor = if options.human { "human" } else { "agent" };
     Statement::with_values(
         format!(
-            "INSERT INTO {ENTRY_TABLE} (id, company_id, journal_id, fiscal_year, number, status, document_date, posting_date, tax_point_date, vat_period, recorded_at, description, source_documents, reverses, base_currency, actor) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO {ENTRY_TABLE} (id, company_id, journal_id, fiscal_year, number, status, document_date, posting_date, tax_point_date, vat_period, recorded_at, description, source_documents, reverses, external_id, base_currency, actor) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ),
         vec![
             SeaValue::from(ctx.entry_id.as_str()),
@@ -456,6 +460,7 @@ fn entry_insert_statement(
             SeaValue::from(raw.description.as_str()),
             SeaValue::from(source_documents_json(raw)),
             SeaValue::from(raw.reverses.as_deref()),
+            SeaValue::from(raw.external_id.as_deref()),
             SeaValue::from(raw.base_currency.as_str()),
             SeaValue::from(actor),
         ],

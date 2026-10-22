@@ -221,10 +221,9 @@ pub type Credential = String;
 /// Trait for authenticating a credential into a principal.
 ///
 /// Implementations are async because they often query the database or
-/// an external service. Following the harness convention, async trait
-/// uses `?Send` — wasm-clean, since tokio is not available in the
-/// Workers runtime.
-#[async_trait::async_trait(?Send)]
+/// an external service. The futures are `Send`: the executor that
+/// awaits them runs inside the server's axum handlers.
+#[async_trait::async_trait]
 pub trait Authenticator: Send + Sync {
     /// Authenticates a credential, returning a principal or an
     /// unauthenticated error.

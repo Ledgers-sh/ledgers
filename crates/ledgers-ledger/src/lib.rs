@@ -74,6 +74,7 @@ pub mod mapping;
 pub mod module;
 pub mod period;
 pub mod posting;
+pub mod query;
 pub mod recurring;
 pub mod registry;
 pub mod report;
@@ -108,7 +109,7 @@ pub use report::{
     BalanceSheet, DimensionBalance, ProfitAndLoss, TrialBalanceRow, account_balance_by_dimension,
     balance_sheet, profit_and_loss, trial_balance,
 };
-pub use reversal::{ReverseContext, reverse_entry};
+pub use reversal::{ReverseContext, plan_reverse_entry, reversal_entry, reverse_entry};
 
 /// The generic small-business chart (`templates/generic-sme.toml`).
 pub const GENERIC_SME_TOML: &str = include_str!(concat!(
