@@ -24,11 +24,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
-
-/// How long an approval request waits for a decision. Matches the default of
-/// `ApprovalConfig`.
-pub const APPROVAL_TTL: Duration = Duration::from_hours(24);
 
 /// Per-currency limits (canonical amount strings) at or below which a money
 /// request is low risk: the only kind a bulk approval may include.

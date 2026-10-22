@@ -6,6 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { handleBills, resetBills, servedFile } from './mockBills';
+import { handleSettings, resetSettings } from './mockSettings';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -807,6 +808,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.bulk = [];
   keyState.keys = [];
   keyCounter = 0;
+  resetSettings();
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -872,6 +874,18 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
             res.end(JSON.stringify(billsReply.body));
             return;
           }
+        }
+        // Settings routes (person only; an agent key gets 403 on them).
+        const settingsReply = handleSettings(
+          req.method ?? 'GET',
+          new URL(req.url ?? '/', API_ORIGIN),
+          text,
+          req.headers.authorization === `Bearer ${API_KEY}`,
+        );
+        if (settingsReply) {
+          res.writeHead(settingsReply.status, { ...headers, 'Content-Type': settingsReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(settingsReply.body));
+          return;
         }
         const reply = handle(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
         res.writeHead(reply.status, { ...headers, 'Content-Type': reply.problem ? 'application/problem+json' : 'application/json' });
