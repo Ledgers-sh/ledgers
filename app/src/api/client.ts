@@ -1,10 +1,12 @@
 /**
- * Low-level HTTP client: builds requests with `Authorization: Bearer <key>`,
- * parses problem+json errors and maps HTTP status to an `ApiError` kind.
+ * Low-level HTTP client. A client with an agent key sends
+ * `Authorization: Bearer <key>`; a signed-in person's client sends the session
+ * cookie (`credentials: 'include'`) and no key. Parses problem+json errors and
+ * maps HTTP status to an `ApiError` kind.
  */
 
 export type ApiErrorKind =
-  | 'unauthorized' // 401: key missing, wrong or revoked
+  | 'unauthorized' // 401: key missing, wrong or revoked; or no person session
   | 'forbidden' // 403: policy denied the command for this key
   | 'validation' // 400/422: the server rejected the input
   | 'not_found' // 404
@@ -29,7 +31,8 @@ export class ApiError extends Error {
 export interface ClientConfig {
   /** Server origin, e.g. http://127.0.0.1:3000 (no trailing slash needed). */
   baseUrl: string;
-  apiKey: string;
+  /** An agent key. Absent for a signed-in person, whose session cookie is sent instead. */
+  apiKey?: string;
   /** Injected for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
 }
@@ -63,7 +66,7 @@ export function kindForStatus(status: number): ApiErrorKind {
 }
 
 const MESSAGES: Record<ApiErrorKind, string> = {
-  unauthorized: 'The API key was rejected. Check the key and try again.',
+  unauthorized: 'Your sign-in has ended, or the API key was rejected. Sign in again or check the key.',
   forbidden: 'This key is not allowed to run that command.',
   validation: 'The server rejected the input.',
   not_found: 'Not found on the server.',
@@ -88,13 +91,19 @@ async function readProblem(response: Response): Promise<string | null> {
   }
 }
 
+/** The init for one request: a key as bearer auth, or the person's cookie. */
+export function requestInit(config: ClientConfig, method: string, headers: Record<string, string>): RequestInit {
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+    return { method, headers, cache: 'no-store' };
+  }
+  return { method, headers, cache: 'no-store', credentials: 'include' };
+}
+
 export async function request<T>(config: ClientConfig, spec: RequestSpec): Promise<T> {
   const doFetch = config.fetch ?? fetch;
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${config.apiKey}`,
-  };
-  const init: RequestInit = { method: spec.method, headers, cache: 'no-store' };
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const init = requestInit(config, spec.method, headers);
   if (spec.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(spec.body);

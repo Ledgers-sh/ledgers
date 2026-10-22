@@ -120,7 +120,7 @@ fn session_cookie_attributes() {
     assert!(cookie.contains("__Host-ledgers-session="));
     assert!(cookie.contains("HttpOnly"));
     assert!(cookie.contains("Secure"));
-    assert!(cookie.contains("SameSite=Strict"));
+    assert!(cookie.contains("SameSite=Lax"));
     assert!(cookie.contains("Path=/"));
     assert!(cookie.contains("Max-Age="));
 
@@ -130,7 +130,7 @@ fn session_cookie_attributes() {
     assert!(clear_cookie.contains("__Host-ledgers-session="));
     assert!(clear_cookie.contains("HttpOnly"));
     assert!(clear_cookie.contains("Secure"));
-    assert!(clear_cookie.contains("SameSite=Strict"));
+    assert!(clear_cookie.contains("SameSite=Lax"));
 }
 
 #[test]

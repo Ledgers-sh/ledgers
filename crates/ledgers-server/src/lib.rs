@@ -9,6 +9,7 @@ pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 pub mod openapi;
+pub mod people;
 pub mod rate_limiting;
 pub mod routes;
 
@@ -52,14 +53,16 @@ pub fn harness(
     // LEDGERS_DEV=1 is the local development mode: a local web app on Vite's
     // default port may call the API, and the dev bootstrap runs at start.
     let dev = is_dev(cfg);
-    let mut default_origins = vec![public_url.clone(), "http://localhost:3000".to_string()];
-    if dev {
-        default_origins.push(DEV_WEB_ORIGIN.to_string());
-    }
-    let cors_origins = cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
-        || default_origins,
-        |s| s.split(',').map(|s| s.trim().to_string()).collect(),
-    );
+    let cors_origins = app_origins(cfg);
+    // Cookie-authenticated (person) calls may come from these origins only.
+    let people_config =
+        people::PeopleConfig::from_config(cfg, &public_url, cors_origins.clone(), dev).map_err(
+            |e| {
+                let mut errors = ConfigError::default();
+                errors.push(e);
+                errors
+            },
+        )?;
 
     let company_id = match cfg.get("LEDGERS_COMPANY_ID") {
         Some(id) => id,
@@ -73,7 +76,7 @@ pub fn harness(
 
     let venture = Venture::new("ledgers", &domain)
         .public_url(public_url.clone())
-        .cors_origins(cors_origins)
+        .cors_origins(cors_origins.clone())
         .env(VentureEnv::Development);
 
     // Every command surface (HTTP, MCP) dispatches through the rate-limiting
@@ -81,7 +84,7 @@ pub fn harness(
     // resolved per request on Workers as well as natively; agent keys are
     // throttled, person principals pass through.
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(rate_limiting::RateLimitingDispatch::new(
-        Arc::new(dispatch::ServerDispatch::new(company_id)),
+        Arc::new(dispatch::ServerDispatch::new(company_id).with_app_origins(cors_origins.clone())),
     ));
 
     // Generate domain modules
@@ -124,7 +127,32 @@ pub fn harness(
     let mcp_module = mcp::McpModule::new(Arc::new(registry.clone()), dispatch.clone(), public_url);
     let builder = builder.module(mcp_module);
 
+    // Last, so its migration follows every existing module's: the D1 files
+    // are numbered in this order and staging has already applied them.
+    let builder = builder.module(people::PeopleModule::new(people_config));
+
     builder.build()
+}
+
+/// The origins the web app is served from, which the API allows for CORS and
+/// for cookie-authenticated calls: `LEDGERS_CORS_ORIGINS` (comma-separated), or
+/// the API's own origin, the local web origin and, in development, Vite's.
+#[must_use]
+pub fn app_origins(cfg: &dyn Config) -> Vec<String> {
+    let domain = cfg
+        .get("LEDGERS_DOMAIN")
+        .unwrap_or_else(|| "ledgers.localhost".to_string());
+    let public_url = cfg
+        .get("LEDGERS_PUBLIC_URL")
+        .unwrap_or_else(|| format!("http://{domain}"));
+    let mut default_origins = vec![public_url, "http://localhost:3000".to_string()];
+    if is_dev(cfg) {
+        default_origins.push(DEV_WEB_ORIGIN.to_string());
+    }
+    cfg.get("LEDGERS_CORS_ORIGINS").map_or_else(
+        || default_origins,
+        |s| s.split(',').map(|s| s.trim().to_string()).collect(),
+    )
 }
 
 /// The web app origin the development mode allows (Vite's default port).

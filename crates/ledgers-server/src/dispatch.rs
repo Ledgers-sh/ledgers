@@ -9,7 +9,8 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
-use crate::routes::Dispatch;
+use crate::people::SessionAuthenticator;
+use crate::routes::{Dispatch, Presented};
 use async_trait::async_trait;
 use cratefield_core::{
     ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, RateLimiter, Statement,
@@ -102,15 +103,25 @@ pub const DISPATCH_PORTS: &[Port] = &[Port::Db, Port::Clock, Port::IdGen];
 /// The server's command dispatch for one company.
 pub struct ServerDispatch {
     company_id: String,
+    app_origins: Vec<String>,
 }
 
 impl ServerDispatch {
-    /// A dispatch serving `company_id`.
+    /// A dispatch serving `company_id`. Cookie sessions are refused unless
+    /// [`ServerDispatch::with_app_origins`] names the origins they may come from.
     #[must_use]
     pub fn new(company_id: impl Into<String>) -> Self {
         Self {
             company_id: company_id.into(),
+            app_origins: Vec::new(),
         }
+    }
+
+    /// The app origins a cookie-authenticated request may come from.
+    #[must_use]
+    pub fn with_app_origins(mut self, origins: Vec<String>) -> Self {
+        self.app_origins = origins;
+        self
     }
 
     /// The company this dispatch serves.
@@ -124,16 +135,16 @@ impl ServerDispatch {
         &self,
         deps: &Deps,
         cmd: &C,
-        credential: Option<String>,
+        presented: Option<Presented>,
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        let credential = credential.ok_or_else(|| {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let presented = presented.ok_or_else(|| {
             CommandError::Unauthenticated
                 .to_problem()
                 .instance(request_id)
         })?;
-        let fail = |err: CommandError| err.to_problem().instance(request_id);
 
         let now_at = deps.clock.now();
         let ctx = CommandContext {
@@ -145,10 +156,27 @@ impl ServerDispatch {
         let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
             .await
             .map_err(fail)?;
-        let authenticator = KeyStore {
-            db: Arc::clone(&deps.db),
-            clock: Arc::clone(&deps.clock),
-            company_id: self.company_id.clone(),
+        let (authenticator, credential) = match presented {
+            Presented::Bearer(token) => (
+                Authn::Key(KeyStore {
+                    db: Arc::clone(&deps.db),
+                    clock: Arc::clone(&deps.clock),
+                    company_id: self.company_id.clone(),
+                }),
+                token,
+            ),
+            Presented::Session(session) => {
+                let id = session.id.clone();
+                (
+                    Authn::Session(SessionAuthenticator {
+                        db: Arc::clone(&deps.db),
+                        clock: Arc::clone(&deps.clock),
+                        app_origins: self.app_origins.clone(),
+                        presented: session,
+                    }),
+                    id,
+                )
+            }
         };
         let input: C::Input = serde_json::from_value(input)
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
@@ -186,46 +214,46 @@ impl Dispatch for ServerDispatch {
         command: &str,
         input: Value,
         request_id: &str,
-        credential: Option<String>,
+        presented: Option<Presented>,
     ) -> Result<Value, Problem> {
         match command {
             "entries.post" => {
-                self.execute(deps, &EntriesPost, credential, request_id, input)
+                self.execute(deps, &EntriesPost, presented, request_id, input)
                     .await
             }
             "entries.reverse" => {
-                self.execute(deps, &EntriesReverse, credential, request_id, input)
+                self.execute(deps, &EntriesReverse, presented, request_id, input)
                     .await
             }
             "entries.list" => {
-                self.execute(deps, &EntriesList, credential, request_id, input)
+                self.execute(deps, &EntriesList, presented, request_id, input)
                     .await
             }
             "entries.get" => {
-                self.execute(deps, &EntriesGet, credential, request_id, input)
+                self.execute(deps, &EntriesGet, presented, request_id, input)
                     .await
             }
             "accounts.list" => {
-                self.execute(deps, &AccountsList, credential, request_id, input)
+                self.execute(deps, &AccountsList, presented, request_id, input)
                     .await
             }
             "reports.trial_balance" => {
-                self.execute(deps, &ReportsTrialBalance, credential, request_id, input)
+                self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
             }
             "reports.profit_and_loss" => {
-                self.execute(deps, &ReportsProfitAndLoss, credential, request_id, input)
+                self.execute(deps, &ReportsProfitAndLoss, presented, request_id, input)
                     .await
             }
             "reports.balance_sheet" => {
-                self.execute(deps, &ReportsBalanceSheet, credential, request_id, input)
+                self.execute(deps, &ReportsBalanceSheet, presented, request_id, input)
                     .await
             }
             "reports.account_balance_by_dimension" => {
                 self.execute(
                     deps,
                     &ReportsAccountBalanceByDimension,
-                    credential,
+                    presented,
                     request_id,
                     input,
                 )
@@ -248,6 +276,22 @@ impl Dispatch for ServerDispatch {
             .authenticate(&credential.to_owned())
             .await
             .map_err(|err| err.to_problem())
+    }
+}
+
+/// The authenticator a command runs under: an agent key or a person session.
+enum Authn {
+    Key(KeyStore),
+    Session(SessionAuthenticator),
+}
+
+#[async_trait]
+impl Authenticator for Authn {
+    async fn authenticate(&self, credential: &Credential) -> Result<Principal, CommandError> {
+        match self {
+            Authn::Key(store) => store.authenticate(credential).await,
+            Authn::Session(session) => session.authenticate(credential).await,
+        }
     }
 }
 

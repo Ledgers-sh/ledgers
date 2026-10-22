@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::dispatch::Deps;
-use crate::routes::Dispatch;
+use crate::routes::{Dispatch, Presented};
 
 /// Dispatch wrapper that enforces the per-agent-key rate limit.
 pub struct RateLimitingDispatch {
@@ -69,17 +69,18 @@ impl Dispatch for RateLimitingDispatch {
         command: &str,
         input: Value,
         request_id: &str,
-        credential: Option<String>,
+        presented: Option<Presented>,
     ) -> Result<Value, Problem> {
-        // An unresolvable credential is left to the wrapped dispatch, which
-        // answers it as unauthenticated.
-        if let Some(credential) = credential.as_deref()
-            && let Ok(principal) = self.wrapped.principal(deps, credential).await
+        // Only a bearer agent key is limited. A session cookie is a person and
+        // passes through. An unresolvable key is left to the wrapped dispatch,
+        // which answers it as unauthenticated.
+        if let Some(Presented::Bearer(token)) = presented.as_ref()
+            && let Ok(principal) = self.wrapped.principal(deps, token).await
         {
             enforce_agent_limit(deps.rate_limiter.as_ref(), &principal).await?;
         }
         self.wrapped
-            .dispatch(deps, command, input, request_id, credential)
+            .dispatch(deps, command, input, request_id, presented)
             .await
     }
 

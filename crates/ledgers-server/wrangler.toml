@@ -66,6 +66,12 @@ LEDGERS_DEV = "0"
 LEDGERS_DOMAIN = "api-staging.ledgers.sh"
 LEDGERS_PUBLIC_URL = "https://api-staging.ledgers.sh"
 LEDGERS_CORS_ORIGINS = "https://app-staging.ledgers.sh"
+# People sign-in (crates/ledgers-server/src/people.rs). The issuer is the per-app
+# Cratefield auth instance; the client id is registered there (docs/deploy.md).
+# STAGING_AUTH_CLIENT_ID is a placeholder to fill before deploy, like STAGING_D1_ID.
+LEDGERS_AUTH_ISSUER = "https://auth-staging.ledgers.sh"
+LEDGERS_AUTH_CLIENT_ID = "STAGING_AUTH_CLIENT_ID"
+LEDGERS_APP_URL = "https://app-staging.ledgers.sh"
 LEDGERS_COMPANY_ID = "STAGING_COMPANY_ID"
 DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
 
