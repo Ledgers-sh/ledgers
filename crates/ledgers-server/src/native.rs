@@ -6,7 +6,7 @@
 use crate::demo;
 use crate::dispatch::{self, Deps};
 use crate::rate_limiting;
-use crate::{harness, is_dev};
+use crate::{compose, is_dev};
 use cratefield_adapter_sqlite::SqliteDatabase;
 use cratefield_core::{Config, Database};
 use cratefield_runtime_native::{DirBlob, Native, serve};
@@ -46,15 +46,20 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
     let sqlite = Arc::new(SqliteDatabase::open(&options.database_path)?);
     // The native runtime has no Redis limiter unless one is configured; agent
     // keys then get this per-process fixed window instead of none at all.
-    let per_minute =
-        rate_limiting::per_minute_from_setting(cfg.get("LEDGERS_RATE_LIMIT_PER_MIN").as_deref())?;
+    let per_minute = per_minute_setting(cfg.get("LEDGERS_RATE_LIMIT_PER_MIN").as_deref());
     let native = Native::new()
         .db_arc(sqlite.clone() as Arc<dyn Database>)
         .blob_arc(DirBlob::arc(&options.blob_dir))
         .rate_limiter(rate_limiting::InProcessRateLimiter::per_minute(per_minute));
 
     let registry = dispatch::registry();
-    let harness_inst = harness(&registry, &cfg, native.clone())?;
+    // Optional features that are off are warned about here, and the server
+    // runs without them (see `compose`).
+    let composition = compose(&registry, &cfg, native.clone())?;
+    for warning in composition.warnings() {
+        eprintln!("warning: {warning}");
+    }
+    let harness_inst = composition.harness;
 
     for module in harness_inst.modules() {
         sqlite.apply_migrations(module.name(), module.migrations().sqlite)?;
@@ -86,6 +91,20 @@ pub async fn run(options: NativeOptions) -> Result<(), Box<dyn std::error::Error
     tracing::info!("Starting Ledgers server");
     serve(Arc::new(harness_inst), native).await?;
     Ok(())
+}
+
+/// The agent-key limit per minute from `LEDGERS_RATE_LIMIT_PER_MIN`. An
+/// invalid value is not a reason to stop the server: the default applies, with
+/// a warning that names the variable.
+#[must_use]
+pub fn per_minute_setting(raw: Option<&str>) -> u64 {
+    rate_limiting::per_minute_from_setting(raw).unwrap_or_else(|reason| {
+        eprintln!(
+            "warning: {reason}; using the default of {} requests a minute",
+            rate_limiting::DEFAULT_PER_MINUTE
+        );
+        rate_limiting::DEFAULT_PER_MINUTE
+    })
 }
 
 /// Configuration read from the process environment. In development mode a
@@ -145,5 +164,19 @@ impl Config for NativeConfig {
             return Some(secret.clone());
         }
         env::var(key).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::per_minute_setting;
+    use crate::rate_limiting::DEFAULT_PER_MINUTE;
+
+    #[test]
+    fn an_unset_or_invalid_rate_limit_uses_the_default_and_never_stops_startup() {
+        assert_eq!(per_minute_setting(None), DEFAULT_PER_MINUTE);
+        assert_eq!(per_minute_setting(Some("many")), DEFAULT_PER_MINUTE);
+        assert_eq!(per_minute_setting(Some("0")), DEFAULT_PER_MINUTE);
+        assert_eq!(per_minute_setting(Some(" 25 ")), 25);
     }
 }
