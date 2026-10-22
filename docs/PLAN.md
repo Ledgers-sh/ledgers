@@ -40,11 +40,12 @@ We depend on the harness the way every other Factory Zero venture does:
 cratefield-core              = "=0.8.4"
 cratefield-runtime-cloudflare = "=0.4.2"
 cratefield-runtime-native     = "=0.4.2"
+cratefield-text-guard        = "=0.1.0"
 # … every cratefield-* crate pinned with `=`, bumped together
 ```
 
 Crates that are not on crates.io yet (`cratefield-auth-passkeys`,
-`cratefield-mcp`, `cratefield-text-guard`) come from git at one pinned `rev`,
+`cratefield-mcp`) come from git at one pinned `rev`,
 with `[patch.crates-io]` pointing `cratefield-core` at the same `rev` so the
 build has exactly one copy of core (the Owlpost backend does this today). CI
 checks that the `rev` is an ancestor of `Cratefield/harness` `main`, and that
