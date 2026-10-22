@@ -11,6 +11,7 @@
 
 mod accounts;
 mod approvals;
+mod bank;
 mod bills;
 
 use crate::people::SessionAuthenticator;
@@ -628,6 +629,23 @@ impl Dispatch for ServerDispatch {
             "bills.confirm" => self.bills_confirm(deps, presented, request_id, input).await,
             "bills.discard" => {
                 self.execute(deps, &BillsDiscard, presented, request_id, input)
+                    .await
+            }
+            "bank.accounts.list"
+            | "bank.accounts.get"
+            | "bank.accounts.reconcile"
+            | "bank.accounts.create"
+            | "bank.accounts.update"
+            | "bank.accounts.archive"
+            | "bank.statements.import"
+            | "bank.transactions.list"
+            | "bank.transactions.post"
+            | "bank.transactions.link"
+            | "bank.transactions.ignore"
+            | "bank.rules.list"
+            | "bank.rules.create"
+            | "bank.rules.enable" => {
+                self.bank_command(deps, presented, request_id, command, input)
                     .await
             }
             "keys.list" => self.keys_list(deps, presented, request_id).await,
@@ -1284,6 +1302,104 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 #[allow(clippy::too_many_lines)]
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
+        (
+            "bank.accounts.list",
+            (
+                schema_of::<ledgers_bank::model::AccountsListInput>(),
+                schema_of::<ledgers_bank::model::AccountsListOutput>(),
+            ),
+        ),
+        (
+            "bank.accounts.get",
+            (
+                schema_of::<ledgers_bank::model::AccountsGetInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.reconcile",
+            (
+                schema_of::<ledgers_bank::model::ReconcileInput>(),
+                schema_of::<ledgers_bank::model::ReconciliationView>(),
+            ),
+        ),
+        (
+            "bank.accounts.create",
+            (
+                schema_of::<ledgers_bank::model::AccountsCreateInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.update",
+            (
+                schema_of::<ledgers_bank::model::AccountsUpdateInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.accounts.archive",
+            (
+                schema_of::<ledgers_bank::model::AccountsArchiveInput>(),
+                schema_of::<ledgers_bank::model::AccountView>(),
+            ),
+        ),
+        (
+            "bank.statements.import",
+            (
+                schema_of::<ledgers_bank::model::StatementsImportRequest>(),
+                schema_of::<ledgers_bank::model::StatementsImportOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.list",
+            (
+                schema_of::<ledgers_bank::model::TransactionsListInput>(),
+                schema_of::<ledgers_bank::model::TransactionsListOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.post",
+            (
+                schema_of::<ledgers_bank::model::TransactionsPostInput>(),
+                schema_of::<ledgers_bank::model::TransactionsPostOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.link",
+            (
+                schema_of::<ledgers_bank::model::TransactionsLinkInput>(),
+                schema_of::<ledgers_bank::model::TransactionStatusOutput>(),
+            ),
+        ),
+        (
+            "bank.transactions.ignore",
+            (
+                schema_of::<ledgers_bank::model::TransactionsIgnoreInput>(),
+                schema_of::<ledgers_bank::model::TransactionStatusOutput>(),
+            ),
+        ),
+        (
+            "bank.rules.list",
+            (
+                schema_of::<ledgers_bank::model::RulesListInput>(),
+                schema_of::<ledgers_bank::model::RulesListOutput>(),
+            ),
+        ),
+        (
+            "bank.rules.create",
+            (
+                schema_of::<ledgers_bank::model::RulesCreateRequest>(),
+                schema_of::<ledgers_bank::model::RuleView>(),
+            ),
+        ),
+        (
+            "bank.rules.enable",
+            (
+                schema_of::<ledgers_bank::model::RulesEnableInput>(),
+                schema_of::<ledgers_bank::model::RulesEnableOutput>(),
+            ),
+        ),
         (
             "accounts.list",
             (

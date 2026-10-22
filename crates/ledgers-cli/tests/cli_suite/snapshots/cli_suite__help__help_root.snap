@@ -13,6 +13,7 @@ Commands:
   demo         Demo company operations
   accounts     Commands under `ledgers accounts`
   approvals    Commands under `ledgers approvals`
+  bank         Commands under `ledgers bank`
   bills        Commands under `ledgers bills`
   documents    Commands under `ledgers documents`
   entries      Commands under `ledgers entries`
