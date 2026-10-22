@@ -9,10 +9,13 @@ use crate::Composed;
 use crate::compose;
 use crate::demo::{self, SeedGate};
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
+use crate::members;
 use crate::people::{allowed_origin, credentialed_cors_headers};
 use crate::timing;
-use cratefield_core::{Config, NoopDefer, constant_time_eq};
-use cratefield_runtime_cloudflare::{Cloudflare, serve};
+use cratefield_core::{
+    BoundedHttpClient, Clock, Config, Database, HttpClient, NoopDefer, constant_time_eq,
+};
+use cratefield_runtime_cloudflare::{Cloudflare, D1Database, FetchClient, WorkersClock, serve};
 use serde_json::json;
 use std::sync::Arc;
 use worker::{
@@ -40,12 +43,30 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         // Create configuration from environment
         let cfg = WorkerConfig { env: env.clone() };
 
+        // The organization module's Auth port reads the session row, so it holds
+        // the same D1 binding the runtime resolves per request. Invitation mail
+        // goes out over the Workers fetch.
+        let Ok(binding) = env.d1("DB") else {
+            return Err("the DB binding is missing".to_owned());
+        };
+        let clock: Arc<dyn Clock> = Arc::new(WorkersClock);
+        let db: Arc<dyn Database> = Arc::new(D1Database(binding));
+        let http: Arc<dyn HttpClient> = Arc::new(BoundedHttpClient::new(
+            Arc::new(FetchClient),
+            Arc::clone(&clock),
+        ));
+
         // Set up the Cloudflare runtime with D1, R2, and rate limiting bindings.
         // The limiter binding (wrangler.toml) is resolved per request in serve().
         let runtime = Cloudflare::new()
             .db("DB")
             .blob("DOCUMENTS")
-            .rate_limiter("RATE_LIMITER");
+            .rate_limiter("RATE_LIMITER")
+            .auth_arc(Arc::new(members::SessionIdentity::new(
+                Arc::clone(&db),
+                Arc::clone(&clock),
+            )))
+            .mailer(members::invitation_mailer(&cfg, http, clock));
 
         // Build the harness with the runtime (so it knows which ports are provided).
         // Optional features that are off are logged and degrade on their own routes.

@@ -701,6 +701,7 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     app_origins: self.app_origins.clone(),
+                    company_id: self.company_id.clone(),
                     presented: session,
                 }
                 .authenticate(&id)
@@ -710,7 +711,7 @@ impl ServerDispatch {
             Presented::Principal(principal) => principal,
         };
         match principal {
-            Principal::Person { person_id } => Ok(ledgers_audit::Actor::Person { person_id }),
+            Principal::Person { person_id, .. } => Ok(ledgers_audit::Actor::Person { person_id }),
             Principal::Agent { key_id, tier, .. } => {
                 let actor = ledgers_audit::Actor::Agent {
                     key_id: key_id.clone(),

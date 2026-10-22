@@ -36,7 +36,7 @@ pub mod mcp;
 pub mod policy;
 pub mod registry;
 
-pub use auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
+pub use auth::{Authenticator, Credential, Limit, Limits, Principal, Role, Tier};
 pub use command::{Command, CommandContext, Plan};
 pub use error::{CommandError, PROBLEM_BASE};
 pub use exec::{

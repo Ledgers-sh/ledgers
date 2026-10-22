@@ -112,6 +112,7 @@ pub mod contract_tests {
     pub fn approval_rules(rules: &dyn ApprovalRules) {
         let person = Principal::Person {
             person_id: "alice".to_string(),
+            role: ledgers_commands::Role::Owner,
         };
         let agent = Principal::Agent {
             key_id: "key1".to_string(),

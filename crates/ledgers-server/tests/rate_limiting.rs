@@ -56,6 +56,7 @@ fn agent() -> Principal {
 fn person() -> Principal {
     Principal::Person {
         person_id: "user_1".to_string(),
+        role: ledgers_commands::Role::Owner,
     }
 }
 

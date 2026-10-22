@@ -168,6 +168,21 @@ The Worker needs its issuer, its client id, and the app's URL:
 Production gets its own client and redirect URI (`https://api.ledgers.sh/v1/auth/callback`)
 when it is set up; nothing here covers it.
 
+## 5b. Invitation mail (once per environment)
+
+Members are invited by email (docs/permissions.md). The invitation is sent
+through Owlpost, so each environment needs the Owlpost key as a secret and a
+sender address in its vars:
+
+```bash
+npx wrangler@4.148.0 secret put OWLPOST_API_KEY --env staging
+```
+
+`ORGS_FROM` (a `send.` address, staging: `invitations@send.ledgers.sh`) and
+`ORGS_ACCEPT_URL` (the app's `/accept` page) are set in `[env.staging.vars]` in
+`crates/ledgers-server/wrangler.toml`. Without `OWLPOST_API_KEY` the server
+still runs; inviting answers `503 mail-not-configured`.
+
 ## 6. Bootstrap the company and its first key (once)
 
 `POST /admin/bootstrap` creates the company (under `LEDGERS_COMPANY_ID`), imports

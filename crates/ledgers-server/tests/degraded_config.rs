@@ -44,6 +44,10 @@ fn native() -> (Arc<SqliteDatabase>, Native) {
     let db = Arc::new(SqliteDatabase::in_memory().expect("in-memory sqlite"));
     let native = Native::new()
         .db_arc(db.clone() as Arc<dyn Database>)
+        .auth_arc(Arc::new(ledgers_server::members::SessionIdentity::new(
+            db.clone() as Arc<dyn Database>,
+            Arc::new(cratefield_core::SystemClock),
+        )))
         .blob_arc(DirBlob::arc(concat!(
             env!("CARGO_TARGET_TMPDIR"),
             "/degraded-blobs"

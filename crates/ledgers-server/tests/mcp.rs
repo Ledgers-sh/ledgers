@@ -82,6 +82,7 @@ impl Dispatch for TestDispatch {
             }),
             "sess_person" => Ok(Principal::Person {
                 person_id: "user_123".to_string(),
+                role: ledgers_commands::Role::Owner,
             }),
             _ => Err(Problem::validation_failed("unauthorized")),
         }

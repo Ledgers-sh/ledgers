@@ -162,7 +162,7 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             return Err(ApprovalError::Expired);
         }
         let approver = authenticator.authenticate(&approver_credential).await?;
-        let Principal::Person { person_id } = &approver else {
+        let Principal::Person { person_id, .. } = &approver else {
             return Err(ApprovalError::Forbidden);
         };
         if !self.rules.may_approve(&approver, &request) {
@@ -243,7 +243,7 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             return Err(ApprovalError::Expired);
         }
         let approver = authenticator.authenticate(&approver_credential).await?;
-        let Principal::Person { person_id } = &approver else {
+        let Principal::Person { person_id, .. } = &approver else {
             return Err(ApprovalError::Forbidden);
         };
         if !self.rules.may_approve(&approver, &request) {

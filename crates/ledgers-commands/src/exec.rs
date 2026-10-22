@@ -479,7 +479,7 @@ impl<'db, A: Authenticator, P: Policy> Executor<'db, A, P> {
 fn requester_id(principal: &Principal) -> String {
     match principal {
         Principal::Agent { key_id, .. } => key_id.clone(),
-        Principal::Person { person_id } => person_id.clone(),
+        Principal::Person { person_id, .. } => person_id.clone(),
     }
 }
 

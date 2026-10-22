@@ -11,6 +11,7 @@ import { TaxSettings } from './settings/TaxSettings';
 import { ApprovalSettings } from './settings/ApprovalSettings';
 import { InvoiceSettings } from './settings/InvoiceSettings';
 import { AuditSettings } from './settings/AuditSettings';
+import { People } from './People';
 import { UnitsPanel } from './Units';
 
 /** The Settings sections, in the order the left navigation lists them. */
@@ -22,6 +23,7 @@ export const SETTINGS_SECTIONS = [
   'approvals',
   'invoices',
   'audit',
+  'people',
   'units',
   'agent-keys',
 ] as const;
@@ -36,6 +38,7 @@ const SECTION_LABEL: Record<SettingsSection, MessageKey> = {
   approvals: 'settings.approvals',
   invoices: 'settings.invoices',
   audit: 'settings.audit',
+  people: 'settings.people',
   units: 'settings.units',
   'agent-keys': 'settings.agent_keys',
 };
@@ -54,6 +57,7 @@ const SECTION_INTRO: Record<SettingsSection, MessageKey> = {
   approvals: 'settings.approvals_intro',
   invoices: 'settings.invoices_intro',
   audit: 'settings.audit_intro',
+  people: 'settings.people_intro',
   units: 'units.intro',
   'agent-keys': 'agentKeys.intro',
 };
@@ -118,6 +122,8 @@ export function Settings({ section }: { section: SettingsSection }) {
             <InvoiceSettings />
           ) : section === 'audit' ? (
             <AuditSettings />
+          ) : section === 'people' ? (
+            <People />
           ) : section === 'units' ? (
             <UnitsPanel />
           ) : (

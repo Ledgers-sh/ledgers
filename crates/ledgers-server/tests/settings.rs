@@ -746,9 +746,11 @@ fn list_reads_cost_the_same_statements_however_many_rows_they_hold() {
         small, large,
         "audit.list runs the same statements for a few rows or sixty"
     );
+    // A person's command reads the session, their membership (a role check on
+    // every command, so a removed member loses access at once) and the list.
     let numbering = statements_for(&fx, "numbering.list", json!({}));
     assert!(
-        numbering <= 6,
+        numbering <= 7,
         "numbering.list is a fixed set of queries, got {numbering}"
     );
 }

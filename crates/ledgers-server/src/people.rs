@@ -13,26 +13,27 @@
 //! forge. Agent keys (`Authorization: Bearer`) are unaffected.
 
 use crate::dispatch::Deps;
+use crate::members;
 use crate::routes::{Presented, SessionPresented};
 use async_trait::async_trait;
 use bytes::Bytes;
 use cratefield_core::axum::{
     self, Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use cratefield_core::{
-    Clock, Config, ConfigError, Database, HttpClient, Migrations, Module, ModuleContext, Port,
-    Problem, ProblemDef, SqlMigration, Statement,
+    Clock, Config, ConfigError, Database, DbError, HttpClient, Migrations, Module, ModuleContext,
+    Port, Problem, ProblemDef, SqlMigration, Statement,
 };
 use ledgers_auth::oidc::{
     self, Discovery, LoginState, OidcError, PublishedKey, b64url, pkce_challenge,
 };
 use ledgers_auth::session::{
     IDLE_TTL_SECONDS, LOGIN_COOKIE, LOGIN_TTL_SECONDS, SESSION_COOKIE, SESSION_TTL_SECONDS,
-    SessionBuilder, clear_login_cookie, login_cookie, may_use_company, session_key_hash,
+    SessionBuilder, clear_login_cookie, login_cookie, session_key_hash,
 };
 use ledgers_commands::CommandError;
 use ledgers_commands::auth::{Authenticator, Credential, Principal};
@@ -67,6 +68,11 @@ pub const PEOPLE_MIGRATIONS: &[SqlMigration] = &[
         "people_session_auth_time",
         include_str!("../migrations/sqlite/0002_people_session_auth_time.sql"),
     ),
+    SqlMigration::new(
+        "0003",
+        "people_profile",
+        include_str!("../migrations/sqlite/0003_people_profile.sql"),
+    ),
 ];
 
 /// Sign-in is off: `LEDGERS_AUTH_ISSUER` is not set, or the instance is not
@@ -94,12 +100,13 @@ pub const SESSION_REQUIRED: ProblemDef = ProblemDef {
     description: "There is no valid person session on this request.",
 };
 
-/// The signed-in account may not use this company (role check).
-pub const COMPANY_ACCESS_DENIED: ProblemDef = ProblemDef {
-    slug: "company-access-denied",
+/// The signed-in person is not a member of the company. The app shows a screen
+/// that asks them to ask the owner for an invitation.
+pub const NOT_A_MEMBER: ProblemDef = ProblemDef {
+    slug: "not-a-member",
     status: StatusCode::FORBIDDEN,
-    title: "This account cannot use this company",
-    description: "The signed-in account has no owner or admin role in this company.",
+    title: "You're not a member of this company yet",
+    description: "The signed-in account holds no membership in this company. Ask the owner for an invitation.",
 };
 
 /// A cookie-authenticated request came from an origin that is not an app
@@ -188,19 +195,46 @@ impl PeopleConfig {
 /// session table as its migration.
 pub struct PeopleModule {
     config: Option<PeopleConfig>,
+    company_id: String,
 }
 
 impl PeopleModule {
-    /// The module for `config` (`None`: sign-in off, routes answer 503).
+    /// The module for `config` (`None`: sign-in off, routes answer 503) and the
+    /// company whose membership decides who may use it.
     #[must_use]
-    pub fn new(config: Option<PeopleConfig>) -> Self {
-        Self { config }
+    pub fn new(config: Option<PeopleConfig>, company_id: impl Into<String>) -> Self {
+        Self {
+            config,
+            company_id: company_id.into(),
+        }
     }
 }
+
+/// The table the member list reads each person's address and last activity
+/// from (see `members::touch_profile`).
+pub const PROFILE_TABLE: &str = "people_profile";
 
 impl Module for PeopleModule {
     fn name(&self) -> &'static str {
         PEOPLE_MODULE
+    }
+
+    fn tables(&self) -> &'static [&'static str] {
+        &[PROFILE_TABLE]
+    }
+
+    /// The profile row is the person's own: erasing the account removes it.
+    fn personal_data(&self) -> &'static [cratefield_core::PersonalDataSet] {
+        const SETS: [cratefield_core::PersonalDataSet; 1] = [cratefield_core::PersonalDataSet {
+            table: PROFILE_TABLE,
+            subject: "person_id",
+            kind: cratefield_core::DataKind::Contact,
+            disposition: cratefield_core::Disposition::Erase,
+            description: "What the company shows about you: the address from your last sign-in and when you last used the app.",
+            redacted: &[],
+            subject_via: None,
+        }];
+        &SETS
     }
 
     fn version(&self) -> &'static str {
@@ -218,12 +252,17 @@ impl Module for PeopleModule {
             deps,
             http: ctx.ports.http.clone(),
             config: self.config.clone(),
+            company_id: self.company_id.clone(),
         });
         axum::Router::new()
             .route("/login", get(login))
             .route("/callback", get(callback))
             .route("/logout", post(logout))
             .route("/session", get(session))
+            .route("/roles", get(roles))
+            .route("/people", get(people))
+            .route("/invitations", get(invitations))
+            .route("/invitations/{id}", delete(revoke_invitation_route))
             .with_state(state)
     }
 
@@ -240,6 +279,7 @@ struct PeopleState {
     deps: Deps,
     http: Option<Arc<dyn HttpClient>>,
     config: Option<PeopleConfig>,
+    company_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +493,9 @@ pub async fn slide_session(
         ],
     ))
     .await?;
+    // The member list's "last active" is the time of this write, so it moves
+    // at the same rate as the session slides: about twice an hour, not per call.
+    members::touch_profile(db, &row.person_id, row.email.as_deref(), now).await?;
     Ok(SessionRow {
         idle_expires_at: idle,
         ..row.clone()
@@ -503,6 +546,8 @@ pub struct SessionAuthenticator {
     pub db: Arc<dyn Database>,
     pub clock: Arc<dyn Clock>,
     pub app_origins: Vec<String>,
+    /// The company whose membership decides the person's role.
+    pub company_id: String,
     pub presented: SessionPresented,
 }
 
@@ -522,23 +567,28 @@ impl Authenticator for SessionAuthenticator {
             .await?
             .filter(|row| !row.expired_at(now))
             .ok_or(CommandError::Unauthenticated)?;
-        if !may_use_company(&row.roles) {
-            return Err(CommandError::Domain(company_denied(row.email.as_deref())));
-        }
+        let role = members::resolve_role(
+            self.db.as_ref(),
+            &self.company_id,
+            &row.person_id,
+            &row.roles,
+            OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH),
+        )
+        .await?
+        .ok_or_else(|| CommandError::Domain(not_a_member()))?;
         let row = slide_session(self.db.as_ref(), session_id, &row, now).await?;
         Ok(Principal::Person {
             person_id: row.person_id,
+            role,
         })
     }
 }
 
-/// The 403 for a signed-in account that may not use the company.
+/// The 403 for a signed-in person who holds no membership in the company.
 #[must_use]
-pub fn company_denied(email: Option<&str>) -> Problem {
-    let who = email.unwrap_or("this account");
-    Problem::new(&COMPANY_ACCESS_DENIED).with_detail(format!(
-        "{who} is signed in, but only the company owner or an admin can use this ledger. Ask the owner to grant access."
-    ))
+pub fn not_a_member() -> Problem {
+    Problem::new(&NOT_A_MEMBER)
+        .with_detail("You're not a member of this company yet. Ask the owner for an invitation.")
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +733,20 @@ async fn login(
     response
 }
 
+/// What a sign-in records: the company's membership (the first owner's
+/// sign-in makes the organization; any other person signs in without a
+/// membership and is told so by `session`) and the profile the member list shows.
+async fn record_sign_in(
+    db: &dyn Database,
+    company_id: &str,
+    person: &PersonClaims,
+    now: i64,
+) -> Result<(), DbError> {
+    let at = OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    members::resolve_role(db, company_id, &person.person_id, &person.roles, at).await?;
+    members::touch_profile(db, &person.person_id, person.email.as_deref(), now).await
+}
+
 /// `GET /v1/auth/callback`: exchanges the code, verifies the ID token and opens
 /// the session.
 async fn callback(
@@ -755,8 +819,13 @@ async fn callback(
         auth_time: claims.auth_time,
     };
     let session_id = random_token(32);
-    if let Err(err) = store_session(state.deps.db.as_ref(), &session_id, &person, now).await {
+    let db = state.deps.db.as_ref();
+    if let Err(err) = store_session(db, &session_id, &person, now).await {
         tracing::error!(error = %err, "sign-in: could not store the session");
+        return problem_response(Problem::new(&SIGN_IN_FAILED));
+    }
+    if let Err(err) = record_sign_in(db, &state.company_id, &person, now).await {
+        tracing::error!(error = %err, "sign-in: could not record the membership");
         return problem_response(Problem::new(&SIGN_IN_FAILED));
     }
     let mut response = (StatusCode::SEE_OTHER, "").into_response();
@@ -834,9 +903,16 @@ async fn session(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> R
             return problem_response(Problem::internal());
         }
     };
-    if !may_use_company(&row.roles) {
-        return problem_response(company_denied(row.email.as_deref()));
-    }
+    let at = OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let role =
+        match members::resolve_role(db, &state.company_id, &row.person_id, &row.roles, at).await {
+            Ok(Some(role)) => role,
+            Ok(None) => return problem_response(not_a_member()),
+            Err(err) => {
+                tracing::error!(error = %err, "session: could not read the membership");
+                return problem_response(Problem::internal());
+            }
+        };
     let row = match slide_session(db, &id, &row, now).await {
         Ok(row) => row,
         Err(err) => {
@@ -850,13 +926,216 @@ async fn session(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> R
     let mut response = Json(json!({
         "personId": row.person_id,
         "email": row.email,
-        "roles": row.roles,
+        "companyId": state.company_id,
+        "role": role.as_str(),
+        "roles": [role.as_str()],
         "csrfToken": row.csrf_token,
         "expiresAt": expires_at,
     }))
     .into_response();
     no_store(&mut response);
     response
+}
+
+// ---------------------------------------------------------------------------
+// People: the matrix, the member list and invitations
+// ---------------------------------------------------------------------------
+
+/// A caller who may manage people is refused with this.
+pub const MANAGE_FORBIDDEN: ProblemDef = ProblemDef {
+    slug: "people-manage-forbidden",
+    status: StatusCode::FORBIDDEN,
+    title: "Only an owner or admin can manage people",
+    description: "Inviting, changing roles and removing people is for owners and admins.",
+};
+
+/// The invitation to revoke is not an open one of this company.
+pub const INVITATION_NOT_FOUND: ProblemDef = ProblemDef {
+    slug: "invitation-not-found",
+    status: StatusCode::NOT_FOUND,
+    title: "No open invitation with that id",
+    description: "The invitation was already accepted, revoked or has lapsed.",
+};
+
+/// The signed-in member a people route acts for.
+struct SessionMember {
+    role: ledgers_commands::Role,
+}
+
+/// Resolves the cookie session to a company member, checking the Origin of a
+/// state-changing request. The error is the problem the caller answers with.
+async fn session_member(
+    state: &PeopleState,
+    headers: &HeaderMap,
+    safe: bool,
+) -> Result<SessionMember, Problem> {
+    let Some(config) = state.config.as_ref() else {
+        return Err(Problem::new(&SIGN_IN_NOT_CONFIGURED));
+    };
+    let Some(id) = cookie_value(headers, SESSION_COOKIE) else {
+        return Err(Problem::new(&SESSION_REQUIRED));
+    };
+    check_session_origin(&config.app_origins, origin_header(headers).as_deref(), safe)?;
+    let now = unix_now(state);
+    let db = state.deps.db.as_ref();
+    let row = match load_session(db, &id).await {
+        Ok(Some(row)) if !row.expired_at(now) => row,
+        Ok(_) => return Err(Problem::new(&SESSION_REQUIRED)),
+        Err(err) => {
+            tracing::error!(error = %err, "people: could not read the session");
+            return Err(Problem::internal());
+        }
+    };
+    let at = OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let role =
+        match members::resolve_role(db, &state.company_id, &row.person_id, &row.roles, at).await {
+            Ok(Some(role)) => role,
+            Ok(None) => return Err(not_a_member()),
+            Err(err) => {
+                tracing::error!(error = %err, "people: could not read the membership");
+                return Err(Problem::internal());
+            }
+        };
+    if let Err(err) = slide_session(db, &id, &row, now).await {
+        tracing::error!(error = %err, "people: could not slide the session");
+        return Err(Problem::internal());
+    }
+    Ok(SessionMember { role })
+}
+
+/// The member-management check: owners and admins only.
+fn may_manage_people(member: &SessionMember) -> Result<(), Problem> {
+    if members::may_manage(member.role) {
+        Ok(())
+    } else {
+        Err(Problem::new(&MANAGE_FORBIDDEN))
+    }
+}
+
+/// An epoch-seconds instant as RFC 3339 text, for the app.
+fn rfc3339_or_none(epoch: Option<i64>) -> Option<String> {
+    epoch
+        .and_then(|secs| OffsetDateTime::from_unix_timestamp(secs).ok())
+        .and_then(|at| at.format(&Rfc3339).ok())
+}
+
+/// `GET /v1/auth/roles`: the permission matrix, for the read-only panel.
+async fn roles(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> Response {
+    if let Err(problem) = session_member(&state, &headers, true).await {
+        return problem_response(problem);
+    }
+    let roles: Vec<Value> = ledgers_policy::roles::matrix()
+        .into_iter()
+        .map(|(role, classes)| {
+            json!({
+                "role": role.as_str(),
+                "classes": classes.into_iter().map(ledgers_policy::roles::Class::name).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let mut response = Json(json!({ "roles": roles })).into_response();
+    no_store(&mut response);
+    response
+}
+
+/// `GET /v1/auth/people`: every member of the company, with the email and
+/// last activity the company shows. One query for the list, whatever its size.
+async fn people(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> Response {
+    let member = match session_member(&state, &headers, true).await {
+        Ok(member) => member,
+        Err(problem) => return problem_response(problem),
+    };
+    let rows = match members::members(state.deps.db.as_ref(), &state.company_id).await {
+        Ok(rows) => rows,
+        Err(err) => {
+            tracing::error!(error = %err, "people: could not list the members");
+            return problem_response(Problem::internal());
+        }
+    };
+    let list: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "personId": row.person_id,
+                "email": row.email,
+                "role": row.role,
+                "invitedBy": row.invited_by,
+                "joinedAt": row.joined_at,
+                "lastActiveAt": rfc3339_or_none(row.last_active_at),
+            })
+        })
+        .collect();
+    let mut response = Json(json!({
+        "members": list,
+        "me": { "role": member.role.as_str() },
+        "canManage": members::may_manage(member.role),
+    }))
+    .into_response();
+    no_store(&mut response);
+    response
+}
+
+/// `GET /v1/auth/invitations`: the invitations still open. The address is
+/// not shown: the company keeps only its hash.
+async fn invitations(State(state): State<Arc<PeopleState>>, headers: HeaderMap) -> Response {
+    let member = match session_member(&state, &headers, true).await {
+        Ok(member) => member,
+        Err(problem) => return problem_response(problem),
+    };
+    if let Err(problem) = may_manage_people(&member) {
+        return problem_response(problem);
+    }
+    let now = state.deps.clock.now();
+    let rows =
+        match members::pending_invitations(state.deps.db.as_ref(), &state.company_id, now).await {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::error!(error = %err, "people: could not list the invitations");
+                return problem_response(Problem::internal());
+            }
+        };
+    let list: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.id,
+                "role": row.role,
+                "invitedBy": row.invited_by,
+                "createdAt": row.created_at,
+                "expiresAt": row.expires_at,
+            })
+        })
+        .collect();
+    let mut response = Json(json!({ "invitations": list })).into_response();
+    no_store(&mut response);
+    response
+}
+
+/// `DELETE /v1/auth/invitations/{id}`: revokes an open invitation.
+async fn revoke_invitation_route(
+    State(state): State<Arc<PeopleState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let member = match session_member(&state, &headers, false).await {
+        Ok(member) => member,
+        Err(problem) => return problem_response(problem),
+    };
+    if let Err(problem) = may_manage_people(&member) {
+        return problem_response(problem);
+    }
+    match members::revoke_invitation(state.deps.db.as_ref(), &state.company_id, &id).await {
+        Ok(true) => {
+            let mut response = StatusCode::NO_CONTENT.into_response();
+            no_store(&mut response);
+            response
+        }
+        Ok(false) => problem_response(Problem::new(&INVITATION_NOT_FOUND)),
+        Err(err) => {
+            tracing::error!(error = %err, "people: could not revoke the invitation");
+            problem_response(Problem::internal())
+        }
+    }
 }
 
 #[cfg(test)]

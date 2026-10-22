@@ -158,13 +158,14 @@ impl Policy for DefaultPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::{Limits, Tier};
+    use crate::auth::{Limits, Role, Tier};
 
     #[test]
     fn owner_always_allowed() {
         let policy = DefaultPolicy;
         let owner = Principal::Person {
             person_id: "alice".to_string(),
+            role: Role::Owner,
         };
         let meta = CommandMeta {
             name: "test.command".to_string(),

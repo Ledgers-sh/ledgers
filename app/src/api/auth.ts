@@ -3,20 +3,44 @@
  * cookie on its own origin; the app only asks whether there is a person and
  * sends them to the sign-in. No token ever reaches this code.
  */
-import { ApiError, buildUrl, kindForStatus, requestInit, type ClientConfig } from './client';
+import { ApiError, buildUrl, kindForStatus, problemSlug, requestInit, type ClientConfig } from './client';
 
 /** The signed-in person as `GET /v1/auth/session` describes them. */
 export interface Person {
   personId: string;
   email: string | null;
+  /** The company this session is for. */
+  companyId: string;
+  /** The person's role in that company (owner, admin, accountant, approver, viewer or auditor). */
+  role: string;
   roles: string[];
   csrfToken: string;
   expiresAt: string | null;
 }
 
-/** Where the browser goes to start a passkey sign-in on this server. */
-export function signInUrl(baseUrl: string): string {
-  return buildUrl(baseUrl, '/v1/auth/login');
+/**
+ * A signed-in account that holds no membership in the company (403 `not-a-member`).
+ * It is still signed in: the People screens can accept an invitation from here.
+ */
+export class NotAMemberError extends Error {
+  readonly title: string;
+  readonly detail: string | null;
+
+  constructor(title: string, detail: string | null) {
+    super(title);
+    this.name = 'NotAMemberError';
+    this.title = title;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Where the browser goes to start a passkey sign-in on this server. With
+ * `returnTo` (an app path such as `/accept?token=...`) the server sends the
+ * browser back there once the person has signed in.
+ */
+export function signInUrl(baseUrl: string, returnTo?: string): string {
+  return buildUrl(baseUrl, '/v1/auth/login', { return_to: returnTo });
 }
 
 /**
@@ -34,8 +58,12 @@ export async function fetchSession(baseUrl: string, fetchImpl: typeof fetch = fe
   }
   if (response.status === 401) return null;
   if (!response.ok) {
-    const detail = await problemDetail(response);
-    throw new ApiError(kindForStatus(response.status), detail ?? 'Sign-in is not available right now.', response.status, detail);
+    const problem = await problemFields(response);
+    if (response.status === 403 && problem.slug === 'not-a-member') {
+      throw new NotAMemberError(problem.title ?? "You're not a member of this company yet", problem.detail);
+    }
+    const detail = problem.detail;
+    throw new ApiError(kindForStatus(response.status), detail ?? 'Sign-in is not available right now.', response.status, detail, problem.slug);
   }
   return (await response.json()) as Person;
 }
@@ -50,12 +78,14 @@ export async function signOut(baseUrl: string, fetchImpl: typeof fetch = fetch):
   }
 }
 
-async function problemDetail(response: Response): Promise<string | null> {
+/** The title, detail and slug of a problem+json body; nulls for anything the body does not say. */
+async function problemFields(response: Response): Promise<{ title: string | null; detail: string | null; slug: string | null }> {
   try {
-    const parsed = (await response.json()) as { detail?: unknown };
-    return typeof parsed.detail === 'string' && parsed.detail.trim() !== '' ? parsed.detail : null;
+    const parsed = (await response.json()) as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === 'string' && value.trim() !== '' ? value : null);
+    return { title: text(parsed.title), detail: text(parsed.detail), slug: problemSlug(parsed) };
   } catch {
-    return null;
+    return { title: null, detail: null, slug: null };
   }
 }
 
