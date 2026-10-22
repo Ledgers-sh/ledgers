@@ -85,13 +85,25 @@ pub async fn init(
     let deps = Deps::from_ports(&native_runtime.ports())
         .ok_or_else(|| CliError::Serve("ports not available".to_string()))?;
 
+    // The base currency is stored on the company row (fixed once entries
+    // exist), so the row must carry the fixture's company and currency
+    // before anything reads it.
+    let book = ledgers_demo::halden::book(year);
+    dispatch::ensure_company(
+        &deps,
+        company_id,
+        ledgers_demo::halden::COMPANY,
+        book.currency,
+    )
+    .await
+    .map_err(|e| CliError::Serve(format!("create company row: {e}")))?;
+
     // Create company if it doesn't exist (create chart, journal, fiscal year)
     dispatch::seed_company(&deps, company_id, "demo-init")
         .await
         .map_err(|e| CliError::Serve(format!("create company: {e}")))?;
 
     // Seed the fixture
-    let book = ledgers_demo::halden::book(year);
     let seed_report = ledgers_server::demo::seed_internal(&deps, company_id, &book)
         .await
         .map_err(|e| CliError::Serve(format!("seed: {e}")))?;

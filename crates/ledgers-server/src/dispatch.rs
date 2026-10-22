@@ -1069,7 +1069,7 @@ pub const DEV_BASE_CURRENCY: &str = "EUR";
 ///
 /// # Errors
 /// A message naming the failed step.
-async fn ensure_company(
+pub async fn ensure_company(
     deps: &Deps,
     company_id: &str,
     name: &str,
