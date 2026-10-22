@@ -1,20 +1,41 @@
 # Netherlands: omzetbelasting (BTW, VAT).
 #
-# Sources (verified 2026-10-23):
-#   BTW tarieven (21%, 9%, 0%): Belastingdienst,
+# Sources (checked 2026-10-23):
+#   Rates 21% and 9% and the 6% before 2019: Belastingdienst, BTW-tarieven,
 #     https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/btw_berekenen_aan_uw_klanten/btw_berekenen/btw_tarief/btw_tarief
-#   BTW-identificatienummer format: Belastingdienst,
-#     https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-identificatienummer-en-omzetbelastingnummer
-#   Aangifte omzetbelasting rubrieken: Belastingdienst (aangifte layout, see TODO)
+#     (the page gives the rates but no dates; the dates below come from the
+#     historical overview at https://www.dezaak.nl/belastingen/het-btw-tarief-een-historisch-overzicht/
+#     and are TODO to confirm against Wet OB 1968 art. 9 and its amending acts;
+#     wetten.overheid.nl returned 403 when fetched)
+#   Accommodation (logies) 9% to 21% from 2026-01-01: Rijksoverheid letter to the
+#     Eerste Kamer, 31 oktober 2025 (kenmerk 2025-0000492625),
+#     https://eerstekamer.nl/9370000/1/j9vvkfvj6b325az/vms7dxbx5gs3/f=/vms7dxbq6us2.pdf
+#   BTW-identificatienummer shape: Belastingdienst, BTW-id controleren,
+#     https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-id-controleren
+#   Rubriek labels 1a-1e, 2a, 3b, 3c, 4a, 4b, 5b, 5d: RGS 3.7 MKB sheet
+#     (https://www.referentiegrootboekschema.nl/definitieve-versie-rgs-37); 5a from
+#     the Belastingdienst aangifte page (https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/ik-moet-btw-aangifte-doen-hoe-vul-ik-die-in).
+#   Chart: nl-rgs-ez / nl-rgs-bv (RGS 3.7 MKB codes).
 #
-# TODO (rates left out, not verified): the valid_from dates of the 21% and 9%
-#   rates (the 9% rate is commonly dated 2019-01-01 and 21% from 2012-10-01, but
-#   the official pages carry no dates and no source was fetched); the 0% rate;
-#   the change of accommodation to 21% from 2026-01-01 (Belastingdienst news,
-#   search snippet only). Until those are added the pack carries no rates.
-# TODO: the aangifte rubriek boxes (1a, 1b, 2a, 4a, 5b, 5g) are not mapped yet;
-#   the 2026 layout must be checked against the form before drafting.
-# TODO: the BTW-id check digits are not verified (shape only).
+# Stable tax codes (ids stored on entries and bills):
+#   NL-BTW-HOOG-21  standard rate 21%              (aangifte 1a)
+#   NL-BTW-LAAG-9   reduced rate 9%                (aangifte 1b)
+#   NL-BTW-NUL      0%, zero-rated supply           (aangifte 1e; export 3a is TODO)
+#   NL-BTW-VRIJ     exempt (vrijgesteld)            (aangifte 1e)
+#   NL-BTW-VERLEGD  reverse charge, domestic        (aangifte 2a, deductible in 5b)
+#   NL-BTW-ICP      intra-community supply, 0%      (aangifte 3b; ICP-opgaaf)
+#   NL-BTW-IMPORT   import VAT from outside the EU  (aangifte 4a, deductible in 5b)
+#   NL-BTW-VOORB    input VAT on purchases           (aangifte 5b)
+#
+# TODO (rates): the rate before 2012-10-01 (19%) and the 6% rate's start are not
+#   sourced here; the rate table starts at 2012-10-01.
+# TODO (aangifte): boxes 1c, 1d, 3a, 3c, 5c and 5e-5g are not mapped (see the
+#   draft in ledgers-tax::nl); the RGS sheet names them, the layout was not verified
+#   against a filed form.
+# TODO (registration): the BTW-id check digits are not verified (shape only).
+# TODO (logies 2026): the accommodation rate is a tax-code choice, NL-BTW-HOOG-21
+#   from 2026-01-01; no per-supply rule is modelled. The 2025 contract rule
+#   (payments in 2025 for 2026 stays at 21%) is documented, not automated.
 
 id = "nl"
 iso = "NL"
@@ -26,7 +47,7 @@ fiscal_year_start_month = 1
 decimal_separator = ","
 thousands_separator = "."
 date_format = "DD-MM-YYYY"
-chart = "generic-sme"
+chart = "nl-rgs-ez"
 regime = "vat"
 rounding = "per_line"
 rates_pending = true
@@ -34,36 +55,80 @@ rates_pending = true
 [registration]
 label = "BTW-id"
 validator = "nl-btw"
-note = "NL, nine digits, B and two digits. Shape only; the check digits and existence are not checked."
+note = "NL, nine digits, B and two digits. Shape only; the check digits and existence are not checked (TODO: verify the check rule against the Belastingdienst specification)."
+
+# Statutory rates. valid_to is inclusive.
+[[rates]]
+jurisdiction = "NL"
+category = "standard"
+percent = "21"
+valid_from = "2012-10-01"
+source = "Wet OB 1968 art. 9; Belastingdienst BTW-tarieven page; historical overview dezaak.nl"
+
+[[rates]]
+jurisdiction = "NL"
+category = "reduced"
+percent = "6"
+valid_from = "2012-10-01"
+valid_to = "2018-12-31"
+source = "Wet OB 1968 art. 9 (before 2019); historical overview dezaak.nl"
+
+[[rates]]
+jurisdiction = "NL"
+category = "reduced"
+percent = "9"
+valid_from = "2019-01-01"
+source = "Wet OB 1968 art. 9; Belastingdienst BTW-tarieven page; historical overview dezaak.nl"
 
 [[tax_codes]]
-code = "NL-BTW-21"
-label = "Output VAT 21%"
+code = "NL-BTW-HOOG-21"
+label = "Output VAT 21% (standard rate)"
 kind = "output_vat"
 category = "standard"
 output_tag = "vat-output"
 
 [[tax_codes]]
-code = "NL-BTW-9"
-label = "Output VAT 9%"
+code = "NL-BTW-LAAG-9"
+label = "Output VAT 9% (reduced rate)"
 kind = "output_vat"
 category = "reduced"
 output_tag = "vat-output"
 
 [[tax_codes]]
-code = "NL-BTW-0"
+code = "NL-BTW-NUL"
 label = "Zero-rated supply (0%)"
 kind = "zero"
 category = "zero"
 
 [[tax_codes]]
-code = "NL-VRIJ"
+code = "NL-BTW-VRIJ"
 label = "Exempt supply (vrijgesteld)"
 kind = "exempt"
 category = "exempt"
 
 [[tax_codes]]
-code = "NL-VB-21"
+code = "NL-BTW-VERLEGD"
+label = "Reverse charge (verlegd), domestic"
+kind = "reverse_charge"
+category = "standard"
+output_tag = "vat-output"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "NL-BTW-ICP"
+label = "Intra-community supply (ICP, 0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "NL-BTW-IMPORT"
+label = "Import VAT (invoer buiten de EU)"
+kind = "import_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "NL-BTW-VOORB"
 label = "Input VAT (voorbelasting)"
 kind = "input_vat"
 category = "standard"

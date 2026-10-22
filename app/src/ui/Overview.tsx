@@ -1,6 +1,8 @@
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { reportsBalanceSheet, reportsTrends, reportsTrialBalance } from '../api/commands';
+import { reportsBalanceSheet, reportsTrends, reportsTrialBalance, reportsUnitsSummary } from '../api/commands';
+import { unitQuery } from '../lib/units';
+import { UnitsComparison } from './UnitsComparison';
 import type { TrendMonth, TrendsOutput } from '../api/types';
 import { useSession } from '../session';
 import { useAsync } from '../hooks';
@@ -83,22 +85,28 @@ function InfoTip({ id, label, children }: { id: string; label: string; children:
 }
 
 export function Overview() {
-  const { client, range, approvalCount } = useSession();
+  const { client, range, approvalCount, unit, units } = useSession();
   const [dimension, setDimension] = useState<Dimension>('cost_centre');
   const previous = previousRange(range);
   const year = rollingYear(range.to);
+  const scope = unitQuery(unit);
   const state = useAsync(
     async () => {
       const [current, before, twelve, trial, bs] = await Promise.all([
-        reportsTrends(client, { from: range.from, to: range.to, dimension }),
-        reportsTrends(client, previous),
-        reportsTrends(client, year),
-        reportsTrialBalance(client, range.to),
-        reportsBalanceSheet(client, periodEnd(range.to)),
+        reportsTrends(client, { from: range.from, to: range.to, dimension, unit: scope }),
+        reportsTrends(client, { ...previous, unit: scope }),
+        reportsTrends(client, { ...year, unit: scope }),
+        reportsTrialBalance(client, range.to, scope),
+        reportsBalanceSheet(client, periodEnd(range.to), scope),
       ]);
       return { current, before, twelve, trial, bs };
     },
-    [client.baseUrl, client.apiKey, range.from, range.to, dimension],
+    [client.baseUrl, client.apiKey, range.from, range.to, dimension, scope],
+  );
+  // The side-by-side units are shown for the company only; the month is the period picker's last month.
+  const comparison = useAsync(
+    () => (units.length > 0 && unit === null ? reportsUnitsSummary(client, range.to) : Promise.resolve(null)),
+    [client.baseUrl, client.apiKey, range.to, units.length, unit],
   );
 
   if (state.loading && !state.data) return <Skeleton rows={6} label={t('overview.loading')} />;
@@ -119,6 +127,17 @@ export function Overview() {
       onDimension={setDimension}
       rangeLabel={range.from === range.to ? formatPeriod(range.from) : `${formatPeriod(range.from)} – ${formatPeriod(range.to)}`}
       months={monthCount(range)}
+      comparison={
+        units.length > 0 && unit === null ? (
+          <UnitsComparison
+            units={units}
+            summary={comparison.data ?? null}
+            error={comparison.error}
+            loading={comparison.loading}
+            onRetry={comparison.reload}
+          />
+        ) : null
+      }
     />
   );
 }
@@ -136,10 +155,12 @@ interface DashboardProps {
   onDimension: (dimension: Dimension) => void;
   rangeLabel: string;
   months: number;
+  /** The side-by-side business units, when the company is consolidated and has units. */
+  comparison: ComponentChildren;
 }
 
 function Dashboard(props: DashboardProps) {
-  const { current, before, twelve, trialRows, balanced, difference, asOf, approvalCount, dimension, onDimension, rangeLabel, months } = props;
+  const { current, before, twelve, trialRows, balanced, difference, asOf, approvalCount, dimension, onDimension, rangeLabel, months, comparison } = props;
   const currency = current.currency;
   const locale = intlLocale();
   const windowMonths: TrendMonth[] = current.months;
@@ -231,6 +252,8 @@ function Dashboard(props: DashboardProps) {
           <KpiCard key={kpi.id} kpi={kpi} currency={currency} sub={sub} />
         ))}
       </section>
+
+      {comparison}
 
       <div class="grid-main">
         <section class="panel chart-panel">
