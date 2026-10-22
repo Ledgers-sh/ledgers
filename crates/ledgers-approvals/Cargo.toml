@@ -7,6 +7,9 @@ repository.workspace = true
 publish = false
 
 [features]
+# The Postgres parity leg of the scenario matrix: native-only, opted into
+# by CI and a local postgres:16 (FZ_TEST_POSTGRES_URL). The lib itself
+# stays wasm-clean without it.
 postgres = ["cratefield-testing/postgres"]
 testing = []
 
