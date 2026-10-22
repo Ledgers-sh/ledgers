@@ -296,6 +296,12 @@ async fn download(
     axum::extract::Path(id): axum::extract::Path<String>,
     Query(query): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
+    // Links are off until LEDGERS_DOCUMENT_SIGNING_KEY is set. An empty key
+    // must never verify a signature (an HMAC under it is forgeable), so the
+    // route answers 503 before it reads anything.
+    if state.signing_key.is_empty() {
+        return document_links_off();
+    }
     let forbidden = |detail: &str| {
         Problem::new(&FORBIDDEN_LINK)
             .with_detail(detail)
@@ -356,6 +362,15 @@ async fn download(
         object.bytes,
     )
         .into_response()
+}
+
+/// The download routes' answer while links are off: 503 with the reason.
+#[must_use]
+pub fn document_links_off() -> axum::response::Response {
+    Problem::not_ready(
+        "document download links are not set up: LEDGERS_DOCUMENT_SIGNING_KEY is missing or shorter than 32 characters",
+    )
+    .into_response()
 }
 
 const FORBIDDEN_LINK: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
