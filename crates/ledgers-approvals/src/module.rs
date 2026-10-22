@@ -9,6 +9,39 @@ pub struct ApprovalsModule;
 /// in the server so the migrations of the modules before it keep their numbers.
 pub struct ApprovalsInboxModule;
 
+/// The notification outbox and channel tables. Registered after the inbox,
+/// so the migrations of the modules before it keep their numbers.
+pub struct ApprovalsNotifyModule;
+
+impl Module for ApprovalsNotifyModule {
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+
+    fn name(&self) -> &'static str {
+        "approvals-notify"
+    }
+
+    fn requires(&self) -> &'static [Port] {
+        &[]
+    }
+
+    fn validate_config(&self, _config: &dyn Config) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn router(&self, _ctx: ModuleContext) -> axum::Router {
+        axum::Router::new()
+    }
+
+    fn migrations(&self) -> Migrations {
+        Migrations {
+            sqlite: super::NOTIFY_SQLITE_MIGRATIONS,
+            postgres: super::NOTIFY_POSTGRES_MIGRATIONS,
+        }
+    }
+}
+
 impl Module for ApprovalsInboxModule {
     fn version(&self) -> &'static str {
         env!("CARGO_PKG_VERSION")

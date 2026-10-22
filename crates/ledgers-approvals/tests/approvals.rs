@@ -282,6 +282,7 @@ fn modules() -> Vec<Box<dyn cratefield_core::Module>> {
         Box::new(ledgers_storage::StorageModule),
         Box::new(ledgers_approvals::ApprovalsModule),
         Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
     ]
 }
 
@@ -1548,6 +1549,139 @@ fn reject_records_the_reason_and_posts_nothing() {
             assert_eq!(request.decision_reason.as_deref(), Some("amount is wrong"));
             assert_eq!(request.audit_ref.as_deref(), Some("evt-r"));
             assert_eq!(request.decided_by.as_deref(), Some(OWNER_PERSON_ID));
+        });
+    }
+}
+
+/// The outbox notices for one approval request, as (outbox id, parsed payload).
+async fn notices_for(db: &dyn Database, approval_id: &str) -> Vec<(String, serde_json::Value)> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id, payload FROM approval_outbox WHERE id LIKE ? ORDER BY id".to_owned(),
+            vec![sea_query::Value::from(format!("{approval_id}-%"))],
+        ))
+        .await
+        .expect("query the notice outbox");
+    rows.rows
+        .iter()
+        .map(|row| {
+            let id: String = row.get("id").expect("outbox id");
+            let payload: String = row.get("payload").expect("outbox payload");
+            (
+                id,
+                serde_json::from_str(&payload).expect("notice payload is JSON"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn raise_enqueues_a_created_notice_linking_the_app() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let (request_hash, preview, reads) = agent_request(&executor, "bill1").await;
+
+            let approval_id = "appr-raise-notice";
+            inbox_service(&*kit.db)
+                .raise(
+                    "bill.pay",
+                    &serde_json::to_value(&PayBillInput {
+                        bill_id: "bill1".to_string(),
+                    })
+                    .unwrap(),
+                    &serde_json::to_value(&preview).unwrap(),
+                    &reads,
+                    request_hash,
+                    "payout requires approval".to_string(),
+                    AGENT_KEY_ID.to_string(),
+                    COMPANY_ID,
+                    approval_id.to_string(),
+                    Some("Acme GmbH"),
+                    NOW,
+                )
+                .await
+                .expect("raise should succeed");
+
+            let notices = notices_for(&*kit.db, approval_id).await;
+            assert_eq!(notices.len(), 1, "one created notice");
+            let (id, payload) = &notices[0];
+            assert_eq!(id, &format!("{approval_id}-created"));
+            assert_eq!(payload["event"], "created");
+            assert_eq!(payload["status"], "pending");
+            assert_eq!(payload["counterparty"], "Acme GmbH");
+            assert_eq!(
+                payload["link"],
+                format!("http://localhost:3000/approvals/{approval_id}")
+            );
+        });
+    }
+}
+
+#[test]
+fn inbox_decisions_enqueue_a_decided_notice_and_refusals_enqueue_none() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+
+            agent_asks_to_pay(&*kit.db, "appr-n-ok", "bill1", &eur_limit()).await;
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx(NOW, "evt-n-ok"),
+                    "appr-n-ok",
+                    Some(NOW_EPOCH),
+                )
+                .await
+                .expect("approve should succeed");
+            // The test persist step stores the request without a Created notice
+            // (the server dispatch and `raise` enqueue that), so only Decided shows.
+            let approved = notices_for(&*kit.db, "appr-n-ok").await;
+            assert_eq!(approved.len(), 1, "one decided notice");
+            let (id, payload) = &approved[0];
+            assert_eq!(id, "appr-n-ok-decided");
+            assert_eq!(payload["status"], "approved");
+            assert_eq!(payload["link"], "http://localhost:3000/approvals/appr-n-ok");
+
+            agent_asks_to_pay(&*kit.db, "appr-n-no", "bill1", &eur_limit()).await;
+            inbox_service(&*kit.db)
+                .reject_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    "owner".to_string(),
+                    "appr-n-no",
+                    &inbox_ctx(NOW, "evt-n-no"),
+                    Some("amount is wrong"),
+                )
+                .await
+                .expect("reject should succeed");
+            let rejected = notices_for(&*kit.db, "appr-n-no").await;
+            assert_eq!(rejected.len(), 1, "one decided notice");
+            assert_eq!(rejected[0].1["status"], "rejected");
+
+            // A refused decision (expired) posts nothing and enqueues no decided notice.
+            agent_asks_to_pay(&*kit.db, "appr-n-exp", "bill1", &eur_limit()).await;
+            let refused = inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx("2026-01-17T09:30:00Z", "evt-n-exp"),
+                    "appr-n-exp",
+                    Some(NOW_EPOCH),
+                )
+                .await;
+            assert!(matches!(refused, Err(ApprovalError::Expired)));
+            let expired = notices_for(&*kit.db, "appr-n-exp").await;
+            assert!(expired.is_empty(), "a refused decision enqueues nothing");
         });
     }
 }

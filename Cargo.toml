@@ -14,6 +14,7 @@ cratefield-core = "=0.10.1"
 cratefield-runtime-cloudflare = "=0.5.0"
 cratefield-runtime-native = "=0.4.4"
 cratefield-adapter-sqlite = "=0.3.2"
+cratefield-module-webhooks = "=0.4.2"
 # The workspace default for the testing kit is its light, wasm-clean surface
 # (port conformance only, no harness graph); a crate that wants the harness
 # (TestHarness, fakes) adds `features = ["harness"]`, which is the kit's

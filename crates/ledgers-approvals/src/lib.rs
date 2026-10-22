@@ -16,6 +16,7 @@ pub mod approval;
 pub mod config;
 pub mod error;
 pub mod module;
+pub mod notify;
 pub mod rules;
 pub mod service;
 pub mod stepup;
@@ -24,6 +25,7 @@ pub use approval::{ApprovalRequest, Risk, Status};
 pub use config::ApprovalConfig;
 pub use error::ApprovalError;
 pub use module::ApprovalsModule;
+pub use notify::{ApprovalEvent, ApprovalNotice, Notifiers, notice_statement};
 pub use rules::{ApprovalRules, OwnerApprovesAll, StepUp};
 pub use service::{
     Approvals, FRESH_SIGN_IN_SECS, Listing, NewRequest, check_bulk, get_request, list_requests,
@@ -49,6 +51,24 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
         include_str!("../migrations/postgres/0001_approvals.sql"),
     )];
 
+/// The notification outbox and channel tables (`approval_outbox` and the
+/// per-channel targets). A module of their own, registered after the inbox,
+/// so the D1 files of the modules before it keep their numbers.
+pub const NOTIFY_SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
+    &[cratefield_core::SqlMigration::new(
+        "0001",
+        "approval_notify",
+        include_str!("../migrations/sqlite/notify/0001_approval_notify.sql"),
+    )];
+
+/// The Postgres migrations for the notification outbox and channel tables.
+pub const NOTIFY_POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
+    &[cratefield_core::SqlMigration::new(
+        "0001",
+        "approval_notify",
+        include_str!("../migrations/postgres/notify/0001_approval_notify.sql"),
+    )];
+
 /// The approval inbox columns (risk, counterparty, decision and result
 /// references). A module of their own, registered after every other module,
 /// so the D1 files of the modules before it keep their numbers.
@@ -71,3 +91,5 @@ const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(INBOX_SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(INBOX_POSTGRES_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(NOTIFY_SQLITE_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(NOTIFY_POSTGRES_MIGRATIONS);

@@ -139,6 +139,8 @@ pub fn harness(
     let builder = builder.module(people::PeopleModule::new(people_config));
     // The approval inbox columns come after every other module's migrations.
     let builder = builder.module(ledgers_approvals::module::ApprovalsInboxModule);
+    // The notification outbox comes last of all, after the inbox.
+    let builder = builder.module(ledgers_approvals::module::ApprovalsNotifyModule);
 
     builder.build()
 }

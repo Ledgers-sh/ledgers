@@ -50,6 +50,35 @@ async function networkFirst(request, cacheName) {
   }
 }
 
+self.addEventListener('push', (event) => {
+  const payload = event.data.json();
+  const { title, body, url, data = {} } = payload;
+  const notificationOptions = {
+    body: body || 'New approval request',
+    icon: '/assets/icon-512.png',
+    badge: '/favicon.svg',
+    tag: data.approval_id || 'approval',
+    requireInteraction: data.high_risk || false,
+    data: {
+      approval_id: data.approval_id,
+      high_risk: data.high_risk,
+      url: url || '/approvals',
+      actions: data.actions || [],
+    },
+    actions: (data.actions || []).slice(0, 2), // Max 2 actions
+  };
+  event.waitUntil(self.registration.showNotification(title || 'Ledgers', notificationOptions));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const { url, actions = [] } = event.notification.data;
+  // Find the action URL from the action ID
+  const action = actions.find((a) => a.action === event.action);
+  const targetUrl = action ? action.url : url;
+  event.waitUntil(clients.openWindow(targetUrl || '/approvals'));
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return; // writes always go to the network

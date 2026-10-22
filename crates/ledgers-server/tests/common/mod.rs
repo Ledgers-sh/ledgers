@@ -145,6 +145,7 @@ pub fn fixture_with_options(
         Box::new(ledgers_storage::StorageModule),
         Box::new(ledgers_approvals::module::ApprovalsModule),
         Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
         Box::new(ApiKeysModule),
         // Carries the session table the owner sessions are stored in.
         Box::new(ledgers_server::people::PeopleModule::new(None)),

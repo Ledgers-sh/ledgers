@@ -667,6 +667,17 @@ fn needs_approval_answers_with_the_stored_request_and_its_link() {
     .expect("the request is stored in the same batch as the audit row");
     assert_eq!(stored.command, "entries.post");
     assert_eq!(stored.risk, ledgers_approvals::Risk::High);
+    // The Created notice is enqueued in the same batch as the request.
+    let notices = pollster::block_on(fx.deps.db.query(&cratefield_core::Statement::with_values(
+        "SELECT topic FROM approval_outbox WHERE id = ?".to_owned(),
+        vec![sea_query::Value::from(format!("{id}-created"))],
+    )))
+    .expect("query the notice outbox");
+    assert_eq!(notices.rows.len(), 1, "one created notice for the request");
+    assert_eq!(
+        notices.rows[0].get::<String>("topic").as_deref(),
+        Some("approval.created")
+    );
 }
 
 #[test]
