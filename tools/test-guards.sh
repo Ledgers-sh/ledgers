@@ -3,6 +3,10 @@
 # Test suite for guard checks (boundary and harness-rev).
 set -euo pipefail
 
+# Resolve the repo root from this script's location so the test works from any
+# working directory and in any checkout (CI, local clone, worktree).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
@@ -55,8 +59,8 @@ fixture() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$d" config user.email "test@test.com"
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$d" config user.name "Test"
   mkdir -p "$d/tools"
-  cp /workspace/tools/check-boundary.sh "$d/tools/"
-  cp /workspace/tools/check-harness-rev.sh "$d/tools/"
+  cp "$ROOT/tools/check-boundary.sh" "$d/tools/"
+  cp "$ROOT/tools/check-harness-rev.sh" "$d/tools/"
   echo "$d"
 }
 
