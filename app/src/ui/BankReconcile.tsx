@@ -25,6 +25,7 @@ import { ErrorBanner, Money } from './common';
 import { chartLabel, counterpartAccounts, accountOptions, SignedAmount, StatusChip, useChart } from './BankShared';
 import { Icon } from './icons';
 import { Select } from './Select';
+import { accountNeedsUnit, colourOf } from '../lib/units';
 
 type Choice = { kind: 'suggestion'; index: number } | { kind: 'manual' };
 type Notice = { kind: 'ok' | 'warn'; text: string; href?: string; hrefLabel?: string };
@@ -36,11 +37,16 @@ const KIND_KEYS: Record<Suggestion['kind'], MessageKey> = {
 };
 
 export function BankReconcile({ account, line, onChanged }: { account: AccountView; line: TransactionView; onChanged: () => void }) {
-  const { client, toast } = useSession();
+  const { client, toast, unit: scopeUnit, units } = useSession();
+  const unitsEnabled = units.length > 0;
   const chart = useChart();
   const rules = useAsync(() => bankRulesList(client).then((r) => r.rules), [client.baseUrl, client.apiKey]);
   const [choice, setChoice] = useState<Choice | null>(line.suggestions.length > 0 ? { kind: 'suggestion', index: 0 } : null);
   const [manualAccount, setManualAccount] = useState('');
+  // The business unit a manual or rule match posts to: the switcher's unit by default.
+  const [matchUnit, setMatchUnit] = useState(scopeUnit ?? '');
+  const [ruleUnit, setRuleUnit] = useState(scopeUnit ?? '');
+  const [unitProblem, setUnitProblem] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -102,14 +108,27 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
     onChanged();
   };
 
+  // The counterpart account a match or rule posts to, and whether it needs a unit (income and expense lines do, once the company has units).
+  const postsNeedUnit = (number: string | null) => unitsEnabled && accountNeedsUnit(accounts.find((a) => a.number === number));
+  const matchAccount = choice?.kind === 'manual' ? manualAccount : suggestion?.kind === 'rule' ? suggestion.account_number : null;
+  const matchMissingUnit = !!matchAccount && postsNeedUnit(matchAccount) && matchUnit === '';
+  const ruleMissingUnit = postsNeedUnit(ruleAccount) && ruleUnit === '';
+
   const match = async () => {
     if (!choice || busy) return;
+    if (matchMissingUnit) {
+      setUnitProblem(true);
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       if (choice.kind === 'manual') {
-        const result = await bankTransactionPost(client, line.id, { counterparty_account: manualAccount });
+        const result = await bankTransactionPost(client, line.id, {
+          counterparty_account: manualAccount,
+          ...(matchUnit === '' ? {} : { unit: matchUnit }),
+        });
         afterWrite(result, t('bank.toast_matched'));
       } else if (suggestion?.kind === 'entry') {
         const result = await bankTransactionLink(client, line.id, suggestion.target_id);
@@ -118,7 +137,10 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
         const result = await bankTransactionPost(client, line.id, { bill_id: suggestion.target_id });
         afterWrite(result, t('bank.toast_matched'));
       } else if (suggestion?.kind === 'rule' && suggestion.account_number) {
-        const result = await bankTransactionPost(client, line.id, { counterparty_account: suggestion.account_number });
+        const result = await bankTransactionPost(client, line.id, {
+          counterparty_account: suggestion.account_number,
+          ...(matchUnit === '' ? {} : { unit: matchUnit }),
+        });
         afterWrite(result, t('bank.toast_matched'));
       }
     } catch (err) {
@@ -162,6 +184,7 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
     if (ruleName.trim() === '') return setRuleProblem('bank.rule_name_required');
     if (contains === '' && iban === null) return setRuleProblem('bank.rule_needs_condition');
     if (ruleAccount === '') return setRuleProblem('bank.rule_account_required');
+    if (ruleMissingUnit) return setRuleProblem('units.err_line');
     setBusy(true);
     setError(null);
     try {
@@ -169,6 +192,7 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
         name: ruleName.trim(),
         conditions: { contains: contains === '' ? null : contains, counterparty_iban: iban, amount_min: null, amount_max: null },
         account_number: ruleAccount,
+        unit: ruleUnit === '' ? null : ruleUnit,
       });
       setRuleOpen(false);
       rules.reload();
@@ -303,8 +327,33 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
                 placeholder={t('bank.counterparty_choose')}
                 emptyLabel={t('bank.counterparty_choose')}
                 options={accountOptions(counterparts)}
-                onChange={setManualAccount}
+                onChange={(value) => {
+                  setManualAccount(value);
+                  setUnitProblem(false);
+                }}
               />
+            </div>
+          )}
+
+          {unitsEnabled && matchAccount && (
+            <div class="field">
+              <span id="bank-match-unit-label">{t('units.field')}</span>
+              <Select
+                id="bank-match-unit"
+                labelledBy="bank-match-unit-label"
+                value={matchUnit}
+                placeholder={t('units.choose_unit')}
+                invalid={unitProblem && matchMissingUnit}
+                options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                searchable={false}
+                onChange={(value) => {
+                  setMatchUnit(value);
+                  setUnitProblem(false);
+                }}
+              />
+              <span class={unitProblem && matchMissingUnit ? 'field-error' : 'hint'}>
+                {unitProblem && matchMissingUnit ? t('units.err_line') : t('units.bank_hint')}
+              </span>
             </div>
           )}
 
@@ -402,6 +451,22 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
                   onChange={setRuleAccount}
                 />
               </div>
+              {unitsEnabled && (
+                <div class="field">
+                  <span id="bank-rule-unit-label">{t('units.field')}</span>
+                  <Select
+                    id="bank-rule-unit"
+                    labelledBy="bank-rule-unit-label"
+                    value={ruleUnit}
+                    placeholder={t('units.choose_unit')}
+                    invalid={ruleProblem === 'units.err_line' && ruleMissingUnit}
+                    options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                    searchable={false}
+                    onChange={setRuleUnit}
+                  />
+                  <span class="hint">{t('units.bank_hint')}</span>
+                </div>
+              )}
               <p class="hint">{client.apiKey ? t('bank.rule_waits_note') : t('bank.rule_applies_note')}</p>
               {ruleProblem && (
                 <p class="field-error" role="alert">

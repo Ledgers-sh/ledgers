@@ -16,6 +16,10 @@ export interface SelectOption {
   /** Language and direction of the label when it is not the page's (a language's own name, for example). */
   lang?: string;
   dir?: 'ltr' | 'rtl';
+  /** A colour dot shown before the label (a business unit's colour, for example). Decorative. */
+  swatch?: string;
+  /** The shorter text the trigger shows once chosen, when the label is too long for a compact control. */
+  trigger?: string;
 }
 
 export interface SelectProps {
@@ -188,7 +192,7 @@ export function Select(props: SelectProps) {
   };
 
   const triggerName = [props.labelledBy ? props.labelledBy : null, id].filter(Boolean).join(' ');
-  const showValue = selected ? selected.label : (props.emptyLabel ?? placeholder ?? '');
+  const showValue = selected ? (selected.trigger ?? selected.label) : (props.emptyLabel ?? placeholder ?? '');
 
   return (
     <div class={`sel${open ? ' open' : ''}${props.class ? ` ${props.class}` : ''}`} ref={wrapRef}>
@@ -211,6 +215,7 @@ export function Select(props: SelectProps) {
         onBlur={onBlur}
       >
         <span class="sel-value" lang={selected?.lang} dir={selected?.dir}>
+          {selected?.swatch && <span class="sel-swatch" style={{ background: selected.swatch }} aria-hidden="true" />}
           {showValue}
         </span>
         <span class="sel-caret" aria-hidden="true">
@@ -270,6 +275,7 @@ export function Select(props: SelectProps) {
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => choose(option)}
                   >
+                    {option.swatch && <span class="sel-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
                     <span class="sel-label" lang={option.lang} dir={option.dir}>
                       {option.label}
                     </span>

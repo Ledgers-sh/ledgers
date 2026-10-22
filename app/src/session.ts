@@ -9,6 +9,7 @@ import type { ClientConfig } from './api/client';
 import { defaultServerUrl } from './api/config';
 import { currentPeriod, isPeriod } from './lib/period';
 import { normaliseRange, presetRange, type MonthRange } from './lib/trends';
+import type { Unit } from './api/types';
 
 /** The server origin the Connect screen starts from: VITE_LEDGERS_API at build time, else the local server. */
 export const DEFAULT_SERVER_URL = defaultServerUrl(import.meta.env.VITE_LEDGERS_API);
@@ -127,6 +128,12 @@ export interface Session {
   approvalCount: number | null;
   /** Re-reads the approvals count (after a decision). */
   refreshApprovals: () => void;
+  /** The unit scope every screen reads: a unit code from the URL (`?unit=`), or null for the whole company. */
+  unit: string | null;
+  /** The active business units, in code order. Empty when the company has none, which hides the switcher. */
+  units: Unit[];
+  /** Re-reads the business units (after a unit is added, renamed or archived). */
+  refreshUnits: () => void;
 }
 
 export const SessionContext = createContext<Session | null>(null);

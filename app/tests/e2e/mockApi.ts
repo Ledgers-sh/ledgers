@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { handleBills, resetBills, servedFile } from './mockBills';
 import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
+import { handleUnits, resetUnits } from './mockUnits';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
@@ -59,6 +60,8 @@ export interface MockOptions {
    * has a hyphenated external id (like the demo book's), the second has none.
    */
   extraEntries?: number;
+  /** Seeds three business units (SQZ, LDG, FZ) so the unit switcher, the comparison and the units screens show. */
+  units?: boolean;
   /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
   bank?: boolean;
 }
@@ -976,6 +979,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   keyState.keys = [];
   keyCounter = 0;
   resetSettings();
+  resetUnits(options.units ?? false);
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -1057,6 +1061,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
             res.end(JSON.stringify(billsReply.body));
             return;
           }
+        }
+        // Business units (the writes are a person's; an agent key gets 403 on them).
+        const unitsReply = handleUnits(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, req.headers.authorization === `Bearer ${API_KEY}`);
+        if (unitsReply) {
+          res.writeHead(unitsReply.status, { ...headers, 'Content-Type': unitsReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(unitsReply.body));
+          return;
         }
         // Settings routes (person only; an agent key gets 403 on them).
         const settingsReply = handleSettings(

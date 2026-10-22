@@ -217,12 +217,16 @@ export interface TransactionsQueryParams {
 export interface PostTransactionInput {
   counterparty_account?: string;
   bill_id?: string;
+  /** The business unit the counterparty line belongs to; required once the company has units and the account is income or expense. */
+  unit?: string;
 }
 
 export interface RuleCreateInput {
   name: string;
   conditions: RuleConditions;
   account_number: string;
+  /** The business unit a matching line is posted to. */
+  unit?: string | null;
 }
 
 /** GET /v1/bank/accounts. */

@@ -210,6 +210,8 @@ export interface KeysCreateInput {
   name: string;
   tier: string;
   limits: Record<string, AgentKeyLimit>;
+  /** Pin the key to one business unit (its code); absent means all units. */
+  unit?: string;
 }
 
 /** The creation answer: the key, and its full token, which is shown once. */
@@ -291,4 +293,70 @@ export interface TrendsOutput {
   dimension: string | null;
   by_dimension: TrendDimensionShare[];
   activity: TrendActivity[];
+}
+
+/** One business unit (UnitView, crates/ledgers-server/src/dispatch/units.rs). */
+export interface Unit {
+  code: string;
+  name: string;
+  /** `#RRGGBB`. */
+  colour: string;
+  logo_document_id: string | null;
+  archived: boolean;
+  created_at: string;
+}
+
+export interface UnitsListOutput {
+  units: Unit[];
+}
+
+export interface UnitsChangedOutput {
+  unit: Unit;
+}
+
+export interface UnitsCreateInput {
+  code: string;
+  name: string;
+  colour?: string;
+  logo_document_id?: string;
+}
+
+export interface UnitsRenameInput {
+  name?: string;
+  colour?: string;
+  logo_document_id?: string;
+  clear_logo?: boolean;
+}
+
+/** One row of reports.units_summary: a unit, the consolidated company, or the eliminations. */
+export interface UnitSummaryRow {
+  /** The unit code; absent on the consolidated and eliminations rows. */
+  unit?: string | null;
+  revenue: Amount;
+  expenses: Amount;
+  result: Amount;
+  cash: Amount;
+}
+
+export interface UnitsSummaryOutput {
+  /** `YYYY-MM`. */
+  period: string;
+  units: UnitSummaryRow[];
+  consolidated: UnitSummaryRow;
+  /** What the intercompany entries add to the units and take away again. */
+  eliminations: UnitSummaryRow;
+}
+
+/** Input of entries.transfer (POST /v1/transfers). Amounts are in the base currency. */
+export interface EntriesTransferInput {
+  journal_id?: string;
+  from_unit: string;
+  to_unit: string;
+  amount: Amount;
+  document_date: string;
+  posting_date: string;
+  tax_point_date?: string | null;
+  description: string;
+  recovery_account: string;
+  cost_account: string;
 }

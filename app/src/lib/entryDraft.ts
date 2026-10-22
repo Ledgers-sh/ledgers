@@ -6,6 +6,8 @@ export interface DraftLine {
   side: 'debit' | 'credit';
   amount: string;
   memo: string;
+  /** The business unit the line belongs to; empty when none is chosen. */
+  unit: string;
 }
 
 export interface DraftHeader {
@@ -15,6 +17,11 @@ export interface DraftHeader {
   description: string;
   currency: string;
   externalId: string;
+}
+
+/** The dimensions a line carries: its business unit, when one is chosen. */
+function unitDimensions(unit: string): Record<string, string> {
+  return unit === '' ? {} : { unit };
 }
 
 /** Converts parsed form lines into the body of POST /v1/entries. */
@@ -39,7 +46,7 @@ export function buildPostEntryInput(header: DraftHeader, lines: DraftLine[], min
         base: { minor: minors[index].toString(), currency: header.currency },
         fx: null,
         tax_code: null,
-        dimensions: {},
+        dimensions: unitDimensions(line.unit),
         memo: line.memo.trim() === '' ? null : line.memo.trim(),
       })),
     },

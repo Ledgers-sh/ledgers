@@ -40,6 +40,11 @@ import { BankRules } from './ui/BankRules';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
 import { Settings, settingsSectionOf } from './ui/Settings';
 import { badgeText } from './lib/approvals';
+import { activeUnits, hashWithUnit, navigateToUnit, routeOf, unitFromHash } from './lib/units';
+import { unitsList } from './api/commands';
+import type { Unit } from './api/types';
+import { UnitSwitcher } from './ui/UnitSwitcher';
+import { Units } from './ui/Units';
 import { normaliseRange, type MonthRange } from './lib/trends';
 import { PeriodPicker } from './ui/PeriodPicker';
 import { t, useLocale, type MessageKey } from './i18n';
@@ -207,6 +212,23 @@ function Shell({
   const online = useOnline();
   const locale = useLocale();
   const { items, push, dismiss } = useToasts();
+  // The business units: read once and after each change on the units screen. A failed read hides the switcher.
+  const [unitList, setUnitList] = useState<Unit[]>([]);
+  const [unitsTick, setUnitsTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    unitsList(apiKey ? { baseUrl, apiKey } : { baseUrl }).then(
+      (list) => live && setUnitList(list.units),
+      () => live && setUnitList([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [baseUrl, apiKey, unitsTick]);
+  const units = activeUnits(unitList);
+  const requestedUnit = unitFromHash(hash);
+  // The scope is the URL's unit when that unit exists and is active; otherwise the whole company.
+  const unit = requestedUnit !== null && units.some((item) => item.code === requestedUnit) ? requestedUnit : null;
   const [range, setRangeState] = useState<MonthRange>(() => loadRange());
   const period = range.to;
   const [currency, setCurrencyState] = useState<string>(() => loadCurrency());
@@ -256,6 +278,9 @@ function Shell({
 
   const session: Session = {
     client: apiKey ? { baseUrl, apiKey } : { baseUrl },
+    unit,
+    units,
+    refreshUnits: () => setUnitsTick((tick) => tick + 1),
     period,
     setPeriod,
     range,
@@ -304,7 +329,9 @@ function Shell({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const route = hash.replace(/\?.*$/, '');
+  const route = routeOf(hash);
+  // Navigation keeps the unit scope: moving between screens does not drop the unit the person chose.
+  const hrefFor = (target: string) => `#/${hashWithUnit(target, unit)}`;
   const page = renderRoute(route);
   const current = NAV.find((item) => item.match(route));
   const shortcutKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K';
@@ -316,27 +343,29 @@ function Shell({
       </a>
       <div class="app">
         <aside class="sidebar" aria-label={t('shell.main_nav')}>
-          <a class="brand" href="#/overview" aria-label={t('shell.brand_link')}>
-            <img src="/assets/favicon.svg" alt="" width="28" height="28" />
-            <span>ledgers<span>.sh</span></span>
-          </a>
-          <nav class="nav" aria-label={t('shell.sections')}>
-            {nav.map((item) => (
-              <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
-                <Icon name={item.icon} />
-                {t(item.label)}
-                {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
-              </a>
-            ))}
-          </nav>
-          <div class="sidebar-foot">
-            <span>
-              {t('shell.server')} <code><Ltr>{baseUrl.replace(/^https?:\/\//, '')}</Ltr></code>
-            </span>
-            <button type="button" class="btn btn-ghost btn-sm" onClick={onSignOut} style={{ justifyContent: 'flex-start' }}>
-              <Icon name="logout" />
-              {t('shell.sign_out')}
-            </button>
+          <div class="sidebar-inner">
+            <a class="brand" href="#/overview" aria-label={t('shell.brand_link')}>
+              <img src="/assets/favicon.svg" alt="" width="28" height="28" />
+              <span>ledgers<span>.sh</span></span>
+            </a>
+            <nav class="nav" aria-label={t('shell.sections')}>
+              {nav.map((item) => (
+                <a key={item.hash} href={hrefFor(item.hash)} aria-current={current === item ? 'page' : undefined}>
+                  <Icon name={item.icon} />
+                  {t(item.label)}
+                  {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
+                </a>
+              ))}
+            </nav>
+            <div class="sidebar-foot">
+              <span>
+                {t('shell.server')} <code><Ltr>{baseUrl.replace(/^https?:\/\//, '')}</Ltr></code>
+              </span>
+              <button type="button" class="btn btn-ghost btn-sm" onClick={onSignOut} style={{ justifyContent: 'flex-start' }}>
+                <Icon name="logout" />
+                {t('shell.sign_out')}
+              </button>
+          </div>
           </div>
         </aside>
         <div class="main">
@@ -357,6 +386,7 @@ function Shell({
                 <span class="person-name">{person.email ?? t('shell.signed_in')}</span>
               </span>
             )}
+            <UnitSwitcher units={units} value={unit} onChange={(code) => navigateToUnit(code)} />
             <PeriodPicker range={range} onChange={setRange} />
             <span class="kbd-hint" aria-hidden="true">
               <kbd>N</kbd> {t('shell.hint_new')} <kbd>/</kbd> {t('shell.hint_search')}
@@ -401,7 +431,7 @@ function Shell({
       </div>
       <nav class="bottom-nav" aria-label={t('shell.sections')}>
         {nav.map((item) => (
-          <a key={item.hash} href={`#/${item.hash}`} aria-current={current === item ? 'page' : undefined}>
+          <a key={item.hash} href={hrefFor(item.hash)} aria-current={current === item ? 'page' : undefined}>
             <Icon name={item.icon} />
             {t(item.label)}
             {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
@@ -429,6 +459,7 @@ function renderRoute(route: string) {
   if (route.startsWith('journal/')) return <EntryDetail entryId={decodeURIComponent(route.slice('journal/'.length))} />;
   if (route === 'accounts') return <Accounts />;
   if (route === 'accounts/new') return <AccountNew />;
+  if (route === 'accounts/units') return <Units />;
   if (route.startsWith('accounts/')) return <AccountDetail number={decodeURIComponent(route.slice('accounts/'.length))} />;
   if (route === 'reports') return <Reports />;
   if (route === 'approvals') return <Approvals />;
