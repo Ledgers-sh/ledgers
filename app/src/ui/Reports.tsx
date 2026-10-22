@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { reportsBalanceSheet, reportsProfitAndLoss, reportsTrialBalance } from '../api/commands';
+import { unitQuery } from '../lib/units';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { periodEnd } from '../lib/period';
@@ -17,15 +18,16 @@ const TABS: { id: ReportKind; label: MessageKey }[] = [
 ];
 
 export function Reports() {
-  const { client, period } = useSession();
+  const { client, period, unit } = useSession();
   const [kind, setKind] = useState<ReportKind>('trial');
+  const scope = unitQuery(unit);
   const state = useAsync(
     async () => {
-      if (kind === 'trial') return { kind, trial: await reportsTrialBalance(client, period) } as const;
-      if (kind === 'pl') return { kind, pl: await reportsProfitAndLoss(client, period) } as const;
-      return { kind, bs: await reportsBalanceSheet(client, periodEnd(period)) } as const;
+      if (kind === 'trial') return { kind, trial: await reportsTrialBalance(client, period, scope) } as const;
+      if (kind === 'pl') return { kind, pl: await reportsProfitAndLoss(client, period, scope) } as const;
+      return { kind, bs: await reportsBalanceSheet(client, periodEnd(period), scope) } as const;
     },
-    [client.baseUrl, client.apiKey, period, kind],
+    [client.baseUrl, client.apiKey, period, kind, scope],
   );
 
   const tabs = (

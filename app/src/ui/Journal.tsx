@@ -125,6 +125,7 @@ export async function findEntry(client: ClientConfig, id: string): Promise<Entry
 
 export function Journal() {
   const [query, setQuery] = useState('');
+  const { unit: unitScope } = useSession();
   const pages = useJournalPages();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -155,6 +156,7 @@ export function Journal() {
       >
         {t('journal.intro')}
       </PageHead>
+      {unitScope !== null && <p class="note" role="note">{t('units.journal_scope_note', { code: unitScope })}</p>}
 
       {all.length === 0 ? (
         <Empty

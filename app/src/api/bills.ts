@@ -74,6 +74,8 @@ export interface Bill {
   /** Which reader produced the fields: rules, anthropic, minimax, unread-scan; null when typed by hand. */
   reader: string | null;
   posted_entry_id: string | null;
+  /** The business unit the bill's expense lines belong to; null when none is set. */
+  unit: string | null;
   journal_preview: PreviewLine[];
   created_by: string;
   created_at: string;
@@ -99,6 +101,8 @@ export interface BillFields {
   vat_minor: number | null;
   gross_minor: number | null;
   lines: BillLine[];
+  /** The business unit the expense lines belong to; required to post once the company has units. */
+  unit?: string | null;
 }
 
 export interface AccountChoice {
@@ -205,8 +209,10 @@ export function extractBill(config: Config, documentId: string): Promise<BillExt
   return billRequest<BillExtraction>(config, 'POST', '/v1/bills/extract', { document_id: documentId });
 }
 
-export function billsList(config: Config): Promise<{ bills: Bill[] }> {
-  return billRequest(config, 'GET', '/v1/bills?limit=100');
+/** GET /v1/bills, newest first; `unit` narrows the list to one business unit (a code), or every unit when absent. */
+export function billsList(config: Config, unit?: string | null): Promise<{ bills: Bill[] }> {
+  const scope = unit ? `&unit=${encodeURIComponent(unit)}` : '';
+  return billRequest(config, 'GET', `/v1/bills?limit=100${scope}`);
 }
 
 export function billGet(config: Config, id: string): Promise<{ bill: Bill }> {

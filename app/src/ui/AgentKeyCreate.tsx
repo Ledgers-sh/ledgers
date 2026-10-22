@@ -6,6 +6,8 @@ import { useSession } from '../session';
 import { t, type MessageKey } from '../i18n';
 import { ErrorBanner } from './common';
 import { UsageSnippets } from './UsageSnippets';
+import { Select } from './Select';
+import { colourOf } from '../lib/units';
 
 const NAME_MAX = 80;
 
@@ -29,7 +31,7 @@ export function AgentKeyCreate({
   onClose: () => void;
   onCreated: (output: KeysCreateOutput) => void;
 }) {
-  const { client, currency } = useSession();
+  const { client, currency, units } = useSession();
   const ref = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState('');
   const [tier, setTier] = useState<TierValue>('post-within-limits');
@@ -37,6 +39,8 @@ export function AgentKeyCreate({
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // The business unit the key is pinned to; empty means every unit.
+  const [unitPin, setUnitPin] = useState('');
 
   useEffect(() => {
     const dialog = ref.current;
@@ -44,6 +48,7 @@ export function AgentKeyCreate({
     if (open && !dialog.open) {
       setName('');
       setTier('post-within-limits');
+      setUnitPin('');
       setRows([{ currency, perEntry: '', perDay: '' }]);
       setProblems([]);
       setError(null);
@@ -73,7 +78,12 @@ export function AgentKeyCreate({
     setBusy(true);
     setError(null);
     try {
-      const output = await keysCreate(client, { name: trimmed, tier, limits: limitsPayload(rows) });
+      const output = await keysCreate(client, {
+        name: trimmed,
+        tier,
+        limits: limitsPayload(rows),
+        ...(unitPin === '' ? {} : { unit: unitPin }),
+      });
       onCreated(output);
     } catch (caught) {
       setError(caught);
@@ -130,6 +140,24 @@ export function AgentKeyCreate({
             </label>
           ))}
         </fieldset>
+
+        {units.length > 0 && (
+          <div class="field unit-pin">
+            <span id="key-unit-label">{t('units.pin_label')}</span>
+            <Select
+              id="key-unit"
+              labelledBy="key-unit-label"
+              value={unitPin}
+              options={[
+                { value: '', label: t('units.all_company') },
+                ...units.map((unit) => ({ value: unit.code, label: unit.code, hint: unit.name, swatch: colourOf(unit) })),
+              ]}
+              searchable={false}
+              onChange={setUnitPin}
+            />
+            <span class="hint">{t('units.pin_hint')}</span>
+          </div>
+        )}
 
         <fieldset class="field limits">
           <legend>{t('agentKeys.limits_legend')}</legend>

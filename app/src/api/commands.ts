@@ -6,6 +6,12 @@
 import { request, type ClientConfig } from './client';
 import type {
   AccountBalanceByDimensionOutput,
+  EntriesTransferInput,
+  UnitsChangedOutput,
+  UnitsCreateInput,
+  UnitsListOutput,
+  UnitsRenameInput,
+  UnitsSummaryOutput,
   AccountDetailOutput,
   AccountWriteOutput,
   AccountsListOutput,
@@ -133,55 +139,112 @@ export function accountsRestore(config: Config, number: string): Promise<Account
   });
 }
 
-/** GET /v1/reports/trial-balance?period=YYYY-MM (reports.trial_balance). */
-export function reportsTrialBalance(config: Config, period: string): Promise<TrialBalanceOutput> {
+/**
+ * The reporting scope a report reads: a unit code, or absent for the company
+ * (consolidated, intercompany entries eliminated). Sent as `unit=CODE`.
+ */
+export type ReportScope = string | null | undefined;
+
+/** GET /v1/reports/trial-balance?period=YYYY-MM[&unit=CODE] (reports.trial_balance). */
+export function reportsTrialBalance(config: Config, period: string, unit?: ReportScope): Promise<TrialBalanceOutput> {
   return request<TrialBalanceOutput>(config, {
     method: 'GET',
     path: '/v1/reports/trial-balance',
-    query: { period },
+    query: { period, unit: unit ?? undefined },
   });
 }
 
-/** GET /v1/reports/p-and-l?period=YYYY-MM (reports.profit_and_loss). */
-export function reportsProfitAndLoss(config: Config, period: string): Promise<ProfitAndLossOutput> {
+/** GET /v1/reports/p-and-l?period=YYYY-MM[&unit=CODE] (reports.profit_and_loss). */
+export function reportsProfitAndLoss(config: Config, period: string, unit?: ReportScope): Promise<ProfitAndLossOutput> {
   return request<ProfitAndLossOutput>(config, {
     method: 'GET',
     path: '/v1/reports/p-and-l',
-    query: { period },
+    query: { period, unit: unit ?? undefined },
   });
 }
 
-/** GET /v1/reports/balance-sheet?as_of=YYYY-MM-DD (reports.balance_sheet). */
-export function reportsBalanceSheet(config: Config, asOf: string): Promise<BalanceSheetOutput> {
+/** GET /v1/reports/balance-sheet?as_of=YYYY-MM-DD[&unit=CODE] (reports.balance_sheet). */
+export function reportsBalanceSheet(config: Config, asOf: string, unit?: ReportScope): Promise<BalanceSheetOutput> {
   return request<BalanceSheetOutput>(config, {
     method: 'GET',
     path: '/v1/reports/balance-sheet',
-    query: { as_of: asOf },
+    query: { as_of: asOf, unit: unit ?? undefined },
   });
 }
 
-/** GET /v1/reports/trends?from=YYYY-MM&to=YYYY-MM[&dimension=cost_centre|project] (reports.trends). */
+/** GET /v1/reports/trends?from=YYYY-MM&to=YYYY-MM[&dimension=cost_centre|project][&unit=CODE] (reports.trends). */
 export function reportsTrends(
   config: Config,
-  params: { from: string; to: string; dimension?: string },
+  params: { from: string; to: string; dimension?: string; unit?: ReportScope },
 ): Promise<TrendsOutput> {
   return request<TrendsOutput>(config, {
     method: 'GET',
     path: '/v1/reports/trends',
-    query: params.dimension ? { from: params.from, to: params.to, dimension: params.dimension } : { from: params.from, to: params.to },
+    query: {
+      from: params.from,
+      to: params.to,
+      dimension: params.dimension || undefined,
+      unit: params.unit ?? undefined,
+    },
   });
 }
 
 /** GET /v1/reports/account-balance-by-dimension (reports.account_balance_by_dimension). */
 export function reportsAccountBalanceByDimension(
   config: Config,
-  params: { account: string; dimension: string; period: string },
+  params: { account: string; dimension: string; period: string; unit?: ReportScope },
 ): Promise<AccountBalanceByDimensionOutput> {
   return request<AccountBalanceByDimensionOutput>(config, {
     method: 'GET',
     path: '/v1/reports/account-balance-by-dimension',
-    query: { account: params.account, dimension: params.dimension, period: params.period },
+    query: { account: params.account, dimension: params.dimension, period: params.period, unit: params.unit ?? undefined },
   });
+}
+
+/**
+ * GET /v1/reports/units-summary?period=YYYY-MM (reports.units_summary): every
+ * business unit side by side for one month, the consolidated company and the
+ * eliminations row.
+ */
+export function reportsUnitsSummary(config: Config, period: string): Promise<UnitsSummaryOutput> {
+  return request<UnitsSummaryOutput>(config, {
+    method: 'GET',
+    path: '/v1/reports/units-summary',
+    query: { period },
+  });
+}
+
+/** GET /v1/units (units.list): every business unit, archived ones included. Person or agent key. */
+export function unitsList(config: Config): Promise<UnitsListOutput> {
+  return request<UnitsListOutput>(config, { method: 'GET', path: '/v1/units' });
+}
+
+/** POST /v1/units (units.create). A person only. */
+export function unitsCreate(config: Config, input: UnitsCreateInput): Promise<UnitsChangedOutput> {
+  return request<UnitsChangedOutput>(config, { method: 'POST', path: '/v1/units', body: input });
+}
+
+/** POST /v1/units/{code}/rename (units.rename): changes only the fields given. A person only. */
+export function unitsRename(config: Config, code: string, input: UnitsRenameInput): Promise<UnitsChangedOutput> {
+  return request<UnitsChangedOutput>(config, {
+    method: 'POST',
+    path: `/v1/units/${encodeURIComponent(code)}/rename`,
+    body: input,
+  });
+}
+
+/** POST /v1/units/{code}/archive (units.archive). An archived unit takes no changes and no new postings. */
+export function unitsArchive(config: Config, code: string): Promise<UnitsChangedOutput> {
+  return request<UnitsChangedOutput>(config, {
+    method: 'POST',
+    path: `/v1/units/${encodeURIComponent(code)}/archive`,
+    body: {},
+  });
+}
+
+/** POST /v1/transfers (entries.transfer): a recharge of a shared cost from one unit to another. */
+export function entriesTransfer(config: Config, input: EntriesTransferInput): Promise<PostEntryOutput> {
+  return request<PostEntryOutput>(config, { method: 'POST', path: '/v1/transfers', body: input });
 }
 
 /**

@@ -42,7 +42,7 @@ export function labelOf(account: Pick<Account, 'name_key' | 'display_name'>): st
 }
 
 export function Accounts() {
-  const { client } = useSession();
+  const { client, unit } = useSession();
   useLocale();
   const state = useAsync(async () => (await accountsList(client)).accounts, [client.baseUrl, client.apiKey]);
   const [query, setQuery] = useState('');
@@ -59,9 +59,14 @@ export function Accounts() {
 
   const accounts = state.data;
   const newButton = (
-    <a class="btn btn-primary" href="#/accounts/new">
-      {t('accounts.new')}
-    </a>
+    <span class="row-actions">
+      <a class="btn" href="#/accounts/units">
+        {t('units.nav')}
+      </a>
+      <a class="btn btn-primary" href="#/accounts/new">
+        {t('accounts.new')}
+      </a>
+    </span>
   );
 
   return (
@@ -69,6 +74,7 @@ export function Accounts() {
       <PageHead title={t('accounts.title')} actions={newButton}>
         {t('accounts.intro')}
       </PageHead>
+      {unit !== null && <p class="note" role="note">{t('units.accounts_scope_note', { code: unit })}</p>}
       {state.error && <ErrorBanner error={state.error} onRetry={state.reload} />}
       {accounts.length === 0 ? (
         <Empty title={t('accounts.empty_title')} action={<div class="row-actions">{newButton}</div>}>
