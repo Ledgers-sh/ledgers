@@ -11,6 +11,7 @@ Licence status of every data file bundled in this directory.
 | `i18n/en.toml` | English translations | Original Ledgers data, MIT |
 | `i18n/de.toml` | German translations | Original Ledgers data, MIT |
 | `i18n/id.toml` | Indonesian translations | Original Ledgers data, MIT |
+| `i18n/ar.toml` | Arabic translations | Original Ledgers data, MIT |
 
 ## Deliberately not bundled
 

@@ -1,10 +1,12 @@
 /**
- * Low-level HTTP client: builds requests with `Authorization: Bearer <key>`,
- * parses problem+json errors and maps HTTP status to an `ApiError` kind.
+ * Low-level HTTP client. A client with an agent key sends
+ * `Authorization: Bearer <key>`; a signed-in person's client sends the session
+ * cookie (`credentials: 'include'`) and no key. Parses problem+json errors and
+ * maps HTTP status to an `ApiError` kind.
  */
 
 export type ApiErrorKind =
-  | 'unauthorized' // 401: key missing, wrong or revoked
+  | 'unauthorized' // 401: key missing, wrong or revoked; or no person session
   | 'forbidden' // 403: policy denied the command for this key
   | 'validation' // 400/422: the server rejected the input
   | 'not_found' // 404
@@ -16,20 +18,30 @@ export class ApiError extends Error {
   readonly kind: ApiErrorKind;
   readonly status: number | null;
   readonly detail: string | null;
+  /** The problem slug the server named, e.g. "reauth-required" or "approval-not-pending"; null when absent. */
+  readonly slug: string | null;
 
-  constructor(kind: ApiErrorKind, message: string, status: number | null, detail: string | null = null) {
+  constructor(
+    kind: ApiErrorKind,
+    message: string,
+    status: number | null,
+    detail: string | null = null,
+    slug: string | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
     this.detail = detail;
+    this.slug = slug;
   }
 }
 
 export interface ClientConfig {
   /** Server origin, e.g. http://127.0.0.1:3000 (no trailing slash needed). */
   baseUrl: string;
-  apiKey: string;
+  /** An agent key. Absent for a signed-in person, whose session cookie is sent instead. */
+  apiKey?: string;
   /** Injected for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
 }
@@ -63,7 +75,7 @@ export function kindForStatus(status: number): ApiErrorKind {
 }
 
 const MESSAGES: Record<ApiErrorKind, string> = {
-  unauthorized: 'The API key was rejected. Check the key and try again.',
+  unauthorized: 'Your sign-in has ended, or the API key was rejected. Sign in again or check the key.',
   forbidden: 'This key is not allowed to run that command.',
   validation: 'The server rejected the input.',
   not_found: 'Not found on the server.',
@@ -72,29 +84,54 @@ const MESSAGES: Record<ApiErrorKind, string> = {
   network: 'Could not reach the server. Check the URL and your connection.',
 };
 
-/** The `detail` of a problem+json body, if the server sent one. */
-async function readProblem(response: Response): Promise<string | null> {
+export interface Problem {
+  detail: string | null;
+  slug: string | null;
+}
+
+/**
+ * The problem slug of a problem+json body: an explicit `slug` member, else the
+ * last segment of a `type` URI or URN (`.../reauth-required`, `urn:...:reauth-required`).
+ */
+export function problemSlug(parsed: Record<string, unknown>): string | null {
+  if (typeof parsed.slug === 'string' && parsed.slug.trim() !== '') return parsed.slug.trim();
+  if (typeof parsed.type === 'string' && parsed.type !== 'about:blank') {
+    const last = parsed.type.split(/[/:#]/).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return null;
+}
+
+/** The `detail` and slug of a problem+json body, if the server sent them. */
+async function readProblem(response: Response): Promise<Problem> {
   try {
     const text = await response.text();
-    if (!text) return null;
+    if (!text) return { detail: null, slug: null };
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object') {
-      const p = parsed as { detail?: unknown };
-      if (typeof p.detail === 'string' && p.detail.trim() !== '') return p.detail;
+      const p = parsed as Record<string, unknown>;
+      const detail = typeof p.detail === 'string' && p.detail.trim() !== '' ? p.detail : null;
+      return { detail, slug: problemSlug(p) };
     }
-    return null;
+    return { detail: null, slug: null };
   } catch {
-    return null;
+    return { detail: null, slug: null };
   }
+}
+
+/** The init for one request: a key as bearer auth, or the person's cookie. */
+export function requestInit(config: ClientConfig, method: string, headers: Record<string, string>): RequestInit {
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+    return { method, headers, cache: 'no-store' };
+  }
+  return { method, headers, cache: 'no-store', credentials: 'include' };
 }
 
 export async function request<T>(config: ClientConfig, spec: RequestSpec): Promise<T> {
   const doFetch = config.fetch ?? fetch;
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${config.apiKey}`,
-  };
-  const init: RequestInit = { method: spec.method, headers, cache: 'no-store' };
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const init = requestInit(config, spec.method, headers);
   if (spec.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(spec.body);
@@ -109,10 +146,10 @@ export async function request<T>(config: ClientConfig, spec: RequestSpec): Promi
 
   if (!response.ok) {
     const kind = kindForStatus(response.status);
-    const detail = await readProblem(response);
+    const problem = await readProblem(response);
     // Validation errors speak for themselves in the server's own words; other kinds use our wording.
-    const message = kind === 'validation' && detail ? detail : MESSAGES[kind];
-    throw new ApiError(kind, message, response.status, detail);
+    const message = kind === 'validation' && problem.detail ? problem.detail : MESSAGES[kind];
+    throw new ApiError(kind, message, response.status, problem.detail, problem.slug);
   }
   return (await response.json()) as T;
 }

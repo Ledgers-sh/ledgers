@@ -95,6 +95,33 @@ Check the deployment:
 curl -sS -o /dev/null -w '%{http_code}\n' https://api-staging.ledgers.sh/v1/openapi   # expect 200
 ```
 
+## 5a. People sign-in (once per environment)
+
+People sign in with a passkey through the per-app auth instance (ADR 0008).
+The Worker needs its issuer, its client id, and the app's URL:
+
+| Variable | Staging value | Where |
+|---|---|---|
+| `LEDGERS_AUTH_ISSUER` | `https://auth-staging.ledgers.sh` | `[env.staging.vars]`, set |
+| `LEDGERS_AUTH_CLIENT_ID` | the id the issuer gives the Ledgers client | `[env.staging.vars]`, placeholder until registered |
+| `LEDGERS_APP_URL` | `https://app-staging.ledgers.sh` | `[env.staging.vars]`, set |
+| `LEDGERS_PUBLIC_URL` | `https://api-staging.ledgers.sh` | `[env.staging.vars]`, already set |
+| `HARNESS_SECRET` | secret, step 3 | seals the login cookie; rotating it ends sign-ins in flight |
+
+1. Register the client with the staging issuer as a public client (no secret),
+   PKCE S256, with the redirect URI **`https://api-staging.ledgers.sh/v1/auth/callback`**,
+   scopes `openid email`, and the `roles` claim enabled for it. Copy the client
+   id into `LEDGERS_AUTH_CLIENT_ID` in `crates/ledgers-server/wrangler.toml`
+   (replace `STAGING_AUTH_CLIENT_ID`) and commit with the deploy change.
+2. Sign-in is off (the routes answer 503) while `LEDGERS_AUTH_ISSUER` is unset.
+   The owner account needs the `owner` (or `admin`) role in that client, or the
+   app shows "This account cannot use this ledger".
+3. Migration `0018_auth_people_session.sql` creates `people_session`. It is
+   applied in step 4 like the others.
+
+Production gets its own client and redirect URI (`https://api.ledgers.sh/v1/auth/callback`)
+when it is set up; nothing here covers it.
+
 ## 6. Bootstrap the company and its first key (once)
 
 `POST /admin/bootstrap` creates the company (under `LEDGERS_COMPANY_ID`), imports
@@ -162,13 +189,43 @@ The app shows Bills only when the server's OpenAPI document lists
 
 ## 8. Smoke check
 
-1. `https://app-staging.ledgers.sh` loads and the Connect screen starts at
-   `https://api-staging.ledgers.sh`.
-2. Connect with the key from step 6. The overview loads and no Bills item
-   appears in the navigation.
-3. Post a balanced entry and check the trial balance shows it.
+1. `https://app-staging.ledgers.sh` loads on the sign-in screen, and the
+   passkey link goes to `https://api-staging.ledgers.sh/v1/auth/login`.
+2. Sign in with the owner account. The top bar shows the email, and
+   `https://api-staging.ledgers.sh/v1/auth/session` answers 200 with the person
+   (`curl` cannot do this without the cookie; use the browser).
+3. Post a balanced entry and check the trial balance shows it. Sign out and
+   confirm `/v1/auth/session` answers 401.
+4. Agent keys still work: connect through "Advanced: connect with an agent key"
+   with a key from step 6 and read the overview.
 
 ## Local development
+
+Sign-in on a laptop needs a publicly routable issuer. The native server
+refuses loopback and private destinations for outbound calls, so a local issuer
+on `127.0.0.1` does not work. Test with `auth-staging`:
+
+1. Register `http://localhost:5173/v1/auth/callback` as an extra redirect URI of
+   the staging client (a dev-only registration; keep it out of production).
+2. Run the native server with the issuer and the dev origin:
+
+```sh
+cd crates/ledgers-server
+LEDGERS_DEV=1 \
+LEDGERS_PUBLIC_URL=http://localhost:5173 \
+LEDGERS_APP_URL=http://localhost:5173 \
+LEDGERS_AUTH_ISSUER=https://auth-staging.ledgers.sh \
+LEDGERS_AUTH_CLIENT_ID=<the staging client id> \
+cargo run -p ledgers-server
+```
+
+3. In `app/`, run `LEDGERS_DEV_API=http://127.0.0.1:3000 VITE_LEDGERS_API=http://localhost:5173 npm run dev`.
+   Vite proxies `/v1` (including `/v1/auth`) to the server, so the browser sees
+   one origin and the session cookie is first-party.
+
+The dev key that `LEDGERS_DEV=1` prints still works through "Advanced: connect
+with an agent key". `HARNESS_SECRET` is generated per run in dev, so a sign-in
+started before a restart fails and must be started again.
 
 `wrangler dev` runs the same Worker on your machine against a local D1:
 
@@ -182,3 +239,47 @@ npx wrangler@4.148.0 dev --env staging --local --port 8787
 `.dev.vars` is gitignored and must never be committed. Delete it when you are
 done. For the native server (SQLite), `LEDGERS_DEV=1 cargo run -p ledgers-server`
 creates the dev company and prints a dev key; that path has no bootstrap route.
+
+## Demo company
+
+The demo company Halden Works GmbH (`crates/ledgers-demo`, issue #51) is loaded
+automatically by the native development server (`LEDGERS_DEV=1`) when its company has no
+entries. It posts through the executor: agent entries with the bootstrap key's own bearer
+token, and the owner's entries under a person principal, so each entry records whether an
+agent or a person posted it. Dimension values are created with the store's domain function.
+Re-running is a no-op: an entry whose `external_id` exists is skipped, and a reversal whose
+target is already reversed is skipped.
+
+### Seeding staging
+
+Staging can load the same book with `POST /admin/seed-demo`, after the bootstrap in step 6.
+The Worker runs the same loader as the development server. Agent entries post as an
+internal agent principal that exists only in memory: no agent key is issued or stored for
+the seed. Owner entries post as the person "Demo owner" through the executor. The route is
+idempotent by `external_id`, so a second call posts nothing.
+
+It refuses in this order, and reads or writes nothing before the checks pass:
+
+- `404` while the `SEED_TOKEN` secret is unset,
+- `401` for a missing or wrong bearer token,
+- `403` unless the variable `LEDGERS_ALLOW_DEMO_SEED` is `"1"`. That variable is set in
+  `[env.staging.vars]` only. Never set it in production.
+
+The response and the Worker log carry counts only, never entry text or keys. Seed the
+staging company like this:
+
+```sh
+export SEED_TOKEN="$(openssl rand -hex 32)"
+printf '%s' "$SEED_TOKEN" | wrangler secret put SEED_TOKEN --env staging
+curl -sS -X POST https://api-staging.ledgers.sh/admin/seed-demo \
+  -H "Authorization: Bearer $SEED_TOKEN" -w '\n%{http_code}\n'   # expect 200 with counts
+wrangler secret delete SEED_TOKEN --env staging
+unset SEED_TOKEN
+```
+
+The one-liner `openssl rand -hex 32 | wrangler secret put SEED_TOKEN --env staging` sets
+the secret, but the call needs the value, so keep the token in a shell variable as above.
+Delete the secret as soon as the call has answered, so the route closes again. A second
+call with the secret still set answers `200` with `"posted": 0`.
+
+`LEDGERS_DEMO=0` keeps a development company empty.

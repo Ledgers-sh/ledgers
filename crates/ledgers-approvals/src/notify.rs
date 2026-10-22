@@ -56,6 +56,7 @@ pub struct ApprovalNotice {
 }
 
 /// Creates a notification notice and enqueues it in the dedicated `approval_outbox` table.
+/// The notice links to `{app_url}/approvals/{approval_id}`.
 ///
 /// # Errors
 /// Returns an error if serialization fails.
@@ -64,6 +65,7 @@ pub fn notice_statement(
     event: ApprovalEvent,
     request: &ApprovalRequest,
     counterparty: Option<&str>,
+    app_url: &str,
     now: &str,
 ) -> Result<Statement, serde_json::Error> {
     let notice = ApprovalNotice {
@@ -74,7 +76,7 @@ pub fn notice_statement(
         amounts: request.effect.clone(),
         counterparty: counterparty.map(ToString::to_string),
         reason: request.reason.clone(),
-        link: format!("/approvals/{approval_id}"),
+        link: format!("{}/approvals/{approval_id}", app_url.trim_end_matches('/')),
         high_risk: !request.effect.is_empty(),
     };
 

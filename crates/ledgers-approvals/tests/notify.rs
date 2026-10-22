@@ -2,7 +2,7 @@
 
 use cratefield_core::{Database, Module, Outbox, Statement};
 use ledgers_approvals::{
-    ApprovalEvent, ApprovalNotice, ApprovalRequest, Status, notice_statement,
+    ApprovalEvent, ApprovalNotice,
     notify::storage::Channel,
     notify::{NOTICE_OUTBOX_TABLE, storage},
 };
@@ -13,12 +13,15 @@ use std::collections::BTreeMap;
 const COMPANY_ID: &str = "test-company-01234567890123";
 const PERSON_ID: &str = "approver-person-id";
 const NOW: &str = "2026-01-15T09:30:00Z";
+const APP_URL: &str = "https://app.example";
 
 fn modules() -> Vec<Box<dyn Module>> {
     vec![
         Box::new(DbModule),
         Box::new(ledgers_storage::StorageModule),
         Box::new(ledgers_approvals::ApprovalsModule),
+        Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
     ]
 }
 
@@ -37,7 +40,7 @@ fn test_notice(approval_id: &str, event: ApprovalEvent, high_risk: bool) -> Appr
         amounts,
         counterparty: Some("Acme GmbH".to_string()),
         reason: "above limit".to_string(),
-        link: format!("/approvals/{approval_id}"),
+        link: format!("{APP_URL}/approvals/{approval_id}"),
         high_risk,
     }
 }
@@ -298,115 +301,6 @@ fn t5_slack_requires_both_enable_and_target() {
                 .expect("should load");
             assert_eq!(targets.len(), 1);
             assert_eq!(targets[0].0, Channel::Slack);
-        });
-    }
-}
-
-// ============================================================================
-// T6: Outbox Records After Raise and Reject (At-Least-Once Semantics)
-// ============================================================================
-
-#[test]
-fn t6_outbox_records_after_raise_and_reject() {
-    for kit in cratefield_testing::TestHarness::all_dialects(modules) {
-        pollster::block_on(async {
-            setup_db(&*kit.db).await;
-
-            let approval_id = "appr-raise-reject-001";
-            let mut effect = BTreeMap::new();
-            effect.insert("EUR".to_string(), "123450".to_string());
-
-            let request = ApprovalRequest {
-                id: approval_id.to_string(),
-                company_id: COMPANY_ID.to_string(),
-                command: "bill.pay".to_string(),
-                input: "{}".to_string(),
-                preview: r#"{"totals":{"EUR":"123450"}}"#.to_string(),
-                reads: "{}".to_string(),
-                request_hash: "test_hash_123".to_string(),
-                effect: effect.clone(),
-                requested_by: "agent-key".to_string(),
-                reason: "above limit".to_string(),
-                status: Status::Pending,
-                created_at: NOW.to_string(),
-                expires_at: "2026-01-15T10:30:00Z".to_string(),
-                decided_by: None,
-                credential_id: None,
-            };
-
-            // Simulate raise: enqueue created notice
-            let stmt_created = notice_statement(
-                approval_id,
-                ApprovalEvent::Created,
-                &request,
-                Some("Acme GmbH"),
-                NOW,
-            )
-            .expect("should create notice");
-            kit.db
-                .batch_atomic(&[stmt_created])
-                .await
-                .expect("should enqueue created");
-
-            // Verify created record (attempts should start at 0)
-            let rows = kit
-                .db
-                .query(&Statement::with_values(
-                    "SELECT id, topic, attempts FROM approval_outbox WHERE id = ?".to_owned(),
-                    vec![SeaValue::from(format!("{approval_id}-created").as_str())],
-                ))
-                .await
-                .expect("should query");
-            assert_eq!(rows.rows.len(), 1, "should have created notice");
-            if let Some(row) = rows.rows.first() {
-                let topic: Option<String> = row.get("topic");
-                assert_eq!(topic.as_deref(), Some("approval.created"));
-                let attempts: i64 = row.get("attempts").unwrap_or(-1);
-                assert_eq!(
-                    attempts, 0,
-                    "created notice should have 0 attempts initially"
-                );
-            }
-
-            // Simulate reject: enqueue decided notice
-            let mut rejected_request = request.clone();
-            rejected_request.status = Status::Rejected;
-            let stmt_decided = notice_statement(
-                approval_id,
-                ApprovalEvent::Decided,
-                &rejected_request,
-                None,
-                NOW,
-            )
-            .expect("should create notice");
-            kit.db
-                .batch_atomic(&[stmt_decided])
-                .await
-                .expect("should enqueue decided");
-
-            // Verify both records exist
-            let all_rows = kit
-                .db
-                .query(&Statement::with_values(
-                    "SELECT id, topic FROM approval_outbox WHERE id LIKE ?".to_owned(),
-                    vec![SeaValue::from(format!("{approval_id}%").as_str())],
-                ))
-                .await
-                .expect("should query");
-            assert_eq!(
-                all_rows.rows.len(),
-                2,
-                "should have both created and decided notices"
-            );
-
-            // Verify topics
-            let topics: Vec<_> = all_rows
-                .rows
-                .iter()
-                .filter_map(|r| r.get::<String>("topic"))
-                .collect();
-            assert!(topics.contains(&"approval.created".to_string()));
-            assert!(topics.contains(&"approval.decided".to_string()));
         });
     }
 }

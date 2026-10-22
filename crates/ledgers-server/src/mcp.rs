@@ -2,7 +2,7 @@
 //! RFC 9728 protected-resource metadata at `/.well-known/oauth-protected-resource`.
 
 use crate::dispatch::{DISPATCH_PORTS, Deps};
-use crate::routes::Dispatch;
+use crate::routes::{Dispatch, Presented};
 use axum::extract::Query;
 use axum::http::header;
 use cratefield_core::axum::{
@@ -71,6 +71,11 @@ impl Module for McpModule {
     }
     fn requires(&self) -> &'static [cratefield_core::Port] {
         DISPATCH_PORTS
+    }
+
+    fn optional(&self) -> &'static [cratefield_core::Port] {
+        // The agent-key limiter, when the runtime provides one.
+        &[cratefield_core::Port::RateLimiter]
     }
 
     fn router(&self, ctx: ModuleContext) -> axum::Router {
@@ -259,6 +264,13 @@ impl mcp::ToolCaller for ServerToolCaller {
         input: Value,
         _dry_run: bool,
     ) -> mcp::ToolOutcome {
+        let presented = self.credential.clone().map(Presented::Bearer);
+        if let Err(limited) =
+            crate::rate_limiting::admit(self.dispatch.as_ref(), &self.deps, presented.as_ref())
+                .await
+        {
+            return mcp::ToolOutcome::Failed(limited.problem().to_string());
+        }
         match self
             .dispatch
             .dispatch(
@@ -266,7 +278,7 @@ impl mcp::ToolCaller for ServerToolCaller {
                 &descriptor.name,
                 input,
                 &self.request_id,
-                self.credential.clone(),
+                presented,
             )
             .await
         {

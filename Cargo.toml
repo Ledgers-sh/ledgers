@@ -87,6 +87,9 @@ ledgers-ext = { path = "crates/ledgers-ext" }
 ledgers-ledger = { path = "crates/ledgers-ledger" }
 # Storage foundation (issue #4).
 ledgers-storage = { path = "crates/ledgers-storage" }
+# Demo company fixture (issue #51): Halden Works GmbH, invented, used for
+# dev auto-load, tests and the docs.
+ledgers-demo = { path = "crates/ledgers-demo" }
 # Exchange rates (issue #5 FX subsection).
 ledgers-fx = { path = "crates/ledgers-fx" }
 # Tax codes and calculations (issue #5 tax subsection).

@@ -3,11 +3,12 @@
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_approvals::{
-    ApprovalConfig, Approvals, CredentialKeys, Es256Verifier, OwnerApprovesAll, PasskeyProof,
+    ApprovalConfig, ApprovalError, Approvals, CredentialKeys, Es256Verifier, NoCredentialKeys,
+    OwnerApprovesAll, PasskeyProof, get_request, list_requests,
 };
 use ledgers_commands::{
     Authenticator, Command, CommandContext, Credential, Execute, Executed, Executor,
-    JournalPreview, Plan, Policy, Principal, Tier, auth::Limits,
+    JournalPreview, PendingApproval, Plan, Policy, Principal, Tier, auth::Limits,
 };
 use ledgers_db::DbModule;
 use ledgers_money::{Amount, Currency};
@@ -280,6 +281,8 @@ fn modules() -> Vec<Box<dyn cratefield_core::Module>> {
         Box::new(DbModule),
         Box::new(ledgers_storage::StorageModule),
         Box::new(ledgers_approvals::ApprovalsModule),
+        Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
     ]
 }
 
@@ -1344,6 +1347,536 @@ fn high_risk_without_passkey_is_refused() {
 
             // Verify status is still pending
             assert_eq!(approval_status(&*kit.db, &approval_id).await, "pending");
+        });
+    }
+}
+
+// ============================================================================
+// Inbox: needs-approval persistence, decisions, expiry, fresh sign-in, bulk
+// ============================================================================
+
+/// `NOW` as epoch seconds (2026-01-15T09:30:00Z).
+const NOW_EPOCH: i64 = 1_768_469_400;
+/// The low-risk limit used by the inbox tests: EUR 100.00.
+fn eur_limit() -> BTreeMap<String, String> {
+    BTreeMap::from([("EUR".to_string(), "100.00".to_string())])
+}
+
+fn inbox_ctx(now: &str, event: &str) -> CommandContext {
+    CommandContext {
+        company_id: COMPANY_ID.to_string(),
+        request_id: "req-inbox".to_string(),
+        event_id: event.to_string(),
+        now: now.to_string(),
+    }
+}
+
+/// The agent asks to pay a bill; policy sends it to approval. The request is
+/// stored by the executor in the same guarded batch as its audit row.
+async fn agent_asks_to_pay(
+    db: &dyn Database,
+    approval_id: &str,
+    bill_id: &str,
+    limits: &BTreeMap<String, String>,
+) -> Executed<PayBillOutput> {
+    let executor = Executor::new(db, TestAuthenticator, TestPolicy);
+    let input = PayBillInput {
+        bill_id: bill_id.to_string(),
+    };
+    let id = approval_id.to_string();
+    let persist = move |pending: &PendingApproval| {
+        let preview = serde_json::to_value(&pending.preview)
+            .map_err(|e| ledgers_commands::CommandError::InvalidInput(e.to_string()))?;
+        let (statement, _) = ledgers_approvals::request_statement(&ledgers_approvals::NewRequest {
+            id: &id,
+            company_id: COMPANY_ID,
+            command: &pending.command,
+            input: &pending.input,
+            preview: &preview,
+            reads: &pending.reads,
+            request_hash: &pending.request_hash,
+            reason: &pending.reason,
+            requested_by: &pending.requested_by,
+            counterparty: Some("Acme GmbH"),
+            now: NOW,
+            ttl: std::time::Duration::from_hours(24),
+            low_risk_limits: limits,
+        })
+        .map_err(|e| ledgers_commands::CommandError::InvalidInput(e.to_string()))?;
+        Ok(vec![statement])
+    };
+    executor
+        .run_for_approval(
+            &PayBillCommand,
+            "agent".to_string(),
+            inbox_ctx(NOW, "evt-agent"),
+            &input,
+            &persist,
+        )
+        .await
+        .expect("the agent call should return a needs-approval outcome")
+}
+
+fn inbox_service(
+    db: &dyn Database,
+) -> Approvals<'_, OwnerApprovesAll, Es256Verifier, NoCredentialKeys> {
+    Approvals::new(
+        db,
+        OwnerApprovesAll,
+        Es256Verifier,
+        NoCredentialKeys,
+        ApprovalConfig::new(
+            "localhost".to_string(),
+            "http://localhost:3000".to_string(),
+            "http://localhost:3000".to_string(),
+        ),
+    )
+}
+
+async fn count_rows(db: &dyn Database, sql: &str, id: &str) -> i64 {
+    db.query(&Statement::with_values(
+        sql.to_owned(),
+        vec![sea_query::Value::from(id)],
+    ))
+    .await
+    .expect("count query")
+    .first()
+    .and_then(|r| r.get::<i64>("n"))
+    .unwrap_or(0)
+}
+
+#[test]
+fn needs_approval_persists_exactly_one_request() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+
+            let outcome = agent_asks_to_pay(&*kit.db, "appr-1", "bill1", &eur_limit()).await;
+            assert!(matches!(outcome, Executed::NeedsApproval { .. }));
+
+            // Exactly one request, with the agent as requester and a risk and expiry.
+            let total = count_rows(
+                &*kit.db,
+                "SELECT COUNT(*) AS n FROM approval_request WHERE id = ?",
+                "appr-1",
+            )
+            .await;
+            assert_eq!(total, 1);
+            let request = get_request(&*kit.db, COMPANY_ID, "appr-1")
+                .await
+                .expect("the request is stored");
+            assert_eq!(request.requested_by, AGENT_KEY_ID);
+            assert_eq!(request.risk, ledgers_approvals::Risk::Low);
+            assert_eq!(request.counterparty.as_deref(), Some("Acme GmbH"));
+            assert_eq!(request.expires_at, "2026-01-16T09:30:00Z");
+            assert_eq!(request.status, ledgers_approvals::Status::Pending);
+        });
+    }
+}
+
+#[test]
+fn approve_posts_once_even_when_called_twice_concurrently() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            agent_asks_to_pay(&*kit.db, "appr-2", "bill1", &eur_limit()).await;
+
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let approvals = inbox_service(&*kit.db);
+            let input = PayBillInput {
+                bill_id: "bill1".to_string(),
+            };
+            let first = approvals.approve_signed_in(
+                &executor,
+                &TestAuthenticator,
+                &PayBillCommand,
+                "owner".to_string(),
+                inbox_ctx(NOW, "evt-a"),
+                "appr-2",
+                Some(NOW_EPOCH),
+            );
+            let second = approvals.approve_signed_in(
+                &executor,
+                &TestAuthenticator,
+                &PayBillCommand,
+                "owner".to_string(),
+                inbox_ctx(NOW, "evt-b"),
+                "appr-2",
+                Some(NOW_EPOCH),
+            );
+            let (a, b) = futures_util::future::join(first, second).await;
+            let _ = &input;
+            let outcomes = [a.is_ok(), b.is_ok()];
+            assert_eq!(
+                outcomes.iter().filter(|ok| **ok).count(),
+                1,
+                "exactly one approval posts"
+            );
+            let loser = if a.is_ok() { b } else { a };
+            assert!(matches!(loser, Err(ApprovalError::NotPending { .. })));
+            assert!(bill_paid(&*kit.db, "bill1").await);
+            assert_eq!(approval_status(&*kit.db, "appr-2").await, "approved");
+        });
+    }
+}
+
+#[test]
+fn reject_records_the_reason_and_posts_nothing() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            agent_asks_to_pay(&*kit.db, "appr-3", "bill1", &eur_limit()).await;
+
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            inbox_service(&*kit.db)
+                .reject_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    "owner".to_string(),
+                    "appr-3",
+                    &inbox_ctx(NOW, "evt-r"),
+                    Some("amount is wrong"),
+                )
+                .await
+                .expect("reject should succeed");
+
+            assert_eq!(approval_status(&*kit.db, "appr-3").await, "rejected");
+            assert!(!bill_paid(&*kit.db, "bill1").await);
+            let request = get_request(&*kit.db, COMPANY_ID, "appr-3").await.unwrap();
+            assert_eq!(request.decision_reason.as_deref(), Some("amount is wrong"));
+            assert_eq!(request.audit_ref.as_deref(), Some("evt-r"));
+            assert_eq!(request.decided_by.as_deref(), Some(OWNER_PERSON_ID));
+        });
+    }
+}
+
+/// The outbox notices for one approval request, as (outbox id, parsed payload).
+async fn notices_for(db: &dyn Database, approval_id: &str) -> Vec<(String, serde_json::Value)> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT id, payload FROM approval_outbox WHERE id LIKE ? ORDER BY id".to_owned(),
+            vec![sea_query::Value::from(format!("{approval_id}-%"))],
+        ))
+        .await
+        .expect("query the notice outbox");
+    rows.rows
+        .iter()
+        .map(|row| {
+            let id: String = row.get("id").expect("outbox id");
+            let payload: String = row.get("payload").expect("outbox payload");
+            (
+                id,
+                serde_json::from_str(&payload).expect("notice payload is JSON"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn raise_enqueues_a_created_notice_linking_the_app() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let (request_hash, preview, reads) = agent_request(&executor, "bill1").await;
+
+            let approval_id = "appr-raise-notice";
+            inbox_service(&*kit.db)
+                .raise(
+                    "bill.pay",
+                    &serde_json::to_value(&PayBillInput {
+                        bill_id: "bill1".to_string(),
+                    })
+                    .unwrap(),
+                    &serde_json::to_value(&preview).unwrap(),
+                    &reads,
+                    request_hash,
+                    "payout requires approval".to_string(),
+                    AGENT_KEY_ID.to_string(),
+                    COMPANY_ID,
+                    approval_id.to_string(),
+                    Some("Acme GmbH"),
+                    NOW,
+                )
+                .await
+                .expect("raise should succeed");
+
+            let notices = notices_for(&*kit.db, approval_id).await;
+            assert_eq!(notices.len(), 1, "one created notice");
+            let (id, payload) = &notices[0];
+            assert_eq!(id, &format!("{approval_id}-created"));
+            assert_eq!(payload["event"], "created");
+            assert_eq!(payload["status"], "pending");
+            assert_eq!(payload["counterparty"], "Acme GmbH");
+            assert_eq!(
+                payload["link"],
+                format!("http://localhost:3000/approvals/{approval_id}")
+            );
+        });
+    }
+}
+
+#[test]
+fn inbox_decisions_enqueue_a_decided_notice_and_refusals_enqueue_none() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+
+            agent_asks_to_pay(&*kit.db, "appr-n-ok", "bill1", &eur_limit()).await;
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx(NOW, "evt-n-ok"),
+                    "appr-n-ok",
+                    Some(NOW_EPOCH),
+                )
+                .await
+                .expect("approve should succeed");
+            // The test persist step stores the request without a Created notice
+            // (the server dispatch and `raise` enqueue that), so only Decided shows.
+            let approved = notices_for(&*kit.db, "appr-n-ok").await;
+            assert_eq!(approved.len(), 1, "one decided notice");
+            let (id, payload) = &approved[0];
+            assert_eq!(id, "appr-n-ok-decided");
+            assert_eq!(payload["status"], "approved");
+            assert_eq!(payload["link"], "http://localhost:3000/approvals/appr-n-ok");
+
+            agent_asks_to_pay(&*kit.db, "appr-n-no", "bill1", &eur_limit()).await;
+            inbox_service(&*kit.db)
+                .reject_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    "owner".to_string(),
+                    "appr-n-no",
+                    &inbox_ctx(NOW, "evt-n-no"),
+                    Some("amount is wrong"),
+                )
+                .await
+                .expect("reject should succeed");
+            let rejected = notices_for(&*kit.db, "appr-n-no").await;
+            assert_eq!(rejected.len(), 1, "one decided notice");
+            assert_eq!(rejected[0].1["status"], "rejected");
+
+            // A refused decision (expired) posts nothing and enqueues no decided notice.
+            agent_asks_to_pay(&*kit.db, "appr-n-exp", "bill1", &eur_limit()).await;
+            let refused = inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx("2026-01-17T09:30:00Z", "evt-n-exp"),
+                    "appr-n-exp",
+                    Some(NOW_EPOCH),
+                )
+                .await;
+            assert!(matches!(refused, Err(ApprovalError::Expired)));
+            let expired = notices_for(&*kit.db, "appr-n-exp").await;
+            assert!(expired.is_empty(), "a refused decision enqueues nothing");
+        });
+    }
+}
+
+#[test]
+fn expired_request_cannot_be_approved_from_the_inbox() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            agent_asks_to_pay(&*kit.db, "appr-4", "bill1", &eur_limit()).await;
+
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let result = inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx("2026-01-17T09:30:00Z", "evt-x"),
+                    "appr-4",
+                    Some(NOW_EPOCH),
+                )
+                .await;
+            assert!(matches!(result, Err(ApprovalError::Expired)));
+            assert!(!bill_paid(&*kit.db, "bill1").await);
+            assert_eq!(approval_status(&*kit.db, "appr-4").await, "expired");
+        });
+    }
+}
+
+#[test]
+fn agent_cannot_decide_from_the_inbox() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            agent_asks_to_pay(&*kit.db, "appr-5", "bill1", &eur_limit()).await;
+
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let approve = inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "agent".to_string(),
+                    inbox_ctx(NOW, "evt-y"),
+                    "appr-5",
+                    Some(NOW_EPOCH),
+                )
+                .await;
+            assert!(matches!(approve, Err(ApprovalError::Forbidden)));
+            let reject = inbox_service(&*kit.db)
+                .reject_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    "agent".to_string(),
+                    "appr-5",
+                    &inbox_ctx(NOW, "evt-z"),
+                    None,
+                )
+                .await;
+            assert!(matches!(reject, Err(ApprovalError::Forbidden)));
+            assert!(!bill_paid(&*kit.db, "bill1").await);
+            assert_eq!(approval_status(&*kit.db, "appr-5").await, "pending");
+        });
+    }
+}
+
+#[test]
+fn high_risk_approval_needs_a_fresh_sign_in() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            // No limit configured for EUR, so the request is high risk.
+            agent_asks_to_pay(&*kit.db, "appr-6", "bill1", &BTreeMap::new()).await;
+            assert_eq!(
+                get_request(&*kit.db, COMPANY_ID, "appr-6")
+                    .await
+                    .unwrap()
+                    .risk,
+                ledgers_approvals::Risk::High
+            );
+
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            let approvals = inbox_service(&*kit.db);
+            let approve = |signed_in_at: Option<i64>, event: &'static str| {
+                approvals.approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx(NOW, event),
+                    "appr-6",
+                    signed_in_at,
+                )
+            };
+            // No sign-in, or one older than five minutes: reauth required, nothing posted.
+            assert!(matches!(
+                approve(None, "e1").await,
+                Err(ApprovalError::ReauthRequired)
+            ));
+            assert!(matches!(
+                approve(Some(NOW_EPOCH - 301), "e2").await,
+                Err(ApprovalError::ReauthRequired)
+            ));
+            assert!(!bill_paid(&*kit.db, "bill1").await);
+            assert_eq!(approval_status(&*kit.db, "appr-6").await, "pending");
+            // Within five minutes: approved.
+            approve(Some(NOW_EPOCH - 60), "e3")
+                .await
+                .expect("fresh sign-in approves");
+            assert!(bill_paid(&*kit.db, "bill1").await);
+        });
+    }
+}
+
+#[test]
+fn low_risk_approval_needs_no_fresh_sign_in() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            agent_asks_to_pay(&*kit.db, "appr-7", "bill1", &eur_limit()).await;
+            let executor = Executor::new(&*kit.db, TestAuthenticator, TestPolicy);
+            inbox_service(&*kit.db)
+                .approve_signed_in(
+                    &executor,
+                    &TestAuthenticator,
+                    &PayBillCommand,
+                    "owner".to_string(),
+                    inbox_ctx(NOW, "e4"),
+                    "appr-7",
+                    None,
+                )
+                .await
+                .expect("low risk approves without a recent sign-in");
+            assert!(bill_paid(&*kit.db, "bill1").await);
+        });
+    }
+}
+
+#[test]
+fn bulk_selection_refuses_mixed_risk_and_mixed_currency() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            setup_db(&*kit.db).await;
+            insert_bill(&*kit.db, "bill1", 10000, "EUR").await;
+            insert_bill(&*kit.db, "bill2", 5000, "EUR").await;
+            insert_bill(&*kit.db, "bill3", 8000, "EUR").await;
+            insert_bill(&*kit.db, "bill4", 9000, "USD").await;
+            let limits = BTreeMap::from([
+                ("EUR".to_string(), "100.00".to_string()),
+                ("USD".to_string(), "100.00".to_string()),
+            ]);
+            agent_asks_to_pay(&*kit.db, "b-1", "bill1", &limits).await;
+            agent_asks_to_pay(&*kit.db, "b-2", "bill2", &limits).await;
+            agent_asks_to_pay(&*kit.db, "b-3", "bill3", &BTreeMap::new()).await;
+            agent_asks_to_pay(&*kit.db, "b-4", "bill4", &limits).await;
+
+            let load = |id: &'static str| {
+                let db = &*kit.db;
+                async move { get_request(db, COMPANY_ID, id).await.unwrap() }
+            };
+            let low_eur_a = load("b-1").await;
+            let low_eur_b = load("b-2").await;
+            let high_eur = load("b-3").await;
+            let low_usd = load("b-4").await;
+
+            assert!(ledgers_approvals::check_bulk(&[low_eur_a.clone(), low_eur_b.clone()]).is_ok());
+            assert!(matches!(
+                ledgers_approvals::check_bulk(&[low_eur_a.clone(), high_eur]),
+                Err(ApprovalError::BulkRefused(_))
+            ));
+            assert!(matches!(
+                ledgers_approvals::check_bulk(&[low_eur_a, low_usd]),
+                Err(ApprovalError::BulkRefused(_))
+            ));
+            assert!(matches!(
+                ledgers_approvals::check_bulk(&[]),
+                Err(ApprovalError::BulkRefused(_))
+            ));
+
+            let pending = list_requests(
+                &*kit.db,
+                COMPANY_ID,
+                ledgers_approvals::Listing::Pending,
+                NOW,
+                50,
+            )
+            .await
+            .expect("list");
+            assert_eq!(pending.1, 4);
+            assert_eq!(pending.0.len(), 4);
         });
     }
 }

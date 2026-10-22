@@ -5,17 +5,23 @@
 //! One route sits in front of the harness: the one-shot deployment bootstrap
 //! (`POST /admin/bootstrap`, see docs/deploy.md).
 
+use crate::demo::{self, SeedGate};
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
 use crate::harness;
+use crate::people::{allowed_origin, credentialed_cors_headers};
 use cratefield_core::{Config, NoopDefer, constant_time_eq};
 use cratefield_runtime_cloudflare::{Cloudflare, serve};
 use serde_json::json;
 use std::sync::{Arc, OnceLock};
-use worker::{Context, Env, Method, Request, Response, console_error, event};
+use worker::{Context, Env, Method, Request, Response, console_error, console_log, event};
 
 /// The bootstrap route. Enabled only while the `BOOTSTRAP_TOKEN` secret is set
 /// and no agent key exists yet.
 pub const BOOTSTRAP_PATH: &str = "/admin/bootstrap";
+
+/// The demo seed route (issue #51). Enabled only while the `SEED_TOKEN` secret
+/// is set and `LEDGERS_ALLOW_DEMO_SEED` is `"1"`; see docs/deploy.md.
+pub const SEED_DEMO_PATH: &str = "/admin/seed-demo";
 
 /// Global harness, built once at first request
 static HARNESS: OnceLock<(cratefield_core::Harness, Cloudflare)> = OnceLock::new();
@@ -45,9 +51,55 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
     if req.method() == Method::Post && req.path() == BOOTSTRAP_PATH {
         return bootstrap_route(req, &env, runtime).await;
     }
+    if req.method() == Method::Post && req.path() == SEED_DEMO_PATH {
+        return seed_demo_route(req, &env, runtime).await;
+    }
+
+    // Credentialed CORS for the person sign-in and session calls. The harness's
+    // CORS layer answers without `Allow-Credentials` and cannot be configured
+    // here, so the Worker answers the preflight and marks the responses itself.
+    // Only the configured app origins get the header, and only on `/v1`.
+    let credentialed = req.path().starts_with("/v1/");
+    let allowed = crate::app_origins(&WorkerConfig { env: env.clone() });
+    let origin = origin_header_worker(&req)
+        .filter(|origin| credentialed && allowed_origin(&allowed, origin).is_some());
+    if let Some(origin) = origin.as_deref()
+        && req.method() == Method::Options
+        && req
+            .headers()
+            .get("access-control-request-method")?
+            .is_some()
+    {
+        let mut response = Response::empty()?.with_status(204);
+        for (name, value) in credentialed_cors_headers(origin) {
+            response.headers_mut().set(name, &value)?;
+        }
+        response
+            .headers_mut()
+            .set("access-control-allow-methods", "GET, POST, OPTIONS")?;
+        response.headers_mut().set(
+            "access-control-allow-headers",
+            "Content-Type, Authorization",
+        )?;
+        response
+            .headers_mut()
+            .set("access-control-max-age", "600")?;
+        return Ok(response);
+    }
 
     // Call the runtime's serve function to handle the request
-    serve(harness_instance, runtime, req, env, ctx).await
+    let mut response = serve(harness_instance, runtime, req, env, ctx).await?;
+    if let Some(origin) = origin.as_deref() {
+        for (name, value) in credentialed_cors_headers(origin) {
+            response.headers_mut().set(name, &value)?;
+        }
+    }
+    Ok(response)
+}
+
+/// The request's `Origin` header, if it sent one.
+fn origin_header_worker(req: &Request) -> Option<String> {
+    req.headers().get("origin").ok().flatten()
 }
 
 /// `POST /admin/bootstrap` with `Authorization: Bearer <BOOTSTRAP_TOKEN>` and a
@@ -106,6 +158,76 @@ async fn bootstrap_route(
         Err(BootstrapError::Failed(step)) => {
             console_error!("bootstrap failed: {}", step);
             Response::error("Bootstrap failed; see the Worker logs", 500)?
+        }
+    };
+    response.headers_mut().set("cache-control", "no-store")?;
+    Ok(response)
+}
+
+/// `POST /admin/seed-demo` with `Authorization: Bearer <SEED_TOKEN>`. Loads the
+/// Halden Works demo book into the configured company, posted as the internal
+/// agent and the "Demo owner" person through the executor. Idempotent by
+/// `external_id`: a second run posts nothing. The gate is checked first, so a
+/// refused request reads and writes nothing. The response and the log carry
+/// counts only.
+async fn seed_demo_route(
+    req: Request,
+    env: &Env,
+    runtime: &Cloudflare,
+) -> worker::Result<Response> {
+    let secret = env.var("SEED_TOKEN").ok().map(|value| value.to_string());
+    let allow = env
+        .var("LEDGERS_ALLOW_DEMO_SEED")
+        .ok()
+        .map(|value| value.to_string());
+    let presented = req
+        .headers()
+        .get("authorization")?
+        .and_then(|value| value.strip_prefix("Bearer ").map(str::to_owned))
+        .unwrap_or_default();
+    let gate = demo::seed_demo_gate(secret.as_deref(), &presented, allow.as_deref());
+    if let Some(status) = gate.status() {
+        let message = match gate {
+            SeedGate::NotFound => "Not found",
+            SeedGate::Unauthorized => "Unauthorized",
+            _ => "Demo seeding is not enabled in this environment",
+        };
+        return Response::error(message, status);
+    }
+
+    let company_id = env
+        .var("LEDGERS_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    if company_id.is_empty() {
+        return Response::error("LEDGERS_COMPANY_ID is not set", 500);
+    }
+    let ports = runtime.ports(env, Arc::new(NoopDefer));
+    let Some(deps) = Deps::from_ports(&ports) else {
+        return Response::error("Storage is not bound", 503);
+    };
+
+    let book = ledgers_demo::halden::book(deps.clock.now().year());
+    let mut response = match demo::seed_internal(&deps, &company_id, &book).await {
+        Ok(report) => {
+            console_log!(
+                "demo seed: posted {}, reversed {}, already present {}, dimensions created {}",
+                report.posted,
+                report.reversed,
+                report.skipped,
+                report.dimensions_created
+            );
+            Response::from_json(&json!({
+                "posted": report.posted,
+                "reversed": report.reversed,
+                "already_present": report.skipped,
+                "dimensions_created": report.dimensions_created,
+            }))?
+        }
+        Err(_) => {
+            // The error text names an entry; the log keeps to counts.
+            console_error!("demo seed failed; the book is partly loaded and a re-run continues it");
+            Response::error("Demo seeding failed; see the Worker logs", 500)?
         }
     };
     response.headers_mut().set("cache-control", "no-store")?;

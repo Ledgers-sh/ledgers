@@ -10,10 +10,13 @@ use ledgers_commands::auth::Tier;
 use ledgers_ledger::LedgerModule;
 use ledgers_policy::key::CurrencyLimit;
 use ledgers_server::dispatch::{self, ApiKeysModule, Deps, ServerDispatch};
+use ledgers_server::people::{PersonClaims, store_session};
 use ledgers_server::routes::{self, Dispatch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub mod http;
 
 pub use cratefield_core::axum::http::Method;
 pub use cratefield_testing::TestResponse;
@@ -114,8 +117,19 @@ pub fn fixture() -> Fixture {
 
 /// [`fixture`] with extra modules mounted beside the domain modules.
 pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
+    fixture_with_options(extra, None, Vec::new())
+}
+
+/// [`fixture`] with a rate limiter on the ports (agent keys are admitted
+/// through it) and the app origins cookie sessions may come from.
+pub fn fixture_with_options(
+    extra: Vec<Arc<dyn Module>>,
+    limiter: Option<Arc<dyn cratefield_core::RateLimiter>>,
+    app_origins: Vec<String>,
+) -> Fixture {
     let registry = dispatch::registry();
-    let dispatch: Arc<dyn Dispatch> = Arc::new(ServerDispatch::new(COMPANY));
+    let dispatch: Arc<dyn Dispatch> =
+        Arc::new(ServerDispatch::new(COMPANY).with_app_origins(app_origins));
     let mut domain = routes::domain_modules(&registry, &dispatch).expect("domain modules");
     domain.extend(extra);
 
@@ -128,9 +142,16 @@ pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
         Box::new(LedgerModule),
         Box::new(ledgers_db::module::DbModule),
         Box::new(ledgers_policy::module::PolicyModule),
+        Box::new(ledgers_storage::StorageModule),
+        Box::new(ledgers_approvals::module::ApprovalsModule),
+        Box::new(ledgers_approvals::module::ApprovalsInboxModule),
+        Box::new(ledgers_approvals::module::ApprovalsNotifyModule),
         Box::new(ApiKeysModule),
+        // Carries the session table the owner sessions are stored in.
+        Box::new(ledgers_server::people::PeopleModule::new(None)),
     ];
     let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
+    let patch_limiter = limiter.clone();
     let kit = TestHarness::with_builder(
         builtin,
         move |builder| {
@@ -141,15 +162,30 @@ pub fn fixture_with(extra: Vec<Arc<dyn Module>>) -> Fixture {
         move |ports: &mut Ports| {
             ports.clock = Some(patch_clock as Arc<dyn cratefield_core::Clock>);
             ports.id_gen = Some(patch_ids as Arc<dyn IdGen>);
+            ports.rate_limiter = patch_limiter;
         },
     );
     let deps = Deps {
         db: kit.db.clone(),
         clock,
         id_gen: ids,
-        rate_limiter: None,
+        rate_limiter: limiter,
     };
 
+    // The company row approval requests reference; the served bootstrap creates it.
+    pollster::block_on(deps.db.execute(&cratefield_core::Statement::with_values(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (id) DO NOTHING"
+            .to_owned(),
+        vec![
+            sea_query::Value::from(COMPANY),
+            sea_query::Value::from("Halden Works GmbH"),
+            sea_query::Value::from("EUR"),
+            sea_query::Value::from(NOW),
+            sea_query::Value::from(NOW),
+        ],
+    )))
+    .expect("company row");
     let full = pollster::block_on(dispatch::bootstrap_dev(&deps, COMPANY)).expect("bootstrap");
     let draft = issue(&deps, Tier::Draft, eur_limits());
     let read = issue(&deps, Tier::Read, eur_limits());
@@ -191,4 +227,29 @@ fn issue(deps: &Deps, tier: Tier, limits: BTreeMap<String, CurrencyLimit>) -> St
 /// The body of a response, parsed.
 pub fn json(response: &TestResponse) -> serde_json::Value {
     response.json()
+}
+
+/// The session id the owner test session is stored under.
+pub const OWNER_SESSION: &str = "owner-session-0001";
+/// The owner's person id, as a session records it.
+pub const OWNER_PERSON: &str = "person-owner";
+
+/// Stores a signed-in owner session in the fixture's database. The session
+/// is what a passkey-less owner sign-in leaves behind; it expires after the
+/// fixture's clock says so, which the fixed clock never does.
+pub fn owner_session(fx: &Fixture) {
+    let now = fx.deps.clock.now().unix_timestamp();
+    let claims = PersonClaims {
+        person_id: OWNER_PERSON.to_owned(),
+        email: Some("owner@example.test".to_owned()),
+        roles: vec!["owner".to_owned()],
+        auth_time: Some(now),
+    };
+    pollster::block_on(store_session(
+        fx.deps.db.as_ref(),
+        OWNER_SESSION,
+        &claims,
+        now,
+    ))
+    .expect("store owner session");
 }

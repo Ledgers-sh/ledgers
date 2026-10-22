@@ -33,6 +33,7 @@ hex = "0.4"
 time = { workspace = true }
 
 [dev-dependencies]
+futures-util = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-db = { workspace = true }
 ledgers-money = { workspace = true }

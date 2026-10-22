@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BILLS_MATCH_OPERATION, fetchOperationIds, operationIds } from './features';
+import { BILLS_MATCH_OPERATION, operationIds } from './features';
+import { fetchOpenApiDocument } from './openapi';
 import { defaultServerUrl, LOCAL_SERVER_URL } from './config';
 
 const document = {
@@ -30,14 +31,14 @@ describe('operationIds', () => {
   });
 });
 
-describe('fetchOperationIds', () => {
+describe('reading the server’s operations', () => {
   it('reads the public document without sending a key', async () => {
     const seen: { url: string; init?: RequestInit }[] = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       seen.push({ url, init });
       return new Response(JSON.stringify(document), { status: 200 });
     }) as typeof fetch;
-    const ids = await fetchOperationIds('https://api-staging.ledgers.sh/', fetchImpl);
+    const ids = operationIds(await fetchOpenApiDocument('https://api-staging.ledgers.sh/', fetchImpl));
     expect(ids.has(BILLS_MATCH_OPERATION)).toBe(true);
     expect(seen[0].url).toBe('https://api-staging.ledgers.sh/v1/openapi');
     expect(new Headers(seen[0].init?.headers).has('Authorization')).toBe(false);
@@ -45,11 +46,11 @@ describe('fetchOperationIds', () => {
 
   it('reads as nothing offered when the server fails or is unreachable', async () => {
     const down = (async () => new Response('', { status: 503 })) as typeof fetch;
-    expect((await fetchOperationIds('http://127.0.0.1:3000', down)).size).toBe(0);
+    expect(operationIds(await fetchOpenApiDocument('http://127.0.0.1:3000', down)).size).toBe(0);
     const broken = (async () => {
       throw new TypeError('network');
     }) as typeof fetch;
-    expect((await fetchOperationIds('http://127.0.0.1:3000', broken)).size).toBe(0);
+    expect(operationIds(await fetchOpenApiDocument('http://127.0.0.1:3000', broken)).size).toBe(0);
   });
 });
 

@@ -20,6 +20,18 @@ pub enum ApprovalError {
         status: String,
     },
 
+    /// No approval request with that id in this company.
+    #[error("approval request not found")]
+    NotFound,
+
+    /// A high-risk approval needs a sign-in within the last five minutes.
+    #[error("a fresh sign-in is required to approve this request")]
+    ReauthRequired,
+
+    /// A bulk approval selection was refused (mixed risk or currencies).
+    #[error("bulk approval refused: {0}")]
+    BulkRefused(String),
+
     /// Step-up (passkey) is required but not provided.
     #[error("passkey step-up required")]
     StepUpRequired,

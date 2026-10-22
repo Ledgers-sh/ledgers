@@ -1978,6 +1978,7 @@ dependencies = [
  "cratefield-core",
  "cratefield-module-webhooks",
  "cratefield-testing",
+ "futures-util",
  "hex",
  "ledgers-audit",
  "ledgers-commands",
@@ -2017,18 +2018,24 @@ name = "ledgers-auth"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "cratefield-core",
  "cratefield-testing",
+ "hmac 0.12.1",
  "ledgers-audit",
  "ledgers-commands",
  "ledgers-db",
+ "p256 0.13.2",
  "pollster",
+ "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
  "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -2083,6 +2090,16 @@ dependencies = [
  "pollster",
  "sea-query",
  "thiserror",
+ "time",
+]
+
+[[package]]
+name = "ledgers-demo"
+version = "0.1.0"
+dependencies = [
+ "ledgers-ledger",
+ "ledgers-money",
+ "ledgers-tax",
  "time",
 ]
 
@@ -2204,17 +2221,21 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
+ "http",
  "ledgers-approvals",
  "ledgers-audit",
  "ledgers-auth",
  "ledgers-commands",
  "ledgers-db",
+ "ledgers-demo",
  "ledgers-ext",
  "ledgers-fx",
  "ledgers-ledger",
+ "ledgers-money",
  "ledgers-policy",
  "ledgers-storage",
  "ledgers-tax",
+ "p256 0.13.2",
  "pollster",
  "rusqlite",
  "schemars 1.2.3",
@@ -2226,6 +2247,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
  "worker",
 ]
 

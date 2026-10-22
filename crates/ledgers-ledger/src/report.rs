@@ -44,14 +44,31 @@ pub struct ProfitAndLoss {
 }
 
 /// Balance sheet: assets, liabilities, and equity as of a date.
+///
+/// Equity is presented the standard way: the equity accounts plus a
+/// "current year result" line (Jahresüberschuss / Jahresfehlbetrag), which is
+/// income minus expenses from the fiscal year start up to the as-of date. The
+/// year's P&L accounts are not closed into retained earnings until the
+/// year-end close, so without that line the sheet would not balance while the
+/// year has activity. Once the year is closed, its closing entry nets the P&L
+/// accounts to zero, so the line is zero and the result is not counted twice.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BalanceSheet {
     /// Total assets (sum of asset account balances).
     pub assets: Amount,
     /// Total liabilities (sum of liability account balances).
     pub liabilities: Amount,
-    /// Total equity (sum of equity account balances).
+    /// Total equity as presented: `equity_accounts` plus `current_year_result`.
     pub equity: Amount,
+    /// The equity accounts alone (capital, reserves, retained earnings).
+    pub equity_accounts: Amount,
+    /// The current year result: income minus expenses from the fiscal year
+    /// start up to the as-of date. Negative for a loss.
+    pub current_year_result: Amount,
+    /// Assets minus (liabilities plus equity). Zero when the sheet balances.
+    pub difference: Amount,
+    /// Whether `difference` is zero.
+    pub balanced: bool,
 }
 
 /// One dimension value's balance for an account.
@@ -299,8 +316,42 @@ pub async fn profit_and_loss(
     })
 }
 
+/// The start of the fiscal year that contains `as_of_date`: the `starts_on`
+/// of the covering `fiscal_year` row. Without a covering row the calendar year
+/// starts the year, which is what a company without a fiscal year calendar
+/// means by one.
+async fn fiscal_year_start(
+    db: &dyn Database,
+    company_id: &str,
+    as_of_date: &str,
+) -> Result<String, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT starts_on FROM fiscal_year \
+             WHERE company_id = ? AND starts_on <= ? AND ends_on >= ? \
+             ORDER BY starts_on DESC LIMIT 1"
+                .to_owned(),
+            vec![
+                SeaValue::from(company_id),
+                SeaValue::from(as_of_date),
+                SeaValue::from(as_of_date),
+            ],
+        ))
+        .await?;
+    match rows.rows.first() {
+        Some(row) => row
+            .get("starts_on")
+            .ok_or_else(|| required_column("starts_on")),
+        None => Ok(format!(
+            "{}-01-01",
+            as_of_date.get(..4).unwrap_or(as_of_date)
+        )),
+    }
+}
+
 /// Generates a balance sheet as of the given date: cumulative balances
-/// from all entries up to and including that date.
+/// from all entries up to and including that date, with the current year
+/// result added to equity (see [`BalanceSheet`]).
 ///
 /// # Arguments
 /// * `db` - The database connection
@@ -311,7 +362,7 @@ pub async fn profit_and_loss(
 /// Returns [`JournalError::Database`] if the query fails.
 ///
 /// # Returns
-/// A `BalanceSheet` struct with assets, liabilities, and equity totals.
+/// A `BalanceSheet` struct with assets, liabilities, equity and the balance check.
 pub async fn balance_sheet(
     db: &dyn Database,
     company_id: &str,
@@ -320,7 +371,7 @@ pub async fn balance_sheet(
     let sql = r"
         SELECT
             a.account_type,
-            COALESCE(SUM(jl.base_minor), 0) as total_amount
+            CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) as total_amount
         FROM journal_line jl
         JOIN journal_entry je ON jl.entry_id = je.id
         JOIN account a ON jl.account_number = a.number AND je.company_id = a.company_id
@@ -377,14 +428,54 @@ pub async fn balance_sheet(
         Currency::from_str("EUR")?
     };
 
+    // The current year result: income and expense activity from the fiscal
+    // year start up to the as-of date. Income is credit-normal, so the
+    // equity-side result is the negated sum of the P&L balances. A closed year
+    // carries a closing entry that nets its P&L accounts to zero, so a closed
+    // year contributes nothing here: its result already sits in retained
+    // earnings.
+    let year_start = fiscal_year_start(db, company_id, as_of_date).await?;
+    let pnl_sql = r"
+        SELECT CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) as total_amount
+        FROM journal_line jl
+        JOIN journal_entry je ON jl.entry_id = je.id
+        JOIN account a ON jl.account_number = a.number AND je.company_id = a.company_id
+        WHERE je.company_id = ? AND je.posting_date >= ? AND je.posting_date <= ?
+          AND a.account_type IN ('income', 'expense')
+    ";
+    let pnl_rows = db
+        .query(&Statement::with_values(
+            pnl_sql.to_string(),
+            vec![
+                SeaValue::from(company_id),
+                SeaValue::from(year_start.as_str()),
+                SeaValue::from(as_of_date),
+            ],
+        ))
+        .await?;
+    let pnl_debit_minor: i64 = match pnl_rows.rows.first() {
+        Some(row) => row
+            .get("total_amount")
+            .ok_or_else(|| required_column("total_amount"))?,
+        None => 0,
+    };
+    let current_year_result_minor = -pnl_debit_minor;
+
+    let equity_total_minor = equity_minor + current_year_result_minor;
+    let difference_minor = assets_minor - liabilities_minor - equity_total_minor;
+
     let assets = Amount::from_i64(assets_minor, currency);
     let liabilities = Amount::from_i64(liabilities_minor, currency);
-    let equity = Amount::from_i64(equity_minor, currency);
+    let equity = Amount::from_i64(equity_total_minor, currency);
 
     Ok(BalanceSheet {
         assets,
         liabilities,
         equity,
+        equity_accounts: Amount::from_i64(equity_minor, currency),
+        current_year_result: Amount::from_i64(current_year_result_minor, currency),
+        difference: Amount::from_i64(difference_minor, currency),
+        balanced: difference_minor == 0,
     })
 }
 
