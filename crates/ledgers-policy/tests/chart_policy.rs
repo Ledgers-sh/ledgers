@@ -24,6 +24,7 @@ fn policy(chart_changes: bool) -> (KeyPolicy, Principal) {
         last_used_at: None,
         revoked_at: None,
         chart_changes,
+        unit: None,
     };
     let keys = BTreeMap::from([("key-chart".to_string(), key)]);
     let policy = KeyPolicy::new(keys, BTreeSet::new(), now, UtcOffset::UTC);

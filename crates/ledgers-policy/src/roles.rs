@@ -61,6 +61,14 @@ impl Class {
 pub fn class_of(command: &str) -> Option<Class> {
     Some(match command {
         "company.get"
+        | "company.profile"
+        | "bank.accounts.list"
+        | "bank.accounts.get"
+        | "bank.transactions.list"
+        | "bank.rules.list"
+        | "reports.units_summary"
+        | "tax.user_rates"
+        | "units.list"
         | "accounts.get"
         | "accounts.list"
         | "entries.get"
@@ -80,6 +88,11 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "tax_settings.get"
         | "test.read" => Class::Read,
         "company.update"
+        | "units.create"
+        | "units.rename"
+        | "units.archive"
+        | "approvals.low_risk_limits"
+        | "approvals.request_ttl_hours"
         | "tax_settings.update"
         | "approval_settings.get"
         | "approval_settings.update"
@@ -88,11 +101,34 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "policy.explain" => Class::Keys,
         "audit.list" => Class::Audit,
         "approvals.get" | "approvals.list" => Class::ApprovalsRead,
-        "approvals.decide" => Class::ApprovalsDecide,
-        "entries.post" | "entries.reverse" | "journal.post_entry" | "bills.create"
-        | "bills.update" | "bills.extract" | "bills.confirm" | "bills.discard" | "bills.post"
-        | "documents.register" | "accounts.create" | "accounts.update" | "accounts.archive"
-        | "accounts.restore" | "test.write" | "test.post" => Class::Post,
+        "approvals.decide" | "approvals.decide_bulk" => Class::ApprovalsDecide,
+        "entries.post"
+        | "entries.reverse"
+        | "entries.transfer"
+        | "journal.post_entry"
+        | "bills.create"
+        | "bills.update"
+        | "bills.extract"
+        | "bills.confirm"
+        | "bills.discard"
+        | "bills.post"
+        | "documents.register"
+        | "accounts.create"
+        | "accounts.update"
+        | "accounts.archive"
+        | "accounts.restore"
+        | "bank.accounts.create"
+        | "bank.accounts.update"
+        | "bank.accounts.archive"
+        | "bank.accounts.reconcile"
+        | "bank.statements.import"
+        | "bank.transactions.post"
+        | "bank.transactions.link"
+        | "bank.transactions.ignore"
+        | "bank.rules.create"
+        | "bank.rules.enable"
+        | "test.write"
+        | "test.post" => Class::Post,
         "bill.pay" => Class::MoneyOut,
         "periods.close"
         | "periods.reopen"

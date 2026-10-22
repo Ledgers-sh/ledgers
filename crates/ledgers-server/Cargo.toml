@@ -26,6 +26,7 @@ ledgers-money = { workspace = true }
 ledgers-storage = { workspace = true }
 ledgers-db = { workspace = true }
 ledgers-documents = { workspace = true }
+ledgers-bank = { workspace = true }
 ledgers-bills = { workspace = true }
 ledgers-extract = { workspace = true }
 hex = { workspace = true }

@@ -289,16 +289,33 @@ pub async fn account_balances(
     db: &dyn Database,
     company_id: &str,
 ) -> Result<Vec<AccountBalance>, JournalError> {
+    account_balances_scoped(db, company_id, &crate::units::UnitScope::Consolidated).await
+}
+
+/// [`account_balances`] for one reporting scope: the company (intercompany
+/// entries eliminated) or one business unit's lines.
+///
+/// # Errors
+/// [`JournalError::Database`] when the query fails.
+pub async fn account_balances_scoped(
+    db: &dyn Database,
+    company_id: &str,
+    scope: &crate::units::UnitScope,
+) -> Result<Vec<AccountBalance>, JournalError> {
+    let (filter, scope_values) = scope.line_filter();
+    let mut values = vec![SeaValue::from(company_id)];
+    values.extend(scope_values);
     let rows = db
         .query(&Statement::with_values(
-            "SELECT jl.account_number AS account_number, je.base_currency AS base_currency, \
+            format!(
+                "SELECT jl.account_number AS account_number, je.base_currency AS base_currency, \
              CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) AS total \
              FROM journal_line jl JOIN journal_entry je ON jl.entry_id = je.id \
-             WHERE je.company_id = ? \
+             WHERE je.company_id = ?{filter} \
              GROUP BY jl.account_number, je.base_currency \
              ORDER BY jl.account_number, je.base_currency"
-                .to_owned(),
-            vec![SeaValue::from(company_id)],
+            ),
+            values,
         ))
         .await?;
     let mut balances = Vec::with_capacity(rows.rows.len());

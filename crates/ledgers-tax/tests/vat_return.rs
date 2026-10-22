@@ -332,7 +332,7 @@ fn oss_matches_fixture() -> Result<(), VatReturnError> {
 fn generic_return_net_payable() -> Result<(), VatReturnError> {
     let from = Date::from_calendar_date(2026, time::Month::January, 1).unwrap();
     let to = Date::from_calendar_date(2026, time::Month::March, 31).unwrap();
-    let r = prepare_generic_return(&fixture(), from, to, VatBasis::Accrual)?;
+    let r = prepare_generic_return(&fixture(), from, to, VatBasis::Accrual, "EUR")?;
     let computed = r.output_vat.checked_sub(r.input_vat)?;
     assert_eq!(
         r.net_payable, computed,

@@ -1,0 +1,71 @@
+# United Kingdom: VAT.
+#
+# Sources:
+#   Standard rate 20% from 2011-01-04: GOV.UK, https://www.gov.uk/vat-rates (fetched 2026-10-23)
+#   Reduced 5% and zero 0%: GOV.UK https://www.gov.uk/vat-rates (rate confirmed; dates not shown)
+#   VAT number format: HMRC, https://design.tax.service.gov.uk/hmrc-design-patterns/vat-registration-number/
+#
+# TODO (not in the pack): the valid_from of the 5% and 0% rates (rates left out
+#   until dated from an official source). The 12-digit VAT number form is accepted
+#   by the validator but its rule is not explained in the source.
+# TODO: the nine-digit mod-97 check is applied; pre-2010 and 55-offset numbers are
+#   not handled. GBGD/GBHA numbers are accepted by shape only.
+# TODO: the VAT return (VAT100 / MTD) layout is not drafted; the generic return only.
+
+id = "gb"
+iso = "GB"
+covers = ["GB"]
+name = "United Kingdom"
+native_name = "United Kingdom"
+currency = "GBP"
+fiscal_year_start_month = 1
+decimal_separator = "."
+thousands_separator = ","
+date_format = "DD/MM/YYYY"
+chart = "generic-sme"
+regime = "vat"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "VAT number"
+validator = "gb-vat"
+note = "GB plus nine digits (mod-97 check) or twelve digits. Shape and check digits only; existence is not checked against HMRC."
+
+[[rates]]
+jurisdiction = "GB"
+category = "standard"
+percent = "20"
+valid_from = "2011-01-04"
+source = "GOV.UK VAT rates: standard rate 20% from 4 January 2011"
+
+[[tax_codes]]
+code = "GB-VAT-20"
+label = "Output VAT 20%"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "GB-VAT-IN"
+label = "Input VAT"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "GB-VAT-ZERO"
+label = "Zero-rated supply (0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "GB-VAT-EXEMPT"
+label = "Exempt supply"
+kind = "exempt"
+category = "exempt"
+
+[[returns]]
+id = "generic"
+label = "VAT return (generic)"
+kind = "generic"

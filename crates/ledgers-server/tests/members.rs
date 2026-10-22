@@ -1020,3 +1020,16 @@ fn a_member_row_shows_the_address_and_when_the_person_was_last_active() {
     );
     assert_eq!(people["me"]["role"], "viewer");
 }
+
+#[test]
+fn every_registered_command_has_a_role_rule() {
+    // A command with no class is refused for every role, so a new command that
+    // is registered without one would be unusable. This keeps the matrix whole.
+    for descriptor in dispatch::registry().iter() {
+        assert!(
+            ledgers_policy::roles::class_of(&descriptor.name).is_some(),
+            "{} has no role rule in ledgers-policy/src/roles.rs",
+            descriptor.name
+        );
+    }
+}

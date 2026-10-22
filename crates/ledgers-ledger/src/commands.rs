@@ -58,7 +58,7 @@ fn no_sleep(_: Duration) {}
 /// change does — re-reading the audit head inside the plan closure so a
 /// fork (a unique violation on `(company_id, seq)`, the one failure
 /// class ADR 0004 allows a retry for) re-plans onto a fresh chain.
-async fn change_with_audit(
+pub(crate) async fn change_with_audit(
     db: &dyn Database,
     company_id: &str,
     audit: &AuditContext,

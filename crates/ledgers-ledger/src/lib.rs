@@ -82,6 +82,7 @@ pub mod report;
 pub mod reversal;
 pub mod store;
 pub mod surface;
+pub mod units;
 
 pub use account::{Account, AccountDraft, AccountEntry, AccountType, NormalBalance};
 pub use chart::{ChartAccount, ChartTemplate};
@@ -167,6 +168,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "account_display_name",
         include_str!("../migrations/sqlite/0008_account_display_name.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0009",
+        "units",
+        include_str!("../migrations/sqlite/0009_units.sql"),
+    ),
 ];
 
 /// The Postgres override set: identical DDL for the tables, and the
@@ -213,6 +219,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0008",
         "account_display_name",
         include_str!("../migrations/postgres/0008_account_display_name.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0009",
+        "units",
+        include_str!("../migrations/postgres/0009_units.sql"),
     ),
 ];
 
@@ -261,7 +272,7 @@ mod tests {
         // assert_migration_set already ran at compile time; this pins
         // the sets' shape for readers.
         for set in [SQLITE_MIGRATIONS, POSTGRES_MIGRATIONS] {
-            assert_eq!(set.len(), 8);
+            assert_eq!(set.len(), 9);
             assert_eq!(set[0].id, "0001");
             assert_eq!(set[0].name, "accounts");
             assert_eq!(set[1].id, "0002");
@@ -278,6 +289,8 @@ mod tests {
             assert_eq!(set[6].name, "dimensions");
             assert_eq!(set[7].id, "0008");
             assert_eq!(set[7].name, "account_display_name");
+            assert_eq!(set[8].id, "0009");
+            assert_eq!(set[8].name, "units");
         }
     }
 

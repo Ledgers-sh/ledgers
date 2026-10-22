@@ -15,6 +15,7 @@
 //! Amounts are integer minor units of EUR (cents), debit and credit as
 //! separate sides, never floats (docs/PLAN.md section 3).
 
+pub mod factory_zero;
 pub mod halden;
 
 use std::collections::BTreeMap;
@@ -139,8 +140,38 @@ pub struct DemoBook {
     pub year: i32,
     /// The dimension values to create before posting.
     pub dimensions: Vec<DemoDimension>,
+    /// The business units to create before posting (ledgers-ledger units).
+    pub units: Vec<DemoUnit>,
     /// The entries, in the order they post.
     pub entries: Vec<DemoEntry>,
+}
+
+/// A business unit the company keeps its own books for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DemoUnit {
+    /// The short code (2 to 16 ASCII alphanumerics).
+    pub code: &'static str,
+    /// The display name.
+    pub name: &'static str,
+    /// The colour, `#RRGGBB`.
+    pub colour: &'static str,
+}
+
+/// The chart accounts an intercompany movement between units uses: the
+/// inter-unit receivable (`inter-unit-due-from`) and payable
+/// (`inter-unit-due-to`) of the generic SME chart. An entry that touches one
+/// of them is intercompany: consolidated views leave it out.
+pub const INTERCOMPANY_ACCOUNTS: [&str; 2] = ["1070", "2050"];
+
+/// Whether an entry is intercompany (touches an inter-unit account).
+#[must_use]
+pub fn is_intercompany(entry: &DemoEntry) -> bool {
+    match &entry.kind {
+        EntryKind::Post { lines } => lines
+            .iter()
+            .any(|line| INTERCOMPANY_ACCOUNTS.contains(&line.account)),
+        EntryKind::Reverse { .. } => false,
+    }
 }
 
 /// The signed total of an entry's lines in minor units: debits minus
@@ -204,7 +235,8 @@ impl DemoBook {
     fn sum_where(&self, keep: impl Fn(&str) -> bool) -> BTreeMap<&'static str, i64> {
         let mut totals: BTreeMap<&'static str, i64> = BTreeMap::new();
         for entry in &self.entries {
-            if !keep(&entry.posting_date) {
+            // Consolidated: intercompany movements between units net away.
+            if !keep(&entry.posting_date) || is_intercompany(entry) {
                 continue;
             }
             if let Some(lines) = self.posted_lines(entry) {

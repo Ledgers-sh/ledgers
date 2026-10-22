@@ -140,6 +140,7 @@ export function CompanySettings() {
             {field('city', 'settings.city', { maxLength: 100, autoComplete: 'address-level2' })}
             {field('country', 'settings.country', { maxLength: 2, mono: true, hint: 'settings.country_hint', autoComplete: 'country' })}
           </div>
+          {view.base_currency_locked ? <p class="hint">{t('settings.country_locked_hint')}</p> : null}
           {field('contact_email', 'settings.contact_email', { type: 'email', maxLength: 254, autoComplete: 'email', hint: 'settings.contact_email_hint' })}
           <div class="form-actions">
             {saved ? (

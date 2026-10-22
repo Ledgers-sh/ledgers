@@ -448,9 +448,31 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "/v1/reports/trends",
             "ledgers reports trends",
         ),
+        entry(
+            "reports.units_summary",
+            "read",
+            "GET",
+            "/v1/reports/units-summary",
+            "ledgers reports units-summary",
+        ),
+        entry(
+            "units.list",
+            "read",
+            "GET",
+            "/v1/units",
+            "ledgers units list",
+        ),
+        entry(
+            "entries.transfer",
+            "post-within-limits",
+            "POST",
+            "/v1/transfers",
+            "ledgers entries transfer",
+        ),
     ];
     commands.extend(human_only_commands());
     commands.extend(approval_commands());
+    commands.extend(bank_commands());
     commands.extend(settings_commands());
     commands
 }
@@ -637,11 +659,147 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "ledgers keys create",
         ),
         human_entry(
+            "units.create",
+            "draft",
+            "POST",
+            "/v1/units",
+            "ledgers units create",
+        ),
+        human_entry(
+            "units.rename",
+            "draft",
+            "POST",
+            "/v1/units/{code}/rename",
+            "ledgers units rename",
+        ),
+        human_entry(
+            "units.archive",
+            "draft",
+            "POST",
+            "/v1/units/{code}/archive",
+            "ledgers units archive",
+        ),
+        human_entry(
             "keys.revoke",
             "post-within-limits",
             "POST",
             "/v1/keys/{id}/revoke",
             "ledgers keys revoke",
+        ),
+    ]
+}
+
+/// The bank commands (issues #26 and #48): accounts and statements, the
+/// line list and its matching, bank rules. Accounts and rule enabling are
+/// person-only; a rule an agent proposes waits for a person.
+#[allow(clippy::too_many_lines)]
+fn bank_commands() -> Vec<CommandDescriptor> {
+    fn human(name: &str, tier: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
+        CommandDescriptor {
+            human_only: true,
+            idempotent: method == "GET",
+            mcp: None,
+            ..entry(name, tier, method, path, cli)
+        }
+    }
+    vec![
+        entry(
+            "bank.accounts.list",
+            "read",
+            "GET",
+            "/v1/bank/accounts",
+            "ledgers bank accounts list",
+        ),
+        entry(
+            "bank.accounts.get",
+            "read",
+            "GET",
+            "/v1/bank/accounts/{id}",
+            "ledgers bank accounts get",
+        ),
+        entry(
+            "bank.accounts.reconcile",
+            "read",
+            "GET",
+            "/v1/bank/accounts/{id}/reconciliation",
+            "ledgers bank accounts reconcile",
+        ),
+        human(
+            "bank.accounts.create",
+            "draft",
+            "POST",
+            "/v1/bank/accounts",
+            "ledgers bank accounts create",
+        ),
+        human(
+            "bank.accounts.update",
+            "draft",
+            "POST",
+            "/v1/bank/accounts/{id}/update",
+            "ledgers bank accounts update",
+        ),
+        human(
+            "bank.accounts.archive",
+            "draft",
+            "POST",
+            "/v1/bank/accounts/{id}/archive",
+            "ledgers bank accounts archive",
+        ),
+        entry(
+            "bank.statements.import",
+            "draft",
+            "POST",
+            "/v1/bank/statements/import",
+            "ledgers bank statements import",
+        ),
+        entry(
+            "bank.transactions.list",
+            "read",
+            "GET",
+            "/v1/bank/transactions",
+            "ledgers bank transactions list",
+        ),
+        entry(
+            "bank.transactions.post",
+            "post-within-limits",
+            "POST",
+            "/v1/bank/transactions/{id}/post",
+            "ledgers bank transactions post",
+        ),
+        entry(
+            "bank.transactions.link",
+            "draft",
+            "POST",
+            "/v1/bank/transactions/{id}/link",
+            "ledgers bank transactions link",
+        ),
+        entry(
+            "bank.transactions.ignore",
+            "draft",
+            "POST",
+            "/v1/bank/transactions/{id}/ignore",
+            "ledgers bank transactions ignore",
+        ),
+        entry(
+            "bank.rules.list",
+            "read",
+            "GET",
+            "/v1/bank/rules",
+            "ledgers bank rules list",
+        ),
+        entry(
+            "bank.rules.create",
+            "draft",
+            "POST",
+            "/v1/bank/rules",
+            "ledgers bank rules create",
+        ),
+        human(
+            "bank.rules.enable",
+            "draft",
+            "POST",
+            "/v1/bank/rules/{id}/enable",
+            "ledgers bank rules enable",
         ),
     ]
 }

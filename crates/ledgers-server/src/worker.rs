@@ -255,20 +255,41 @@ async fn seed_demo_route(
         return Response::error(message, status);
     }
 
+    // `?demo=halden` (the default) loads Halden Works into LEDGERS_COMPANY_ID;
+    // `?demo=factory-zero` loads the Factory Zero book into its own company,
+    // LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID, which is created on first use.
+    let demo_name = req
+        .url()?
+        .query_pairs()
+        .find(|(key, _)| key == "demo")
+        .map(|(_, value)| value.into_owned())
+        .unwrap_or_else(|| "halden".to_owned());
+    let (company_var, factory_zero) = match demo_name.as_str() {
+        "halden" => ("LEDGERS_COMPANY_ID", false),
+        "factory-zero" => ("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID", true),
+        _ => return Response::error("demo must be halden or factory-zero", 400),
+    };
     let company_id = env
-        .var("LEDGERS_COMPANY_ID")
+        .var(company_var)
         .map(|value| value.to_string())
         .unwrap_or_default();
     if company_id.is_empty() {
-        return Response::error("LEDGERS_COMPANY_ID is not set", 500);
+        return Response::error(format!("{company_var} is not set"), 500);
     }
     let ports = runtime.ports(env, Arc::new(NoopDefer));
     let Some(deps) = Deps::from_ports(&ports) else {
         return Response::error("Storage is not bound", 503);
     };
 
-    let book = ledgers_demo::halden::book(deps.clock.now().year());
-    let mut response = match demo::seed_internal(&deps, &company_id, &book).await {
+    let year = deps.clock.now().year();
+    let result = if factory_zero {
+        let book = ledgers_demo::factory_zero::book(year);
+        demo::seed_company_book(&deps, &company_id, &book).await
+    } else {
+        let book = ledgers_demo::halden::book(year);
+        demo::seed_internal(&deps, &company_id, &book).await
+    };
+    let mut response = match result {
         Ok(report) => {
             console_log!(
                 "demo seed: posted {}, reversed {}, already present {}, dimensions created {}",

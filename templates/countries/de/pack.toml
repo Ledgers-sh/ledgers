@@ -1,0 +1,132 @@
+# Germany: Umsatzsteuer (VAT). The rates are the ones the German code carried
+# before country packs existed; the statute is public law.
+#
+# Sources:
+#   §12 UStG (Umsatzsteuergesetz), https://www.gesetze-im-internet.de/ustg_1980/__12.html
+#   Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512 (temporary rates 2020-07-01 to 2020-12-31)
+#   USt-IdNr format: BZSt, https://www.bzst.de (DE + nine digits, ISO 7064 check digit)
+#
+# TODO (not modelled): since 2026-01-01 restaurant and catering services
+# (excluding beverages) are taxed at 7% (§12 Abs. 2 Nr. 15 UStG, BMF letter
+# 2025-12-22). The rate table is per category, so this special case needs a
+# per-supply rate and is not in the pack yet. The 19%/7% valid_from of 2021-01-01
+# is taken from the 2020 temporary-rate end date; the §12 page shows no date.
+#
+# Chart: de-hgb (HGB §266 / §275). Rounding: per document, as UStVA requires.
+
+id = "de"
+iso = "DE"
+covers = ["DE"]
+name = "Germany"
+native_name = "Deutschland"
+currency = "EUR"
+fiscal_year_start_month = 1
+decimal_separator = ","
+thousands_separator = "."
+date_format = "DD.MM.YYYY"
+chart = "de-hgb"
+regime = "vat"
+rounding = "per_document"
+
+[registration]
+label = "USt-IdNr."
+validator = "iso7064-nine"
+note = "DE plus nine digits, with the ISO 7064 Mod 11,10 check digit. Existence is not checked against the BZSt."
+
+[[rates]]
+jurisdiction = "DE"
+category = "standard"
+percent = "19"
+valid_from = "2007-01-01"
+valid_to = "2020-06-30"
+source = "§12 UStG"
+
+[[rates]]
+jurisdiction = "DE"
+category = "reduced"
+percent = "7"
+valid_from = "2007-01-01"
+valid_to = "2020-06-30"
+source = "§12 UStG"
+
+[[rates]]
+jurisdiction = "DE"
+category = "standard"
+percent = "16"
+valid_from = "2020-07-01"
+valid_to = "2020-12-31"
+source = "§12 UStG; Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512"
+
+[[rates]]
+jurisdiction = "DE"
+category = "reduced"
+percent = "5"
+valid_from = "2020-07-01"
+valid_to = "2020-12-31"
+source = "§12 UStG; Zweites Corona-Steuerhilfegesetz, BGBl. I 2020 S. 1512"
+
+[[rates]]
+jurisdiction = "DE"
+category = "standard"
+percent = "19"
+valid_from = "2021-01-01"
+source = "§12 UStG"
+
+[[rates]]
+jurisdiction = "DE"
+category = "reduced"
+percent = "7"
+valid_from = "2021-01-01"
+source = "§12 UStG"
+
+[[rates]]
+jurisdiction = "DE"
+category = "zero"
+percent = "0"
+valid_from = "2007-01-01"
+source = "§12 UStG"
+
+[[tax_codes]]
+code = "19-U"
+label = "Output VAT 19%"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "7-U"
+label = "Output VAT 7%"
+kind = "output_vat"
+category = "reduced"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "19-V"
+label = "Input VAT 19%"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "7-V"
+label = "Input VAT 7%"
+kind = "input_vat"
+category = "reduced"
+input_tag = "vat-input"
+
+[[tax_codes]]
+code = "0-U"
+label = "Zero-rated supply (0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "FREI"
+label = "Exempt supply (§4 UStG)"
+kind = "exempt"
+category = "exempt"
+
+[[returns]]
+id = "ustva"
+label = "Umsatzsteuer-Voranmeldung (UStVA)"
+kind = "ustva"

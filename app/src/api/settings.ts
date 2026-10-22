@@ -61,8 +61,29 @@ export interface JournalNumberingView {
 }
 
 export interface TaxRateView {
-  category: 'standard' | 'reduced';
+  category: 'standard' | 'reduced' | 'zero';
   percent: string;
+  valid_from: string;
+  source: string;
+}
+
+export interface TaxCodeView {
+  code: string;
+  label: string;
+  kind: 'output_vat' | 'input_vat' | 'reverse_charge' | 'exempt' | 'zero' | 'import_vat';
+  category: 'standard' | 'reduced' | 'zero' | 'exempt';
+}
+
+export interface ReturnView {
+  id: string;
+  label: string;
+}
+
+/** A rate the company defines itself (generic and US sales-tax packs only). */
+export interface UserRateInput {
+  category: 'standard' | 'reduced' | 'zero';
+  percent: string;
+  valid_from: string;
   source: string;
 }
 
@@ -72,6 +93,16 @@ export interface TaxSettingsView {
   country: string;
   rate_table: boolean;
   rates: TaxRateView[];
+  pack: string;
+  pack_name: string;
+  regime: '' | 'vat' | 'gst' | 'sales_tax' | 'none';
+  user_rates_allowed: boolean;
+  rates_status: '' | 'complete' | 'pending';
+  registration_label: string;
+  registration_note: string;
+  returns: ReturnView[];
+  tax_codes: TaxCodeView[];
+  user_rates: UserRateInput[];
 }
 
 export interface ApprovalSettingsView {
@@ -164,7 +195,7 @@ export function taxSettingsGet(config: Config): Promise<TaxSettingsView> {
 /** POST /v1/tax-settings (tax_settings.update). */
 export function taxSettingsUpdate(
   config: Config,
-  input: { small_business: boolean; vat_basis: 'accrual' | 'cash' },
+  input: { small_business: boolean; vat_basis: 'accrual' | 'cash'; user_rates?: UserRateInput[] },
 ): Promise<TaxSettingsView> {
   return request<TaxSettingsView>(config, { method: 'POST', path: '/v1/tax-settings', body: input });
 }

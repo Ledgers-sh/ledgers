@@ -6,6 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { handleBills, resetBills, servedFile } from './mockBills';
+import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
 import { handlePeople, resetPeople } from './mockPeople';
 import http from 'node:http';
@@ -59,6 +60,8 @@ export interface MockOptions {
    * has a hyphenated external id (like the demo book's), the second has none.
    */
   extraEntries?: number;
+  /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
+  bank?: boolean;
 }
 
 export const PERSON = {
@@ -685,7 +688,8 @@ function seedAccounts(): MockAccount[] {
     normal_balance: account.normal_balance,
     currency: null,
     parent: null,
-    tags: [],
+    // The cash account is the chart account a bank account links to (tag bank).
+    tags: account.number === '1000' ? ['bank'] : [],
     archived: false,
   }));
   return [
@@ -966,6 +970,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.reversals = [];
   state.person = options.person ?? false;
   resetBills();
+  resetBank(options.bank === true);
   state.approvals = options.person ? approvalSeed() : [];
   state.decisions = [];
   state.bulk = [];
@@ -1030,6 +1035,22 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
+        }
+        if (path.startsWith('/v1/bank')) {
+          const bankReply = handleBank(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
+          if (bankReply) {
+            res.writeHead(bankReply.status, { ...headers, 'Content-Type': bankReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(bankReply.body));
+            return;
+          }
+        }
+        if (req.method === 'POST' && path === '/v1/documents/upload') {
+          const statement = handleStatementUpload(raw, decodeURIComponent(String(req.headers['x-file-name'] ?? 'document')));
+          if (statement) {
+            res.writeHead(statement.status, { ...headers, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(statement.body));
+            return;
+          }
         }
         if (path.startsWith('/v1/documents') || path.startsWith('/v1/bills')) {
           const billsReply = handleBills(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, raw, req.headers);

@@ -1,0 +1,75 @@
+# Netherlands: omzetbelasting (BTW, VAT).
+#
+# Sources (verified 2026-10-23):
+#   BTW tarieven (21%, 9%, 0%): Belastingdienst,
+#     https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/btw_berekenen_aan_uw_klanten/btw_berekenen/btw_tarief/btw_tarief
+#   BTW-identificatienummer format: Belastingdienst,
+#     https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-identificatienummer-en-omzetbelastingnummer
+#   Aangifte omzetbelasting rubrieken: Belastingdienst (aangifte layout, see TODO)
+#
+# TODO (rates left out, not verified): the valid_from dates of the 21% and 9%
+#   rates (the 9% rate is commonly dated 2019-01-01 and 21% from 2012-10-01, but
+#   the official pages carry no dates and no source was fetched); the 0% rate;
+#   the change of accommodation to 21% from 2026-01-01 (Belastingdienst news,
+#   search snippet only). Until those are added the pack carries no rates.
+# TODO: the aangifte rubriek boxes (1a, 1b, 2a, 4a, 5b, 5g) are not mapped yet;
+#   the 2026 layout must be checked against the form before drafting.
+# TODO: the BTW-id check digits are not verified (shape only).
+
+id = "nl"
+iso = "NL"
+covers = ["NL"]
+name = "Netherlands"
+native_name = "Nederland"
+currency = "EUR"
+fiscal_year_start_month = 1
+decimal_separator = ","
+thousands_separator = "."
+date_format = "DD-MM-YYYY"
+chart = "generic-sme"
+regime = "vat"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "BTW-id"
+validator = "nl-btw"
+note = "NL, nine digits, B and two digits. Shape only; the check digits and existence are not checked."
+
+[[tax_codes]]
+code = "NL-BTW-21"
+label = "Output VAT 21%"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "NL-BTW-9"
+label = "Output VAT 9%"
+kind = "output_vat"
+category = "reduced"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "NL-BTW-0"
+label = "Zero-rated supply (0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "NL-VRIJ"
+label = "Exempt supply (vrijgesteld)"
+kind = "exempt"
+category = "exempt"
+
+[[tax_codes]]
+code = "NL-VB-21"
+label = "Input VAT (voorbelasting)"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "BTW-aangifte (generic)"
+kind = "generic"

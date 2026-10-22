@@ -4,6 +4,7 @@
 pub mod agent_keys;
 pub mod config;
 pub mod demo;
+pub mod demo_bank;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -181,6 +182,9 @@ pub fn compose(
     // module above, the same way the D1 files are numbered.
     let builder = builder.module(ledgers_documents::DocumentsStoreModule);
     let builder = builder.module(ledgers_bills::BillsModule);
+    // Bank accounts, statements and reconciliation: after the documents and the
+    // bills whose tables reconciliation reads.
+    let builder = builder.module(ledgers_bank::BankModule);
     // The company's organization: members, roles and invitations. Mounted after
     // the bills module so its migrations are the last in the D1 set.
     let builder = builder.module(members::MembersModule::new(cors_origins.clone()));

@@ -72,6 +72,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
 
+# Bank accounts, statement import and reconciliation (issues #26, #48).
+ledgers-bank = { path = "crates/ledgers-bank" }
 # Source documents (issue #20): hashing, sniffing, signed links, the document store.
 ledgers-documents = { path = "crates/ledgers-documents" }
 # Vendor bills (issue #22): bills from extracted documents, posted through the executor.
