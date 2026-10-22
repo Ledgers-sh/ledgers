@@ -2,25 +2,35 @@ import { useState } from 'preact/hooks';
 import { keysList, keysRevoke } from '../api/commands';
 import type { AgentKeyView, KeysCreateOutput } from '../api/types';
 import { useAsync } from '../hooks';
-import { TOKEN_PLACEHOLDER, tierLabel } from '../lib/agentKeys';
+import { TOKEN_PLACEHOLDER, tierLabelKey } from '../lib/agentKeys';
 import { useSession } from '../session';
-import { ConfirmDialog, Empty, ErrorBanner, LOCALE, Skeleton } from './common';
+import { intlLocale, t, tRich, type MessageKey } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
+import { ConfirmDialog, Empty, ErrorBanner, Skeleton } from './common';
 import { Icon } from './icons';
 import { AgentKeyCreate, ShowOnceDialog } from './AgentKeyCreate';
 import { UsageSnippets } from './UsageSnippets';
 
 /** A timestamp as the person's locale shows it, or a dash when there is none. */
 export function formatWhen(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return t('common.empty_cell');
   const when = new Date(iso);
-  return Number.isNaN(when.getTime()) ? iso : when.toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(when.getTime())
+    ? iso
+    : when.toLocaleString(intlLocale(), { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /** "EUR 1000.00 / 5000.00" for each currency: per entry, then per day. */
 export function limitsSummary(key: AgentKeyView): string[] {
   const entries = Object.entries(key.limits);
-  if (entries.length === 0) return ['No currencies: cannot move money'];
+  if (entries.length === 0) return [t('agentKeys.no_currencies')];
   return entries.map(([currency, limit]) => `${currency} ${limit.per_entry} / ${limit.per_day}`);
+}
+
+/** A key's tier, in the reader's language; the server's own word for a tier the app does not know. */
+function tierText(tier: string): string {
+  const key: MessageKey | null = tierLabelKey(tier);
+  return key ? t(key) : tier;
 }
 
 /**
@@ -40,11 +50,8 @@ export function AgentKeys() {
   if (!personal) {
     return (
       <section class="settings-section" aria-labelledby="agent-keys-title">
-        <h2 id="agent-keys-title">Agent keys</h2>
-        <Empty title="Sign in as a person to manage agent keys">
-          This session uses an agent key. An agent key cannot create, list or revoke agent keys. Sign in with a passkey to
-          manage them here.
-        </Empty>
+        <h2 id="agent-keys-title">{t('agentKeys.title')}</h2>
+        <Empty title={t('agentKeys.person_title')}>{t('agentKeys.person_body')}</Empty>
       </section>
     );
   }
@@ -55,7 +62,7 @@ export function AgentKeys() {
     setRevokeError(null);
     try {
       await keysRevoke(client, revoking.id);
-      toast(`Revoked ${revoking.name}. It stops working on its next request.`);
+      toast(t('agentKeys.revoked_toast', { name: revoking.name }));
       setRevoking(null);
       state.reload();
     } catch (error) {
@@ -69,62 +76,63 @@ export function AgentKeys() {
     <section class="settings-section" aria-labelledby="agent-keys-title">
       <div class="section-head">
         <div>
-          <h2 id="agent-keys-title">Agent keys</h2>
-          <p class="muted">
-            A key lets an agent or a script use this ledger within its tier and limits. Revoke a key to stop it at once. Its
-            secret is shown only when you create it.
-          </p>
+          <h2 id="agent-keys-title">{t('agentKeys.title')}</h2>
+          <p class="muted">{t('agentKeys.intro')}</p>
         </div>
         <button type="button" class="btn btn-primary" onClick={() => setCreating(true)}>
           <Icon name="plus" />
-          Create key
+          {t('agentKeys.create')}
         </button>
       </div>
 
-      {state.loading && !state.data && <Skeleton rows={3} label="Loading agent keys" />}
+      {state.loading && !state.data && <Skeleton rows={3} label={t('agentKeys.loading')} />}
       {state.error && !state.data && <ErrorBanner error={state.error} onRetry={state.reload} />}
       {state.data &&
         (state.data.keys.length === 0 ? (
-          <Empty title="No agent keys yet">Create a key to let an agent or a script use this ledger.</Empty>
+          <Empty title={t('agentKeys.empty_title')}>{t('agentKeys.empty_body')}</Empty>
         ) : (
           <div class="panel">
             <div class="table-wrap">
               <table class="ledger cards">
                 <thead>
                   <tr>
-                    <th scope="col">Name</th>
-                    <th scope="col">Key</th>
-                    <th scope="col">Tier</th>
-                    <th scope="col">Limits (entry / day)</th>
-                    <th scope="col">Last used</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('agentKeys.col_name')}</th>
+                    <th scope="col">{t('agentKeys.col_key')}</th>
+                    <th scope="col">{t('agentKeys.col_tier')}</th>
+                    <th scope="col">{t('agentKeys.col_limits')}</th>
+                    <th scope="col">{t('agentKeys.col_last_used')}</th>
+                    <th scope="col">{t('agentKeys.col_status')}</th>
                     <th scope="col">
-                      <span class="sr-only">Actions</span>
+                      <span class="sr-only">{t('agentKeys.col_actions')}</span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {state.data.keys.map((key) => (
                     <tr key={key.id}>
-                      <td class="main" data-label="Name">
+                      <td class="main" data-label={t('agentKeys.col_name')}>
                         {key.name}
-                        <div class="muted small">Created {formatWhen(key.created_at)}</div>
+                        <div class="muted small">{t('agentKeys.created_at', { when: formatWhen(key.created_at) })}</div>
                       </td>
-                      <td class="mono" data-label="Key">
-                        {key.prefix ?? '—'}
+                      <td class="mono" data-label={t('agentKeys.col_key')}>
+                        {key.prefix ?? t('common.empty_cell')}
                       </td>
-                      <td data-label="Tier">{tierLabel(key.tier)}</td>
-                      <td class="num" data-label="Limits">
+                      <td data-label={t('agentKeys.col_tier')}>{tierText(key.tier)}</td>
+                      <td class="num" data-label={t('agentKeys.col_limits')}>
                         {limitsSummary(key).map((line) => (
-                          <div key={line}>{line}</div>
+                          <div key={line}>
+                            <Ltr>{line}</Ltr>
+                          </div>
                         ))}
                       </td>
-                      <td data-label="Last used">{key.last_used_at ? formatWhen(key.last_used_at) : <span class="muted">Never</span>}</td>
-                      <td data-label="Status">
+                      <td data-label={t('agentKeys.col_last_used')}>
+                        {key.last_used_at ? formatWhen(key.last_used_at) : <span class="muted">{t('agentKeys.never')}</span>}
+                      </td>
+                      <td data-label={t('agentKeys.col_status')}>
                         {key.revoked_at ? (
-                          <span class="status revoked">Revoked {formatWhen(key.revoked_at)}</span>
+                          <span class="status revoked">{t('agentKeys.revoked_at', { when: formatWhen(key.revoked_at) })}</span>
                         ) : (
-                          <span class="status active">Active</span>
+                          <span class="status active">{t('agentKeys.active')}</span>
                         )}
                       </td>
                       <td class="actions">
@@ -132,12 +140,13 @@ export function AgentKeys() {
                           <button
                             type="button"
                             class="btn btn-sm btn-danger"
+                            aria-label={t('agentKeys.revoke_named', { name: key.name })}
                             onClick={() => {
                               setRevokeError(null);
                               setRevoking(key);
                             }}
                           >
-                            Revoke<span class="sr-only"> {key.name}</span>
+                            {t('agentKeys.revoke')}
                           </button>
                         )}
                       </td>
@@ -151,10 +160,9 @@ export function AgentKeys() {
 
       <div class="panel usage">
         <div class="panel-body">
-          <h3>Use a key</h3>
+          <h3>{t('agentKeys.use_title')}</h3>
           <p class="muted">
-            Replace <code>{TOKEN_PLACEHOLDER}</code> with a key's secret, the one shown when you created it. Keys cannot be
-            shown again.
+            {tRich('agentKeys.use_body', { token: <code>{TOKEN_PLACEHOLDER}</code> })}
           </p>
           <UsageSnippets baseUrl={client.baseUrl} token={TOKEN_PLACEHOLDER} />
         </div>
@@ -173,17 +181,14 @@ export function AgentKeys() {
       <ConfirmDialog
         open={revoking !== null}
         onClose={() => setRevoking(null)}
-        title={`Revoke ${revoking?.name ?? 'this key'}?`}
-        confirmLabel="Revoke key"
+        title={t('agentKeys.revoke_title', { name: revoking?.name ?? t('agentKeys.this_key') })}
+        confirmLabel={t('agentKeys.revoke_confirm')}
         danger
         busy={revokeBusy}
         error={revokeError}
         onConfirm={() => void confirmRevoke()}
       >
-        <p>
-          <span class="mono">{revoking?.prefix}</span> stops working on its next request, over HTTP and MCP. The record
-          stays in the list, marked revoked. This cannot be undone: a new key needs a new secret.
-        </p>
+        <p>{tRich('agentKeys.revoke_body', { prefix: <span class="mono">{revoking?.prefix}</span> })}</p>
       </ConfirmDialog>
     </section>
   );

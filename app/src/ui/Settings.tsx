@@ -1,5 +1,6 @@
 import { AgentKeys } from './AgentKeys';
 import { PageHead } from './common';
+import { t } from '../i18n';
 
 export type SettingsSection = 'agent-keys';
 
@@ -7,10 +8,10 @@ export type SettingsSection = 'agent-keys';
 export function Settings({ section }: { section: SettingsSection }) {
   return (
     <>
-      <PageHead title="Settings">Your account and the ledger's connections.</PageHead>
-      <nav class="subnav" aria-label="Settings sections">
+      <PageHead title={t('settings.title')}>{t('settings.intro')}</PageHead>
+      <nav class="subnav" aria-label={t('settings.sections')}>
         <a href="#/settings/agent-keys" aria-current={section === 'agent-keys' ? 'page' : undefined}>
-          Agent keys
+          {t('settings.agent_keys')}
         </a>
       </nav>
       {section === 'agent-keys' && <AgentKeys />}

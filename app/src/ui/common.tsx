@@ -1,27 +1,40 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { ApiError } from '../api/client';
+import { ApiError, type ApiErrorKind } from '../api/client';
 import { formatMinor } from '../lib/money';
+import { intlLocale, t, type MessageKey } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
 
-export const LOCALE = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
-
-/** An amount in its currency's own decimals, right aligned. */
+/** An amount in its currency's own decimals, right aligned. Digits stay left-to-right in every language. */
 export function Money({ minor, currency, class: className }: { minor: string | bigint; currency: string; class?: string }) {
   const negative = String(minor).startsWith('-');
   return (
     <span class={`num${negative ? ' neg' : ''} ${className ?? ''}`.trim()}>
-      {formatMinor(minor, currency, LOCALE)}
+      <Ltr>{formatMinor(minor, currency, intlLocale())}</Ltr>
       <span class="sr-only"> {currency}</span>
     </span>
   );
 }
 
+const API_KIND_KEYS: Record<ApiErrorKind, MessageKey> = {
+  unauthorized: 'error.unauthorized',
+  forbidden: 'error.forbidden',
+  validation: 'error.validation',
+  not_found: 'error.not_found',
+  unavailable: 'error.unavailable',
+  server: 'error.server',
+  network: 'error.network',
+};
+
 export function describeError(error: unknown): { title: string; detail: string | null } {
   if (error instanceof ApiError) {
-    return { title: error.message, detail: error.detail && error.detail !== error.message ? error.detail : null };
+    const title = t(API_KIND_KEYS[error.kind]);
+    // A validation message is the server's own words; the detail adds the specifics.
+    const detail = error.detail && error.detail !== title ? error.detail : null;
+    return { title, detail };
   }
   if (error instanceof Error) return { title: error.message, detail: null };
-  return { title: 'Something went wrong.', detail: null };
+  return { title: t('common.something_wrong'), detail: null };
 }
 
 export function ErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
@@ -34,17 +47,17 @@ export function ErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () =
       </div>
       {onRetry && (
         <button type="button" class="btn btn-sm" onClick={onRetry}>
-          Try again
+          {t('common.try_again')}
         </button>
       )}
     </div>
   );
 }
 
-export function Skeleton({ rows = 4, label = 'Loading' }: { rows?: number; label?: string }) {
+export function Skeleton({ rows = 4, label }: { rows?: number; label?: string }) {
   return (
     <div class="panel" role="status" aria-live="polite">
-      <span class="sr-only">{label}</span>
+      <span class="sr-only">{label ?? t('common.loading')}</span>
       <div class="skeleton" aria-hidden="true">
         {Array.from({ length: rows }, (_, i) => (
           <i key={i} style={{ width: `${92 - ((i * 13) % 35)}%` }} />
@@ -77,7 +90,7 @@ export function PageHead({ title, children, actions }: { title: string; children
 }
 
 export function Marker({ by }: { by: 'agent' | 'person' }) {
-  return <span class={`marker ${by === 'agent' ? 'agent' : 'human'}`}>{by === 'agent' ? 'Agent' : 'Person'}</span>;
+  return <span class={`marker ${by === 'agent' ? 'agent' : 'human'}`}>{by === 'agent' ? t('marker.agent') : t('marker.person')}</span>;
 }
 
 /** Native <dialog> confirm: Esc and the backdrop close it, focus returns to the opener. */
@@ -131,7 +144,7 @@ export function ConfirmDialog({
         {error !== undefined && error !== null && <ErrorBanner error={error} />}
         <div class="dialog-actions">
           <button type="button" class="btn" onClick={onClose} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -140,7 +153,7 @@ export function ConfirmDialog({
             disabled={busy || disabled}
             aria-busy={busy ? 'true' : undefined}
           >
-            {busy ? 'Working…' : confirmLabel}
+            {busy ? t('common.working') : confirmLabel}
           </button>
         </div>
       </div>
@@ -165,7 +178,7 @@ export function Toasts({ items, dismiss }: { items: ToastItem[]; dismiss: (id: n
       {items.map((item) => (
         <div key={item.id} class={`toast ${item.kind === 'error' ? 'error' : ''}`}>
           <span>{item.message}</span>
-          <button type="button" class="btn btn-ghost btn-sm" onClick={() => dismiss(item.id)} aria-label="Dismiss notification">
+          <button type="button" class="btn btn-ghost btn-sm" onClick={() => dismiss(item.id)} aria-label={t('common.dismiss')}>
             ×
           </button>
         </div>

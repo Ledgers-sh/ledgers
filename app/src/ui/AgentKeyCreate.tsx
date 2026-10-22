@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { keysCreate } from '../api/commands';
 import type { KeysCreateOutput } from '../api/types';
-import { limitRowError, limitsPayload, TIERS, type LimitRow, type TierValue } from '../lib/agentKeys';
+import { limitRowError, limitsPayload, TIERS, type LimitProblem, type LimitRow, type TierValue } from '../lib/agentKeys';
 import { useSession } from '../session';
+import { t, type MessageKey } from '../i18n';
 import { ErrorBanner } from './common';
 import { UsageSnippets } from './UsageSnippets';
 
 const NAME_MAX = 80;
+
+/** A limit row's problem, in the reader's language. */
+function limitProblemText(problem: LimitProblem): string {
+  if (problem.kind === 'currency') return t('agentKeys.limit_currency');
+  const key: MessageKey = problem.kind === 'per-entry' ? 'agentKeys.limit_per_entry' : 'agentKeys.limit_per_day';
+  return t(key, { currency: problem.currency, decimals: problem.decimals });
+}
 
 /**
  * The create dialog: a name, a tier, and per-currency limits. Nothing is sent
@@ -51,14 +59,14 @@ export function AgentKeyCreate({
     event.preventDefault();
     const trimmed = name.trim();
     const found: string[] = [];
-    if (trimmed === '') found.push('Give the key a name, such as "Bank feed bot".');
-    if (trimmed.length > NAME_MAX) found.push(`The name can be ${NAME_MAX} characters at most.`);
-    if (rows.length === 0) found.push('Add at least one currency. A key with no currency cannot move money.');
+    if (trimmed === '') found.push(t('agentKeys.problem_name'));
+    if (trimmed.length > NAME_MAX) found.push(t('agentKeys.problem_name_long', { max: NAME_MAX }));
+    if (rows.length === 0) found.push(t('agentKeys.problem_no_currency'));
     for (const row of rows) {
       const rowError = limitRowError(row);
-      if (rowError) found.push(rowError);
+      if (rowError) found.push(limitProblemText(rowError));
     }
-    if (new Set(rows.map((row) => row.currency)).size !== rows.length) found.push('Each currency can appear once.');
+    if (new Set(rows.map((row) => row.currency)).size !== rows.length) found.push(t('agentKeys.problem_duplicate'));
     setProblems(found);
     if (found.length > 0) return;
 
@@ -86,24 +94,26 @@ export function AgentKeyCreate({
       }}
     >
       <form class="dialog-body" onSubmit={submit} noValidate>
-        <h2 id="create-key-title">Create an agent key</h2>
+        <h2 id="create-key-title">{t('agentKeys.create_title')}</h2>
         <label class="field">
-          <span>Name</span>
+          <span>{t('agentKeys.name')}</span>
           <input
             class="input"
             name="name"
-            aria-label="Name"
+            aria-label={t('agentKeys.name')}
             value={name}
             maxLength={NAME_MAX + 20}
             autoComplete="off"
             aria-describedby="key-name-hint"
             onInput={(event) => setName((event.target as HTMLInputElement).value)}
           />
-          <span id="key-name-hint" class="hint">Shown in the list and the audit trail. Not secret.</span>
+          <span id="key-name-hint" class="hint">
+            {t('agentKeys.name_hint')}
+          </span>
         </label>
 
         <fieldset class="field tiers">
-          <legend>Tier</legend>
+          <legend>{t('agentKeys.tier_legend')}</legend>
           {TIERS.map((option) => (
             <label key={option.value} class="tier-option">
               <input
@@ -114,48 +124,45 @@ export function AgentKeyCreate({
                 onChange={() => setTier(option.value)}
               />
               <span>
-                <strong>{option.label}</strong>
-                <span class="hint"> {option.hint}</span>
+                <strong>{t(option.labelKey)}</strong>
+                <span class="hint"> {t(option.hintKey)}</span>
               </span>
             </label>
           ))}
         </fieldset>
 
         <fieldset class="field limits">
-          <legend>Limits per currency</legend>
-          <p class="hint">
-            The most one entry may move, and the most in a rolling day, in major units (for example 1000.00). A currency
-            with no row cannot be moved at all. Read and draft keys do not post, so their limits do nothing yet.
-          </p>
+          <legend>{t('agentKeys.limits_legend')}</legend>
+          <p class="hint">{t('agentKeys.limits_hint')}</p>
           {rows.map((row, index) => (
             <div class="limit-row" key={index}>
               <label class="field">
-                <span>Currency</span>
+                <span>{t('agentKeys.currency')}</span>
                 <input
                   class="input mono"
                   value={row.currency}
                   maxLength={3}
-                  aria-label={`Currency, row ${index + 1}`}
+                  aria-label={t('agentKeys.currency_row', { n: index + 1 })}
                   onInput={(event) => updateRow(index, { currency: (event.target as HTMLInputElement).value.toUpperCase() })}
                 />
               </label>
               <label class="field">
-                <span>Per entry</span>
+                <span>{t('agentKeys.per_entry')}</span>
                 <input
                   class="input mono"
                   inputMode="decimal"
                   value={row.perEntry}
-                  aria-label={`Most per entry in ${row.currency || 'this currency'}`}
+                  aria-label={t('agentKeys.per_entry_aria', { currency: row.currency || t('agentKeys.this_currency') })}
                   onInput={(event) => updateRow(index, { perEntry: (event.target as HTMLInputElement).value })}
                 />
               </label>
               <label class="field">
-                <span>Per day</span>
+                <span>{t('agentKeys.per_day')}</span>
                 <input
                   class="input mono"
                   inputMode="decimal"
                   value={row.perDay}
-                  aria-label={`Most per day in ${row.currency || 'this currency'}`}
+                  aria-label={t('agentKeys.per_day_aria', { currency: row.currency || t('agentKeys.this_currency') })}
                   onInput={(event) => updateRow(index, { perDay: (event.target as HTMLInputElement).value })}
                 />
               </label>
@@ -165,7 +172,8 @@ export function AgentKeyCreate({
                 disabled={rows.length === 1}
                 onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
               >
-                Remove<span class="sr-only"> currency row {index + 1}</span>
+                {t('agentKeys.remove')}
+                <span class="sr-only"> {t('agentKeys.remove_row', { n: index + 1 })}</span>
               </button>
             </div>
           ))}
@@ -175,7 +183,7 @@ export function AgentKeyCreate({
               class="btn btn-sm"
               onClick={() => setRows((prev) => [...prev, { currency: '', perEntry: '', perDay: '' }])}
             >
-              Add currency
+              {t('agentKeys.add_currency')}
             </button>
           </div>
         </fieldset>
@@ -193,10 +201,10 @@ export function AgentKeyCreate({
 
         <div class="dialog-actions">
           <button type="button" class="btn" onClick={onClose} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button type="submit" class="btn btn-primary" disabled={busy} aria-busy={busy ? 'true' : undefined}>
-            {busy ? 'Creating…' : 'Create key'}
+            {busy ? t('agentKeys.creating') : t('agentKeys.create')}
           </button>
         </div>
       </form>
@@ -262,11 +270,10 @@ export function ShowOnceDialog({
     >
       {output && (
         <div class="dialog-body">
-          <h2 id="show-key-title">Copy your new key</h2>
+          <h2 id="show-key-title">{t('agentKeys.copy_title')}</h2>
           <div class="banner human" role="alert">
             <div class="grow">
-              <strong>You won't see this again.</strong> Copy it now and store it where the agent can read it. If you lose it,
-              revoke this key and create a new one.
+              <strong>{t('agentKeys.wont_see')}</strong> {t('agentKeys.wont_see_body')}
             </div>
           </div>
           <label class="field">
@@ -281,17 +288,17 @@ export function ShowOnceDialog({
                 onFocus={(event) => (event.target as HTMLInputElement).select()}
               />
               <button type="button" class="btn" onClick={() => void copy()}>
-                {copied === 'copied' ? 'Copied' : 'Copy key'}
+                {copied === 'copied' ? t('agentKeys.copied') : t('agentKeys.copy_key')}
               </button>
             </div>
             <span id="show-key-note" class="hint" role="status">
-              {copied === 'select' ? 'Copying is blocked here. The key is selected: press Ctrl+C or Cmd+C.' : `Prefix ${output.key.prefix ?? ''}`}
+              {copied === 'select' ? t('agentKeys.copy_blocked') : t('agentKeys.prefix', { prefix: output.key.prefix ?? '' })}
             </span>
           </label>
           <UsageSnippets baseUrl={baseUrl} token={output.token} />
           <div class="dialog-actions">
             <button type="button" class="btn btn-primary" onClick={() => ref.current?.close()}>
-              I've copied the key
+              {t('agentKeys.copied_ack')}
             </button>
           </div>
         </div>

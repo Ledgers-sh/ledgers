@@ -4,18 +4,21 @@
  * the screen and its tests share one definition.
  */
 import type { AgentKeyLimit } from '../api/types';
+import type { MessageKey } from '../i18n';
 import { currencyExponent, parseMajorToMinor } from './money';
 
+/** The tiers a key can carry. Labels and hints are message keys, so the screen words them in the reader's language. */
 export const TIERS = [
-  { value: 'read', label: 'Read', hint: 'Reads the ledger. Cannot draft or post.' },
-  { value: 'draft', label: 'Draft', hint: 'Reads and drafts entries. Cannot post.' },
-  { value: 'post-within-limits', label: 'Post within limits', hint: 'Posts entries up to the limits below.' },
-] as const;
+  { value: 'read', labelKey: 'agentKeys.tier_read', hintKey: 'agentKeys.tier_read_hint' },
+  { value: 'draft', labelKey: 'agentKeys.tier_draft', hintKey: 'agentKeys.tier_draft_hint' },
+  { value: 'post-within-limits', labelKey: 'agentKeys.tier_post', hintKey: 'agentKeys.tier_post_hint' },
+] as const satisfies readonly { value: string; labelKey: MessageKey; hintKey: MessageKey }[];
 
 export type TierValue = (typeof TIERS)[number]['value'];
 
-export function tierLabel(tier: string): string {
-  return TIERS.find((t) => t.value === tier)?.label ?? tier;
+/** The message key for a tier's label, or null for a tier the app does not know (the server's own word is shown then). */
+export function tierLabelKey(tier: string): MessageKey | null {
+  return TIERS.find((t) => t.value === tier)?.labelKey ?? null;
 }
 
 /** Placeholder shown wherever a key's token is not known (the list, the usage card). */
@@ -55,15 +58,18 @@ export interface LimitRow {
   perDay: string;
 }
 
+/** Why a limit row cannot be saved. The screen words it in the reader's language. */
+export type LimitProblem =
+  | { kind: 'currency' }
+  | { kind: 'per-entry'; currency: string; decimals: number }
+  | { kind: 'per-day'; currency: string; decimals: number };
+
 /** Why a limit row cannot be saved, or null when it can. */
-export function limitRowError(row: LimitRow): string | null {
-  if (!/^[A-Z]{3}$/.test(row.currency)) return 'Use a three-letter currency code, such as EUR.';
-  if (parseMajorToMinor(row.perEntry, row.currency) === null) {
-    return `Enter the most one entry may move, in ${row.currency} (up to ${currencyExponent(row.currency)} decimals).`;
-  }
-  if (parseMajorToMinor(row.perDay, row.currency) === null) {
-    return `Enter the most the key may move in a day, in ${row.currency} (up to ${currencyExponent(row.currency)} decimals).`;
-  }
+export function limitRowError(row: LimitRow): LimitProblem | null {
+  if (!/^[A-Z]{3}$/.test(row.currency)) return { kind: 'currency' };
+  const decimals = currencyExponent(row.currency);
+  if (parseMajorToMinor(row.perEntry, row.currency) === null) return { kind: 'per-entry', currency: row.currency, decimals };
+  if (parseMajorToMinor(row.perDay, row.currency) === null) return { kind: 'per-day', currency: row.currency, decimals };
   return null;
 }
 

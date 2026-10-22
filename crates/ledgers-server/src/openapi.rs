@@ -146,8 +146,20 @@ pub fn document(registry: &Registry) -> Value {
 
         operation.insert("responses".to_string(), Value::Object(responses));
 
-        // Add x-ledgers extensions
+        // Add x-ledgers extensions. The three surface forms below are what
+        // the app's command palette shows next to each operation (issue #53).
+        operation.insert("x-ledgers-command".to_string(), json!(descriptor.name));
         operation.insert("x-ledgers-tier".to_string(), json!(descriptor.tier));
+        operation.insert("x-ledgers-cli".to_string(), json!(descriptor.cli));
+        // Human-only commands have no MCP tool: the MCP listing skips them, so
+        // the document does not publish a name for them either.
+        let mcp = if descriptor.human_only {
+            None
+        } else {
+            descriptor.mcp.as_deref()
+        };
+        operation.insert("x-ledgers-mcp".to_string(), json!(mcp));
+        operation.insert("x-ledgers-curl".to_string(), json!(descriptor.curl));
         if descriptor.human_only {
             operation.insert("x-ledgers-human-only".to_string(), json!(true));
         }

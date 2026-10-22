@@ -2,42 +2,65 @@ import { useState } from 'preact/hooks';
 import { approvalDecide, approvalGet, approvalsBulkApprove, approvalsList, type ApprovalStatus, type ApprovalView } from '../api/approvals';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
-import { formatTimestamp, shortHash, relativeTime, expiryText, amountText, bulkPlan, bulkTotalMinor, classifyDecisionError, displayAmount, isBulkEligible, reauthUrl, resultEntry, BULK_HIGH_RISK_MESSAGE } from '../lib/approvals';
-import { ConfirmDialog, Empty, ErrorBanner, LOCALE, PageHead, Skeleton, describeError } from './common';
+import {
+  formatTimestamp,
+  shortHash,
+  relativeTime,
+  expiry,
+  amountText,
+  bulkPlan,
+  bulkTotalMinor,
+  classifyDecisionError,
+  displayAmount,
+  isBulkEligible,
+  reauthUrl,
+  resultEntry,
+  type PlanMessage,
+} from '../lib/approvals';
+import { intlLocale, t, tn, tRich, type MessageKey } from '../i18n';
+import { Ltr } from '../i18n/Ltr';
+import { ConfirmDialog, Empty, ErrorBanner, PageHead, Skeleton, describeError } from './common';
 
-const STATUS_LABEL: Record<ApprovalStatus, string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  expired: 'Expired',
-  superseded: 'Superseded',
+const STATUS_KEY: Record<ApprovalStatus, MessageKey> = {
+  pending: 'approvals.status_pending',
+  approved: 'approvals.status_approved',
+  rejected: 'approvals.status_rejected',
+  expired: 'approvals.status_expired',
+  superseded: 'approvals.status_superseded',
 };
 
 /** The agent that asked, in agent blue. */
 export function AgentKey({ id }: { id: string }) {
   return (
-    <span class="agent-key" title="Requesting agent key">
-      {id}
+    <span class="agent-key" title={t('approvals.requesting_key')}>
+      <Ltr>{id}</Ltr>
     </span>
   );
 }
 
 export function RiskChip({ risk }: { risk: ApprovalView['risk'] }) {
-  return <span class={`chip risk-${risk}`}>{risk === 'high' ? 'High risk' : 'Low risk'}</span>;
+  return <span class={`chip risk-${risk}`}>{t(risk === 'high' ? 'approvals.risk_high' : 'approvals.risk_low')}</span>;
 }
 
 export function StatusChip({ status }: { status: ApprovalStatus }) {
-  return <span class={`chip status-${status}`}>{STATUS_LABEL[status]}</span>;
+  return <span class={`chip status-${status}`}>{t(STATUS_KEY[status])}</span>;
+}
+
+/** When an approval expires, as words: "expires in 2 hours" while open, "expired 30 minutes ago" after. */
+function expiryPhrase(expiresAt: string, now: number): string {
+  const found = expiry(expiresAt, now, intlLocale());
+  if (!found) return '';
+  return t(found.open ? 'approvals.expires' : 'approvals.expired', { when: found.when });
 }
 
 /** Points at the journal entry a decision posted, or shows the command output as sent. */
 function ResultReference({ result }: { result: unknown }) {
-  if (result === null || result === undefined) return <span class="muted">None</span>;
+  if (result === null || result === undefined) return <span class="muted">{t('approvals.none')}</span>;
   const entry = resultEntry(result);
   if (entry) {
     return (
       <a class="row-link" href={`#/journal/${encodeURIComponent(entry.journalKey)}`}>
-        {entry.entryId}
+        <Ltr>{entry.entryId}</Ltr>
       </a>
     );
   }
@@ -46,14 +69,24 @@ function ResultReference({ result }: { result: unknown }) {
 
 function AgentKeyNotice() {
   return (
-    <Empty title="Approvals need a person sign-in">
-      Agent keys cannot review approvals. Sign in with your passkey to see the requests waiting for you.
-    </Empty>
+    <Empty title={t('approvals.agent_key_title')}>{t('approvals.agent_key_body')}</Empty>
   );
 }
 
 function labelOf(item: ApprovalView): string {
   return item.counterparty ?? item.command;
+}
+
+/** A selection's refusal, in the reader's language. */
+function planMessageText(message: PlanMessage): string {
+  if (message.kind === 'high-risk') return t('approvals.bulk_high_risk');
+  const list = new Intl.ListFormat(intlLocale(), { style: 'long', type: 'conjunction' }).format(message.currencies);
+  return t('approvals.bulk_mixed', { currencies: list });
+}
+
+/** A failed decision's message, in the reader's language. */
+function staleText(reason: 'not-pending' | 'expired'): string {
+  return t(reason === 'expired' ? 'approvals.expired_message' : 'approvals.not_pending');
 }
 
 type Tab = 'pending' | 'history';
@@ -80,11 +113,13 @@ function ApprovalsInbox() {
   const loaded = state.data?.status === status ? state.data.list : undefined;
   const items = loaded?.items ?? [];
   const now = Date.now();
+  const locale = intlLocale();
   // Only rows still on screen and still eligible can be selected: a reload drops the rest.
   const chosen = new Set([...selected].filter((id) => items.some((item) => item.id === id && isBulkEligible(item))));
   const plan = bulkPlan(items, chosen);
   const total = plan.currency ? bulkTotalMinor(items, chosen, plan.currency) : null;
-  const totalText = plan.currency && total !== null ? displayAmount(total, plan.currency, LOCALE) : null;
+  const totalText = plan.currency && total !== null ? displayAmount(total, plan.currency, locale) : null;
+  const planText = plan.message ? planMessageText(plan.message) : null;
 
   function toggle(id: string, checked: boolean) {
     setSelected((prev) => {
@@ -103,13 +138,13 @@ function ApprovalsInbox() {
       const output = await approvalsBulkApprove(client, [...chosen]);
       const count = output.results.length;
       setSelected(new Set());
-      setNotice({ kind: 'ok', message: `Approved ${count} ${count === 1 ? 'request' : 'requests'}.` });
+      setNotice({ kind: 'ok', message: tn('approvals.approved_count', count) });
     } catch (error) {
       const failure = classifyDecisionError(error);
-      setNotice({
-        kind: 'error',
-        message: failure.kind === 'refused' || failure.kind === 'stale' ? failure.message : describeError(error).title,
-      });
+      let message = describeError(error).title;
+      if (failure.kind === 'refused') message = failure.detail ?? t('approvals.bulk_refused');
+      if (failure.kind === 'stale') message = staleText(failure.reason);
+      setNotice({ kind: 'error', message });
     } finally {
       setBulkBusy(false);
       state.reload();
@@ -117,13 +152,14 @@ function ApprovalsInbox() {
     }
   }
 
+  const confirmTitle = tn('approvals.confirm_title', plan.count);
+  const confirmAction = tn('approvals.confirm_action', plan.count);
+
   return (
     <>
-      <PageHead title="Approvals">
-        Entries an agent cannot post on its own wait here. Nothing is posted until you approve it.
-      </PageHead>
+      <PageHead title={t('approvals.title')}>{t('approvals.intro')}</PageHead>
 
-      <div class="tabs" role="tablist" aria-label="Approval views">
+      <div class="tabs" role="tablist" aria-label={t('approvals.tabs_label')}>
         {(['pending', 'history'] as const).map((name) => (
           <button
             key={name}
@@ -138,7 +174,7 @@ function ApprovalsInbox() {
               setNotice(null);
             }}
           >
-            {name === 'pending' ? 'Pending' : 'History'}
+            {name === 'pending' ? t('approvals.tab_pending') : t('approvals.tab_history')}
           </button>
         ))}
       </div>
@@ -152,7 +188,7 @@ function ApprovalsInbox() {
 
         {state.loading && !loaded ? (
           <div class="panel-body">
-            <Skeleton rows={4} label="Loading approvals" />
+            <Skeleton rows={4} label={t('approvals.loading')} />
           </div>
         ) : state.error && !loaded ? (
           <div class="panel-body">
@@ -161,26 +197,32 @@ function ApprovalsInbox() {
         ) : tab === 'pending' ? (
           items.length === 0 ? (
             <div class="panel-body">
-              <Empty title="Nothing is waiting for you">Requests from agents that need your approval appear here.</Empty>
+              <Empty title={t('approvals.empty_title')}>{t('approvals.empty_body')}</Empty>
             </div>
           ) : (
             <>
               {chosen.size > 0 && (
-                <div class="bulk-bar" role="region" aria-label="Bulk approval">
+                <div class="bulk-bar" role="region" aria-label={t('approvals.bulk_region')}>
                   <span>
-                    <strong>{plan.count}</strong> selected{totalText ? ` · ${totalText}` : ''}
+                    {tRich('approvals.selected', { count: <strong><Ltr>{String(plan.count)}</Ltr></strong> })}
+                    {totalText && (
+                      <>
+                        {' · '}
+                        <Ltr>{totalText}</Ltr>
+                      </>
+                    )}
                   </span>
-                  {plan.message && (
+                  {planText && (
                     <span class="bulk-message" role="status">
-                      {plan.message}
+                      {planText}
                     </span>
                   )}
                   <span class="grow" />
                   <button type="button" class="btn btn-human" disabled={!plan.canApprove || bulkBusy} onClick={() => setConfirming(true)}>
-                    Approve selected ({plan.count})
+                    {t('approvals.approve_selected', { count: plan.count })}
                   </button>
                   <button type="button" class="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
-                    Clear
+                    {t('approvals.clear')}
                   </button>
                 </div>
               )}
@@ -189,16 +231,16 @@ function ApprovalsInbox() {
                   <thead>
                     <tr>
                       <th scope="col">
-                        <span class="sr-only">Select for bulk approval</span>
+                        <span class="sr-only">{t('approvals.select_all_label')}</span>
                       </th>
-                      <th scope="col">Counterparty</th>
+                      <th scope="col">{t('approvals.col_counterparty')}</th>
                       <th scope="col" class="num">
-                        Amount
+                        {t('term.amount')}
                       </th>
-                      <th scope="col">Reason</th>
-                      <th scope="col">Requested by</th>
-                      <th scope="col">Risk</th>
-                      <th scope="col">Expires</th>
+                      <th scope="col">{t('approvals.col_reason')}</th>
+                      <th scope="col">{t('approvals.col_requested_by')}</th>
+                      <th scope="col">{t('approvals.col_risk')}</th>
+                      <th scope="col">{t('approvals.col_expires')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -206,32 +248,32 @@ function ApprovalsInbox() {
                       const eligible = isBulkEligible(item);
                       return (
                         <tr key={item.id}>
-                          <td class="check-cell" data-label="Select">
+                          <td class="check-cell" data-label={t('approvals.col_select')}>
                             <input
                               type="checkbox"
-                              aria-label={`Select ${labelOf(item)} for bulk approval`}
+                              aria-label={t('approvals.select_row', { label: labelOf(item) })}
                               checked={chosen.has(item.id)}
                               disabled={!eligible || bulkBusy}
-                              title={eligible ? undefined : BULK_HIGH_RISK_MESSAGE}
+                              title={eligible ? undefined : t('approvals.bulk_high_risk')}
                               onChange={(event) => toggle(item.id, (event.target as HTMLInputElement).checked)}
                             />
                           </td>
-                          <td class="lead" data-label="Counterparty">
+                          <td class="lead" data-label={t('approvals.col_counterparty')}>
                             <a class="row-link" href={`#/approvals/${encodeURIComponent(item.id)}`}>
                               {labelOf(item)}
                             </a>
                           </td>
-                          <td class="num" data-label="Amount">
-                            {amountText(item.amount, LOCALE)}
+                          <td class="num" data-label={t('term.amount')}>
+                            <Ltr>{amountText(item.amount, locale)}</Ltr>
                           </td>
-                          <td data-label="Reason">{item.reason}</td>
-                          <td data-label="Requested by">
+                          <td data-label={t('approvals.col_reason')}>{item.reason}</td>
+                          <td data-label={t('approvals.col_requested_by')}>
                             <AgentKey id={item.requested_by} />
                           </td>
-                          <td data-label="Risk">
+                          <td data-label={t('approvals.col_risk')}>
                             <RiskChip risk={item.risk} />
                           </td>
-                          <td data-label="Expires">{expiryText(item.expires_at, now)}</td>
+                          <td data-label={t('approvals.col_expires')}>{expiryPhrase(item.expires_at, now)}</td>
                         </tr>
                       );
                     })}
@@ -242,46 +284,48 @@ function ApprovalsInbox() {
           )
         ) : items.length === 0 ? (
           <div class="panel-body">
-            <Empty title="No decisions yet">Approved, rejected and expired requests are listed here with their audit reference.</Empty>
+            <Empty title={t('approvals.history_empty_title')}>{t('approvals.history_empty_body')}</Empty>
           </div>
         ) : (
           <div class="table-wrap">
             <table class="ledger cards">
               <thead>
                 <tr>
-                  <th scope="col">Status</th>
-                  <th scope="col">Counterparty</th>
+                  <th scope="col">{t('approvals.col_status')}</th>
+                  <th scope="col">{t('approvals.col_counterparty')}</th>
                   <th scope="col" class="num">
-                    Amount
+                    {t('term.amount')}
                   </th>
-                  <th scope="col">Decided</th>
-                  <th scope="col">Decided by</th>
-                  <th scope="col">Audit ref</th>
-                  <th scope="col">Result</th>
+                  <th scope="col">{t('approvals.col_decided')}</th>
+                  <th scope="col">{t('approvals.col_decided_by')}</th>
+                  <th scope="col">{t('approvals.col_audit_ref')}</th>
+                  <th scope="col">{t('approvals.col_result')}</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
-                    <td data-label="Status">
+                    <td data-label={t('approvals.col_status')}>
                       <StatusChip status={item.status} />
                     </td>
-                    <td class="lead" data-label="Counterparty">
+                    <td class="lead" data-label={t('approvals.col_counterparty')}>
                       <a class="row-link" href={`#/approvals/${encodeURIComponent(item.id)}`}>
                         {labelOf(item)}
                       </a>
                     </td>
-                    <td class="num" data-label="Amount">
-                      {amountText(item.amount, LOCALE)}
+                    <td class="num" data-label={t('term.amount')}>
+                      <Ltr>{amountText(item.amount, locale)}</Ltr>
                     </td>
-                    <td data-label="Decided">{item.decided_at ? formatTimestamp(item.decided_at, LOCALE) : '—'}</td>
-                    <td data-label="Decided by" class="mono">
-                      {item.decided_by ?? '—'}
+                    <td data-label={t('approvals.col_decided')}>
+                      {item.decided_at ? <Ltr>{formatTimestamp(item.decided_at, locale)}</Ltr> : t('common.empty_cell')}
                     </td>
-                    <td data-label="Audit ref" class="mono">
-                      {item.audit_ref ?? '—'}
+                    <td data-label={t('approvals.col_decided_by')} class="mono">
+                      {item.decided_by ?? t('common.empty_cell')}
                     </td>
-                    <td data-label="Result">
+                    <td data-label={t('approvals.col_audit_ref')} class="mono">
+                      {item.audit_ref ?? t('common.empty_cell')}
+                    </td>
+                    <td data-label={t('approvals.col_result')}>
                       <ResultReference result={item.result ?? null} />
                     </td>
                   </tr>
@@ -295,16 +339,18 @@ function ApprovalsInbox() {
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}
-        title={`Approve ${plan.count} ${plan.count === 1 ? 'request' : 'requests'}?`}
-        confirmLabel={`Approve ${plan.count} ${plan.count === 1 ? 'request' : 'requests'}`}
+        title={confirmTitle}
+        confirmLabel={confirmAction}
         onConfirm={() => void approveChosen()}
         busy={bulkBusy}
         tone="human"
         disabled={!plan.canApprove}
       >
         <p>
-          Each request posts its entry in {plan.currency ?? 'its own currency'}
-          {totalText ? `, a total of ${totalText}` : ''}. Only low-risk requests are in this selection.
+          {t('approvals.confirm_body', {
+            currency: plan.currency ?? t('approvals.own_currency'),
+            total: totalText ? t('approvals.confirm_total', { total: totalText }) : '',
+          })}
         </p>
       </ConfirmDialog>
     </>
@@ -322,12 +368,12 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
   const [outcomeResult, setOutcomeResult] = useState<unknown>(null);
 
   if (client.apiKey) return <AgentKeyNotice />;
-  if (state.loading && !state.data && !outcome) return <Skeleton rows={6} label="Loading approval" />;
+  if (state.loading && !state.data && !outcome) return <Skeleton rows={6} label={t('approvals.loading_detail')} />;
   if (state.error && !state.data && !outcome) {
     return (
       <>
         <a class="back-link" href="#/approvals">
-          ← Approvals
+          {t('approvals.back')}
         </a>
         <ErrorBanner error={state.error} onRetry={state.reload} />
       </>
@@ -338,6 +384,7 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
 
   const pending = item.status === 'pending';
   const now = Date.now();
+  const locale = intlLocale();
   const result = outcome ? outcomeResult : (item.result ?? null);
   const preview = item.preview ?? null;
 
@@ -353,24 +400,18 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
       );
       setOutcome(output.approval);
       setOutcomeResult(output.result ?? null);
-      setNotice({
-        kind: 'ok',
-        message: decision === 'approve' ? 'Approved.' : 'Rejected. Nothing was posted.',
-      });
+      setNotice({ kind: 'ok', message: t(decision === 'approve' ? 'approvals.approved' : 'approvals.rejected') });
       refreshApprovals();
     } catch (error) {
       const failure = classifyDecisionError(error);
       if (failure.kind === 'reauth') {
-        setNotice({
-          kind: 'error',
-          message: 'Approving a high-risk request needs a fresh sign-in. Signing you in again; you will return to this request.',
-        });
+        setNotice({ kind: 'error', message: t('approvals.reauth') });
         window.location.assign(reauthUrl(client.baseUrl, approvalId));
         return;
       }
       if (failure.kind === 'stale') {
         setOutcome(null);
-        setNotice({ kind: 'error', message: failure.message });
+        setNotice({ kind: 'error', message: staleText(failure.reason) });
         state.reload();
         refreshApprovals();
         return;
@@ -384,21 +425,27 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
   return (
     <>
       <a class="back-link" href="#/approvals">
-        ← Approvals
+        {t('approvals.back')}
       </a>
-      <PageHead title={pending ? 'Approval request' : `${STATUS_LABEL[item.status]} request`}>
+      <PageHead
+        title={pending ? t('approvals.title_pending') : t('approvals.title_decided', { status: t(STATUS_KEY[item.status]) })}
+      >
         {pending
-          ? `Requested ${relativeTime(item.created_at, now)} by agent key ${item.requested_by}. ${expiryText(item.expires_at, now)}.`
-          : `Decided ${item.decided_at ? formatTimestamp(item.decided_at, LOCALE) : 'by the server'}.`}
+          ? t('approvals.detail_pending', {
+              when: relativeTime(item.created_at, now, locale),
+              key: item.requested_by,
+              expiry: expiryPhrase(item.expires_at, now),
+            })
+          : t('approvals.decided_line', {
+              when: item.decided_at ? formatTimestamp(item.decided_at, locale) : t('approvals.decided_by_server'),
+            })}
       </PageHead>
 
       {notice && (
         <div class={`banner ${notice.kind === 'error' ? 'error' : 'human'}`} role={notice.kind === 'error' ? 'alert' : 'status'}>
           <span class="grow">{notice.message}</span>
           {outcome && outcomeResult !== null && resultEntry(outcomeResult) && (
-            <span>
-              Entry posted as <ResultReference result={outcomeResult} />
-            </span>
+            <span>{tRich('approvals.entry_posted_as', { ref: <ResultReference result={outcomeResult} /> })}</span>
           )}
         </div>
       )}
@@ -406,7 +453,7 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
       <section class="panel" aria-labelledby="request-heading">
         <div class="panel-head">
           <h2 id="request-heading" class="grow">
-            Request
+            {t('approvals.request')}
           </h2>
           <StatusChip status={item.status} />
           <RiskChip risk={item.risk} />
@@ -414,36 +461,38 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
         <div class="panel-body">
           <dl class="entry-meta detail-meta">
             <div>
-              <dt>Amount</dt>
-              <dd class="amount-value">{amountText(item.amount, LOCALE)}</dd>
+              <dt>{t('term.amount')}</dt>
+              <dd class="amount-value">
+                <Ltr>{amountText(item.amount, locale)}</Ltr>
+              </dd>
             </div>
             <div>
-              <dt>Counterparty</dt>
-              <dd>{item.counterparty ?? '—'}</dd>
+              <dt>{t('approvals.counterparty')}</dt>
+              <dd>{item.counterparty ?? t('common.empty_cell')}</dd>
             </div>
             <div>
-              <dt>Reason</dt>
+              <dt>{t('approvals.col_reason')}</dt>
               <dd>{item.reason}</dd>
             </div>
             <div>
-              <dt>Requested by</dt>
+              <dt>{t('approvals.col_requested_by')}</dt>
               <dd>
                 <AgentKey id={item.requested_by} />
               </dd>
             </div>
             <div>
-              <dt>Command</dt>
+              <dt>{t('approvals.command')}</dt>
               <dd class="mono-value">{item.command}</dd>
             </div>
             <div>
-              <dt>Expires</dt>
+              <dt>{t('approvals.col_expires')}</dt>
               <dd>
-                {formatTimestamp(item.expires_at, LOCALE)}
-                <span class="muted detail-sub">{expiryText(item.expires_at, now)}</span>
+                <Ltr>{formatTimestamp(item.expires_at, locale)}</Ltr>
+                <span class="muted detail-sub">{expiryPhrase(item.expires_at, now)}</span>
               </dd>
             </div>
             <div>
-              <dt>Request hash</dt>
+              <dt>{t('approvals.request_hash')}</dt>
               <dd class="mono-value" title={item.request_hash}>
                 {shortHash(item.request_hash)}
               </dd>
@@ -455,7 +504,7 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
       <section class="panel" aria-labelledby="preview-heading">
         <div class="panel-head">
           <h2 id="preview-heading" class="grow">
-            Entry preview
+            {t('approvals.entry_preview')}
           </h2>
         </div>
         {preview && preview.lines.length > 0 ? (
@@ -463,24 +512,24 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
             <table class="ledger cards">
               <thead>
                 <tr>
-                  <th scope="col">Account</th>
-                  <th scope="col">Side</th>
+                  <th scope="col">{t('term.account')}</th>
+                  <th scope="col">{t('new.col_side')}</th>
                   <th scope="col" class="num">
-                    Amount
+                    {t('term.amount')}
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {preview.lines.map((line, index) => (
                   <tr key={`${line.account}-${index}`}>
-                    <td class="code lead" data-label="Account">
-                      {line.account}
+                    <td class="code lead" data-label={t('term.account')}>
+                      <Ltr>{line.account}</Ltr>
                     </td>
-                    <td data-label="Side">
-                      <span class={`side ${line.side}`}>{line.side === 'debit' ? 'Debit' : 'Credit'}</span>
+                    <td data-label={t('new.col_side')}>
+                      <span class={`side ${line.side}`}>{t(line.side === 'debit' ? 'new.side_debit' : 'new.side_credit')}</span>
                     </td>
-                    <td class="num" data-label="Amount">
-                      {displayAmount(line.amount, line.currency, LOCALE)}
+                    <td class="num" data-label={t('term.amount')}>
+                      <Ltr>{displayAmount(line.amount, line.currency, locale)}</Ltr>
                     </td>
                   </tr>
                 ))}
@@ -489,9 +538,9 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
                 <tfoot>
                   {Object.entries(preview.totals).map(([currency, value]) => (
                     <tr key={currency}>
-                      <td colSpan={2}>Total {currency}</td>
-                      <td class="num" data-label="Total">
-                        {displayAmount(value, currency, LOCALE)}
+                      <td colSpan={2}>{t('entry.total', { currency })}</td>
+                      <td class="num" data-label={t('term.amount')}>
+                        <Ltr>{displayAmount(value, currency, locale)}</Ltr>
                       </td>
                     </tr>
                   ))}
@@ -500,22 +549,22 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
             </table>
           </div>
         ) : (
-          <div class="panel-body muted">No preview was stored for this request.</div>
+          <div class="panel-body muted">{t('approvals.no_preview')}</div>
         )}
       </section>
 
       <section class="panel decision" aria-labelledby="decision-heading">
         <div class="panel-head">
           <h2 id="decision-heading" class="grow">
-            {pending ? 'Your decision' : 'Decision'}
+            {pending ? t('approvals.your_decision') : t('approvals.decision')}
           </h2>
         </div>
         <div class="panel-body">
           {pending ? (
             <div class="decision-form">
               <label class="field" for="decision-reason">
-                <span>Reason (optional)</span>
-                <span class="hint">Kept with the decision in the audit trail.</span>
+                <span>{t('approvals.reason_optional')}</span>
+                <span class="hint">{t('approvals.reason_hint')}</span>
                 <textarea
                   id="decision-reason"
                   class="input"
@@ -526,33 +575,33 @@ export function ApprovalDetail({ approvalId }: { approvalId: string }) {
               </label>
               <div class="form-actions">
                 <button type="button" class="btn btn-human" disabled={busy !== null} onClick={() => void decide('approve')} aria-busy={busy === 'approve' ? 'true' : undefined}>
-                  {busy === 'approve' ? 'Approving…' : 'Approve'}
+                  {busy === 'approve' ? t('approvals.approving') : t('approvals.approve')}
                 </button>
                 <button type="button" class="btn btn-danger" disabled={busy !== null} onClick={() => void decide('reject')} aria-busy={busy === 'reject' ? 'true' : undefined}>
-                  {busy === 'reject' ? 'Rejecting…' : 'Reject'}
+                  {busy === 'reject' ? t('approvals.rejecting') : t('approvals.reject')}
                 </button>
               </div>
             </div>
           ) : (
             <dl class="entry-meta detail-meta">
               <div>
-                <dt>Decided</dt>
-                <dd>{item.decided_at ? formatTimestamp(item.decided_at, LOCALE) : '—'}</dd>
+                <dt>{t('approvals.decided')}</dt>
+                <dd>{item.decided_at ? <Ltr>{formatTimestamp(item.decided_at, locale)}</Ltr> : t('common.empty_cell')}</dd>
               </div>
               <div>
-                <dt>Decided by</dt>
-                <dd class="mono-value">{item.decided_by ?? '—'}</dd>
+                <dt>{t('approvals.decided_by')}</dt>
+                <dd class="mono-value">{item.decided_by ?? t('common.empty_cell')}</dd>
               </div>
               <div>
-                <dt>Decision reason</dt>
-                <dd>{item.decision_reason ?? '—'}</dd>
+                <dt>{t('approvals.decision_reason')}</dt>
+                <dd>{item.decision_reason ?? t('common.empty_cell')}</dd>
               </div>
               <div>
-                <dt>Audit reference</dt>
-                <dd class="mono-value">{item.audit_ref ?? '—'}</dd>
+                <dt>{t('approvals.audit_reference')}</dt>
+                <dd class="mono-value">{item.audit_ref ?? t('common.empty_cell')}</dd>
               </div>
               <div>
-                <dt>Result</dt>
+                <dt>{t('approvals.result')}</dt>
                 <dd>
                   <ResultReference result={result} />
                 </dd>
@@ -570,19 +619,20 @@ export function WaitingForYou({ count }: { count: number }) {
   const { client } = useSession();
   const state = useAsync(() => approvalsList(client, 'pending', 3), [client.baseUrl, client.apiKey, count]);
   const now = Date.now();
+  const locale = intlLocale();
   return (
     <section class="panel waiting" aria-labelledby="waiting-heading">
       <div class="panel-head">
         <h2 id="waiting-heading" class="grow">
-          Waiting for you
+          {t('approvals.waiting_title')}
         </h2>
-        <span class="muted">{count} pending</span>
+        <span class="muted">{t('approvals.pending_count', { count })}</span>
         <a class="btn btn-sm btn-human" href="#/approvals">
-          Review approvals
+          {t('approvals.review')}
         </a>
       </div>
       {state.loading && !state.data ? (
-        <div class="panel-body muted">Loading approvals…</div>
+        <div class="panel-body muted">{t('approvals.loading_short')}</div>
       ) : state.error && !state.data ? (
         <div class="panel-body">
           <ErrorBanner error={state.error} onRetry={state.reload} />
@@ -596,14 +646,16 @@ export function WaitingForYou({ count }: { count: number }) {
                   <strong>{labelOf(item)}</strong>
                   <span class="muted">{item.reason}</span>
                 </span>
-                <span class="num">{amountText(item.amount, LOCALE)}</span>
-                <span class="muted waiting-time">{expiryText(item.expires_at, now)}</span>
+                <span class="num">
+                  <Ltr>{amountText(item.amount, locale)}</Ltr>
+                </span>
+                <span class="muted waiting-time">{expiryPhrase(item.expires_at, now)}</span>
               </a>
             </li>
           ))}
           {count > (state.data?.items.length ?? 0) && (
             <li class="muted waiting-more">
-              <a href="#/approvals">and {count - (state.data?.items.length ?? 0)} more</a>
+              <a href="#/approvals">{t('approvals.and_more', { count: count - (state.data?.items.length ?? 0) })}</a>
             </li>
           )}
         </ul>

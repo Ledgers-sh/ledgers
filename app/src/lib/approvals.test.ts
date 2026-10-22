@@ -8,16 +8,13 @@ import {
   bulkTotalMinor,
   classifyDecisionError,
   displayAmount,
-  expiryText,
+  expiry,
   formatTimestamp,
   isBulkEligible,
   reauthUrl,
   relativeTime,
   resultEntry,
   shortHash,
-  BULK_HIGH_RISK_MESSAGE,
-  EXPIRED_MESSAGE,
-  NOT_PENDING_MESSAGE,
 } from './approvals';
 
 function item(overrides: Partial<ApprovalView> & { id: string }): ApprovalView {
@@ -68,13 +65,13 @@ describe('bulkPlan', () => {
   it('refuses a selection that includes a high-risk row', () => {
     const plan = bulkPlan(rows, new Set(['eur1', 'high1']));
     expect(plan.canApprove).toBe(false);
-    expect(plan.message).toBe(BULK_HIGH_RISK_MESSAGE);
+    expect(plan.message).toEqual({ kind: 'high-risk' });
   });
 
   it('refuses a mixed-currency selection with a message naming both currencies', () => {
     const plan = bulkPlan(rows, new Set(['eur1', 'usd1']));
     expect(plan.canApprove).toBe(false);
-    expect(plan.message).toBe('The selection mixes EUR and USD. Select one currency at a time.');
+    expect(plan.message).toEqual({ kind: 'mixed', currencies: ['EUR', 'USD'] });
   });
 
   it('ignores ids that are not on screen', () => {
@@ -110,8 +107,9 @@ describe('badge and formatting helpers', () => {
     const now = Date.parse('2026-10-22T12:00:00Z');
     expect(relativeTime('2026-10-22T10:00:00Z', now)).toBe('2 hours ago');
     expect(relativeTime('2026-10-22T15:00:00Z', now)).toBe('in 3 hours');
-    expect(expiryText('2026-10-22T14:00:00Z', now)).toBe('expires in 2 hours');
-    expect(expiryText('2026-10-22T11:30:00Z', now)).toBe('expired 30 minutes ago');
+    expect(expiry('2026-10-22T14:00:00Z', now)).toEqual({ open: true, when: 'in 2 hours' });
+    expect(expiry('2026-10-22T11:30:00Z', now)).toEqual({ open: false, when: '30 minutes ago' });
+    expect(expiry('not a time', now)).toBeNull();
     expect(relativeTime('not a time', now)).toBe('');
   });
 
@@ -133,15 +131,15 @@ describe('reauth and decision errors', () => {
 
   it('classifies each slug the contract names', () => {
     expect(classifyDecisionError(new ApiError('unauthorized', 'x', 401, null, 'reauth-required'))).toEqual({ kind: 'reauth' });
-    expect(classifyDecisionError(new ApiError('server', 'x', 409, null, 'approval-not-pending'))).toEqual({ kind: 'stale', message: NOT_PENDING_MESSAGE });
-    expect(classifyDecisionError(new ApiError('server', 'x', 409, null, 'approval-expired'))).toEqual({ kind: 'stale', message: EXPIRED_MESSAGE });
+    expect(classifyDecisionError(new ApiError('server', 'x', 409, null, 'approval-not-pending'))).toEqual({ kind: 'stale', reason: 'not-pending' });
+    expect(classifyDecisionError(new ApiError('server', 'x', 409, null, 'approval-expired'))).toEqual({ kind: 'stale', reason: 'expired' });
     expect(classifyDecisionError(new ApiError('validation', 'x', 422, 'Mixed currencies', 'bulk-selection-refused'))).toEqual({
       kind: 'refused',
-      message: 'Mixed currencies',
+      detail: 'Mixed currencies',
     });
     expect(classifyDecisionError(new ApiError('validation', 'x', 422, null, 'bulk-selection-refused'))).toEqual({
       kind: 'refused',
-      message: 'The server refused this selection. Nothing was approved.',
+      detail: null,
     });
     expect(classifyDecisionError(new Error('boom'))).toEqual({ kind: 'other' });
   });

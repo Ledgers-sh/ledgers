@@ -7,10 +7,8 @@ import { ApiError, buildUrl } from '../api/client';
 import type { ApprovalView } from '../api/approvals';
 import { formatMinor } from './money';
 
-export const BULK_HIGH_RISK_MESSAGE = 'High-risk requests are approved one at a time, from their own page.';
-export const NOT_PENDING_MESSAGE = 'This request was already decided or superseded. The page now shows its current state.';
-export const EXPIRED_MESSAGE = 'This request expired before it was approved. Nothing was posted. The page now shows its current state.';
-export const BULK_REFUSED_MESSAGE = 'The server refused this selection. Nothing was approved.';
+/** Why a selection cannot be bulk approved. The screen words it in the reader's language. */
+export type PlanMessage = { kind: 'high-risk' } | { kind: 'mixed'; currencies: string[] };
 
 /** Only a pending low-risk request can be bulk approved. */
 export function isBulkEligible(item: Pick<ApprovalView, 'status' | 'risk'>): boolean {
@@ -30,7 +28,7 @@ export interface BulkPlan {
   /** The one currency of the selection, or null when the selection has no amount. */
   currency: string | null;
   /** Why the bulk button is off, or null. */
-  message: string | null;
+  message: PlanMessage | null;
 }
 
 /**
@@ -43,7 +41,7 @@ export function bulkPlan(items: readonly ApprovalView[], selectedIds: ReadonlySe
   const count = selected.length;
   if (count === 0) return { canApprove: false, count, currency: null, message: null };
   if (selected.some((item) => !isBulkEligible(item))) {
-    return { canApprove: false, count, currency: null, message: BULK_HIGH_RISK_MESSAGE };
+    return { canApprove: false, count, currency: null, message: { kind: 'high-risk' } };
   }
   const currencies = [...new Set(selected.flatMap(currenciesOf))].sort();
   if (currencies.length > 1) {
@@ -51,7 +49,7 @@ export function bulkPlan(items: readonly ApprovalView[], selectedIds: ReadonlySe
       canApprove: false,
       count,
       currency: null,
-      message: `The selection mixes ${currencies.join(' and ')}. Select one currency at a time.`,
+      message: { kind: 'mixed', currencies },
     };
   }
   return { canApprove: true, count, currency: currencies[0] ?? null, message: null };
@@ -96,7 +94,7 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['minute', 60_000],
 ];
 
-/** "2 hours ago" / "in 3 days" for an RFC 3339 time against `now` (milliseconds). */
+/** "2 hours ago" / "in 3 days" for an RFC 3339 time against `now` (milliseconds), in the given locale. */
 export function relativeTime(iso: string, now: number, locale = 'en'): string {
   const target = Date.parse(iso);
   if (Number.isNaN(target)) return '';
@@ -108,11 +106,14 @@ export function relativeTime(iso: string, now: number, locale = 'en'): string {
   return rtf.format(Math.round(diff / 1000), 'second');
 }
 
-/** "expires in 2 hours" while open, "expired 5 minutes ago" once the time has passed. */
-export function expiryText(expiresAt: string, now: number, locale = 'en'): string {
+/**
+ * When an approval expires: whether it is still open, and how far away the
+ * time is in the locale ("in 2 hours" / "2 hours ago"). Null for a bad time.
+ */
+export function expiry(expiresAt: string, now: number, locale = 'en'): { open: boolean; when: string } | null {
   const target = Date.parse(expiresAt);
-  if (Number.isNaN(target)) return '';
-  return target > now ? `expires ${relativeTime(expiresAt, now, locale)}` : `expired ${relativeTime(expiresAt, now, locale)}`;
+  if (Number.isNaN(target)) return null;
+  return { open: target > now, when: relativeTime(expiresAt, now, locale) };
 }
 
 /** A timestamp for the history table: date and time in the reader's locale. */
@@ -137,8 +138,8 @@ export function reauthUrl(baseUrl: string, approvalId: string): string {
 
 export type DecisionFailure =
   | { kind: 'reauth' }
-  | { kind: 'stale'; message: string }
-  | { kind: 'refused'; message: string }
+  | { kind: 'stale'; reason: 'not-pending' | 'expired' }
+  | { kind: 'refused'; detail: string | null }
   | { kind: 'other' };
 
 /** Sorts a failed decision: sign in again, the item changed under us, the selection was refused, or other. */
@@ -148,11 +149,11 @@ export function classifyDecisionError(error: unknown): DecisionFailure {
     case 'reauth-required':
       return { kind: 'reauth' };
     case 'approval-not-pending':
-      return { kind: 'stale', message: NOT_PENDING_MESSAGE };
+      return { kind: 'stale', reason: 'not-pending' };
     case 'approval-expired':
-      return { kind: 'stale', message: EXPIRED_MESSAGE };
+      return { kind: 'stale', reason: 'expired' };
     case 'bulk-selection-refused':
-      return { kind: 'refused', message: error.detail ?? BULK_REFUSED_MESSAGE };
+      return { kind: 'refused', detail: error.detail };
     default:
       return { kind: 'other' };
   }

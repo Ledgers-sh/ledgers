@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cliSnippet, limitRowError, limitsPayload, mcpConfig, minorToCanonical, serverOrigin, TOKEN_PLACEHOLDER, tierLabel } from './agentKeys';
+import { cliSnippet, limitRowError, limitsPayload, mcpConfig, minorToCanonical, serverOrigin, TOKEN_PLACEHOLDER, tierLabelKey } from './agentKeys';
 
 describe('usage snippets', () => {
   const token = 'lk_live_0123456789abcdef_' + 'ab'.repeat(32);
@@ -34,11 +34,11 @@ describe('usage snippets', () => {
 });
 
 describe('tiers', () => {
-  it('labels the three tiers and passes unknown values through', () => {
-    expect(tierLabel('read')).toBe('Read');
-    expect(tierLabel('draft')).toBe('Draft');
-    expect(tierLabel('post-within-limits')).toBe('Post within limits');
-    expect(tierLabel('admin')).toBe('admin');
+  it('names the three tiers with message keys, and passes unknown values through', () => {
+    expect(tierLabelKey('read')).toBe('agentKeys.tier_read');
+    expect(tierLabelKey('draft')).toBe('agentKeys.tier_draft');
+    expect(tierLabelKey('post-within-limits')).toBe('agentKeys.tier_post');
+    expect(tierLabelKey('admin')).toBeNull();
   });
 });
 
