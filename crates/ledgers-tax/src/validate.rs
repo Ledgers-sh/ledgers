@@ -30,6 +30,8 @@ pub enum Validator {
     UsEin,
     /// EU VAT number: a member-state prefix and an alphanumeric body.
     EuVat,
+    /// Dutch KvK-nummer (Chamber of Commerce number): eight digits.
+    NlKvk,
 }
 
 impl Validator {
@@ -48,6 +50,7 @@ impl Validator {
             "au-abn" => Validator::AuAbn,
             "us-ein" => Validator::UsEin,
             "eu-vat" => Validator::EuVat,
+            "nl-kvk" => Validator::NlKvk,
             other => {
                 return Err(TaxError::Invalid {
                     reason: format!("unknown registration validator {other:?}"),
@@ -69,6 +72,7 @@ impl Validator {
             Validator::AuAbn => "au-abn",
             Validator::UsEin => "us-ein",
             Validator::EuVat => "eu-vat",
+            Validator::NlKvk => "nl-kvk",
         }
     }
 
@@ -96,6 +100,7 @@ impl Validator {
             Validator::AuAbn => check_au_abn(number),
             Validator::UsEin => check_us_ein(number),
             Validator::EuVat => check_eu_vat(number),
+            Validator::NlKvk => check_nl_kvk(number),
         }
     }
 }
@@ -168,6 +173,17 @@ fn check_id_npwp(number: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("An Indonesian NPWP is 15 or 16 digits.".to_owned())
+    }
+}
+
+/// A KvK-nummer is eight digits. The number carries no check digit, so this
+/// checks the shape only; existence is not checked against the register.
+/// TODO: cite the `KvK` specification for the shape (kvk.nl), not yet fetched.
+fn check_nl_kvk(number: &str) -> Result<(), String> {
+    if number.len() == 8 && all_digits(number) {
+        Ok(())
+    } else {
+        Err("A KvK-nummer is eight digits.".to_owned())
     }
 }
 

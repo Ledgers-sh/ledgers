@@ -62,7 +62,7 @@ pub enum VatReturnError {
     Money(#[from] ledgers_money::MoneyError),
 }
 
-fn in_period(record: &VatRecord, from: Date, to: Date, basis: VatBasis) -> bool {
+pub(crate) fn in_period(record: &VatRecord, from: Date, to: Date, basis: VatBasis) -> bool {
     let date = match basis {
         VatBasis::Accrual => record.tax_point,
         VatBasis::Cash => {
