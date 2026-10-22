@@ -49,6 +49,11 @@ export interface MockOptions {
    * are the signed-in owner's, and the approvals fixtures are loaded.
    */
   person?: boolean;
+  /**
+   * Adds this many generated entries after the seed, for paging: the first
+   * has a hyphenated external id (like the demo book's), the second has none.
+   */
+  extraEntries?: number;
 }
 
 export const PERSON = {
@@ -141,6 +146,35 @@ function seedEntries(): Entry[] {
       lines: [line('1200', 'debit', '119000', 'Invoice 2026-118'), line('4000', 'credit', '100000'), line('2000', 'credit', '19000')],
     },
   ];
+}
+
+/** Generated entries for the journal paging tests (see MockOptions.extraEntries). */
+function extraEntriesFor(count: number): Entry[] {
+  const p = period();
+  return Array.from({ length: count }, (_, index) => {
+    const number = index + 3;
+    const day = String((index % 27) + 1).padStart(2, '0');
+    const externalId = index === 0 ? 'halden-12-bank-charges-and-interest' : index === 1 ? null : `bulk-${number}`;
+    return {
+      external_id: externalId,
+      entry_id: index === 0 ? 'demo-01M5HTGY741A4WFVVT1WSVJYP4' : index === 1 ? 'demo-01M5HTFRTE2D7Y0M9YXBDZECM4' : `entry-bulk-${number}`,
+      journal_id: 'general',
+      fiscal_year: Number(p.slice(0, 4)),
+      number,
+      document_date: `${p}-${day}`,
+      posting_date: `${p}-${day}`,
+      base_currency: 'EUR',
+      description: index === 0 ? 'Bank charges and loan interest, Dezember' : `Generated entry ${number}`,
+      posted_by: index % 2 ? 'person' : 'agent',
+      reverses: null,
+      reversed_by: null,
+      recorded_at: `${p}-${day}T08:00:00Z`,
+      lines: [
+        { account_number: '5100', side: 'debit', base: { minor: '990', currency: 'EUR' }, memo: null },
+        { account_number: '1200', side: 'credit', base: { minor: '990', currency: 'EUR' }, memo: null },
+      ],
+    };
+  });
 }
 
 function sum(entries: Entry[], filter: (account: string) => boolean, side: Side): bigint {
@@ -459,7 +493,19 @@ function handle(method: string, url: URL, bodyText: string): Reply {
   if (method === 'GET' && path === '/v1/auth/session' && state.person) return { status: 200, body: PERSON };
 
   if (method === 'GET' && path === '/v1/accounts') return { status: 200, body: { accounts: ACCOUNTS } };
-  if (method === 'GET' && path === '/v1/entries') return { status: 200, body: { entries: state.entries } };
+  if (method === 'GET' && path === '/v1/entries') {
+    // Newest first, one page at a time, as the server pages it: `after` is the last entry_id of the previous page.
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50), 1), 200);
+    const newestFirst = [...state.entries].reverse();
+    const after = url.searchParams.get('after');
+    let start = 0;
+    if (after) {
+      const index = newestFirst.findIndex((entry) => entry.entry_id === after);
+      if (index < 0) return problem(404, 'Not found');
+      start = index + 1;
+    }
+    return { status: 200, body: { entries: newestFirst.slice(start, start + limit) } };
+  }
   if (method === 'GET' && path.startsWith('/v1/entries/')) {
     const id = decodeURIComponent(path.slice('/v1/entries/'.length));
     const entry = state.entries.find((e) => e.external_id === id);
@@ -583,6 +629,7 @@ let server: http.Server | null = null;
  */
 export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   state.entries = options.seed ? seedEntries() : [];
+  if (options.extraEntries) state.entries.push(...extraEntriesFor(options.extraEntries));
   state.posts = [];
   state.reversals = [];
   state.person = options.person ?? false;

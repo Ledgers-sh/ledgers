@@ -109,49 +109,173 @@ pub async fn entry_by_external_id(
     entry_by_id(db, company_id, &id).await
 }
 
+/// The order of a journal listing: newest posting first. `id` breaks the
+/// ties so the order is total and a cursor can name a position in it.
+const LIST_ORDER: &str = "ORDER BY posting_date DESC, fiscal_year DESC, number DESC, id DESC";
+
 /// Lists posted entries of one VAT period (`YYYY-MM`) or of every period,
-/// newest posting first, at most `limit` of them.
+/// newest posting first, at most `limit` of them. `after` is the id of the
+/// last entry of the previous page: the page then starts strictly after it.
+///
+/// The cost is a constant number of queries whatever `limit` is: the cursor
+/// lookup, the page itself, all of its lines in one query, and all of its
+/// reversals in one query. The page is selected once in a subquery, so the
+/// lines and reversals always belong to exactly the entries listed.
+///
+/// Returns `Ok(None)` when `after` names no entry of the company.
 ///
 /// # Errors
-/// [`JournalError::Database`] when a query fails.
+/// [`JournalError::Database`] when a query fails, or a stored row cannot
+/// be read back.
 pub async fn list_entries(
     db: &dyn Database,
     company_id: &str,
     period: Option<&str>,
+    after: Option<&str>,
     limit: u32,
-) -> Result<Vec<EntryRecord>, JournalError> {
-    let rows = match period {
-        Some(period) => {
-            db.query(&Statement::with_values(
-                "SELECT id FROM journal_entry WHERE company_id = ? AND vat_period = ? \
-                 ORDER BY posting_date DESC, fiscal_year DESC, number DESC LIMIT ?"
-                    .to_owned(),
-                vec![
-                    SeaValue::from(company_id),
-                    SeaValue::from(period),
-                    SeaValue::from(i64::from(limit)),
-                ],
-            ))
-            .await?
-        }
-        None => {
-            db.query(&Statement::with_values(
-                "SELECT id FROM journal_entry WHERE company_id = ? \
-                 ORDER BY posting_date DESC, fiscal_year DESC, number DESC LIMIT ?"
-                    .to_owned(),
-                vec![SeaValue::from(company_id), SeaValue::from(i64::from(limit))],
-            ))
-            .await?
-        }
+) -> Result<Option<Vec<EntryRecord>>, JournalError> {
+    let Some(filter) = page_filter(db, company_id, period, after).await? else {
+        return Ok(None);
     };
-    let mut records = Vec::with_capacity(rows.rows.len());
-    for row in &rows.rows {
-        let Some(id) = row.get::<String>("id") else {
-            continue;
+    // The page, as a subquery the lines and reversals select from.
+    let page_ids = format!(
+        "SELECT id FROM journal_entry WHERE {} {LIST_ORDER} LIMIT ?",
+        filter.where_sql
+    );
+    let mut page_values = filter.values.clone();
+    page_values.push(SeaValue::from(i64::from(limit)));
+
+    let headers = db
+        .query(&Statement::with_values(
+            format!(
+                "SELECT id, journal_id, fiscal_year, number, document_date, posting_date, \
+                 tax_point_date, base_currency, reverses, recorded_at, actor, external_id, description \
+                 FROM journal_entry WHERE {} {LIST_ORDER} LIMIT ?",
+                filter.where_sql
+            ),
+            page_values.clone(),
+        ))
+        .await?;
+    let lines = db
+        .query(&Statement::with_values(
+            format!(
+                "SELECT entry_id, account_number, base_minor, tx_currency, tx_minor, rate_scaled, \
+                 tax_code, dimensions, memo FROM journal_line \
+                 WHERE entry_id IN ({page_ids}) ORDER BY entry_id, line_no"
+            ),
+            page_values.clone(),
+        ))
+        .await?;
+    let reversals = db
+        .query(&Statement::with_values(
+            format!(
+                "SELECT r.reverses AS target, r.id AS id FROM journal_entry r \
+                 WHERE r.company_id = ? AND r.reverses IN ({page_ids}) ORDER BY r.id"
+            ),
+            std::iter::once(SeaValue::from(company_id))
+                .chain(page_values)
+                .collect(),
+        ))
+        .await?;
+    assemble_page(company_id, &headers, lines, reversals).map(Some)
+}
+
+/// The `WHERE` clause of a listing (company, period, cursor) and its values.
+struct PageFilter {
+    where_sql: String,
+    values: Vec<SeaValue>,
+}
+
+/// The filter of one page, or `Ok(None)` when `after` names no entry of the company.
+async fn page_filter(
+    db: &dyn Database,
+    company_id: &str,
+    period: Option<&str>,
+    after: Option<&str>,
+) -> Result<Option<PageFilter>, JournalError> {
+    let mut filter = vec!["company_id = ?".to_owned()];
+    let mut values = vec![SeaValue::from(company_id)];
+    if let Some(period) = period {
+        filter.push("vat_period = ?".to_owned());
+        values.push(SeaValue::from(period));
+    }
+    if let Some(after) = after {
+        let cursor = db
+            .query(&Statement::with_values(
+                "SELECT posting_date, fiscal_year, number FROM journal_entry \
+                 WHERE id = ? AND company_id = ?"
+                    .to_owned(),
+                vec![SeaValue::from(after), SeaValue::from(company_id)],
+            ))
+            .await?;
+        let Some(row) = cursor.first() else {
+            return Ok(None);
         };
-        if let Some(record) = entry_by_id(db, company_id, &id).await? {
-            records.push(record);
+        filter.push("(posting_date, fiscal_year, number, id) < (?, ?, ?, ?)".to_owned());
+        values.extend([
+            SeaValue::from(row.get::<String>("posting_date").unwrap_or_default()),
+            SeaValue::from(row.get::<i64>("fiscal_year").unwrap_or_default()),
+            SeaValue::from(row.get::<i64>("number").unwrap_or_default()),
+            SeaValue::from(after),
+        ]);
+    }
+    Ok(Some(PageFilter {
+        where_sql: filter.join(" AND "),
+        values,
+    }))
+}
+
+/// Builds the records of one page from its header, line and reversal rows.
+fn assemble_page(
+    company_id: &str,
+    headers: &cratefield_core::Rows,
+    lines: cratefield_core::Rows,
+    reversals: cratefield_core::Rows,
+) -> Result<Vec<EntryRecord>, JournalError> {
+    let mut reversed_by: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for row in reversals.rows {
+        if let (Some(target), Some(id)) = (row.get::<String>("target"), row.get::<String>("id")) {
+            reversed_by.entry(target).or_default().push(id);
         }
+    }
+    let mut lines_by_entry: std::collections::HashMap<String, Vec<cratefield_core::Row>> =
+        std::collections::HashMap::new();
+    for row in lines.rows {
+        if let Some(entry_id) = row.get::<String>("entry_id") {
+            lines_by_entry.entry(entry_id).or_default().push(row);
+        }
+    }
+
+    let mut records = Vec::with_capacity(headers.rows.len());
+    for row in &headers.rows {
+        let id = row.get::<String>("id").unwrap_or_default();
+        let header = crate::reversal::parse_entry_header_row(row, &id)?;
+        let line_rows = lines_by_entry.remove(&id).unwrap_or_default();
+        let code = header.base_currency.code().to_owned();
+        let parsed_lines = line_rows
+            .iter()
+            .map(|line_row| {
+                crate::reversal::parse_line_row(line_row, header.base_currency, &code, &id)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut entry =
+            crate::reversal::entry_from_header(company_id, header, parsed_lines.clone());
+        // The header row is the source of the idempotency key; the reader does not load it.
+        entry.external_id = row.get::<Option<String>>("external_id").flatten();
+        entry.description = row.get::<String>("description").unwrap_or_default();
+        records.push(EntryRecord {
+            fiscal_year: row.get::<i64>("fiscal_year").unwrap_or_default(),
+            number: row.get::<i64>("number").unwrap_or_default(),
+            recorded_at: row.get::<String>("recorded_at").unwrap_or_default(),
+            actor: row
+                .get::<String>("actor")
+                .unwrap_or_else(|| "agent".to_owned()),
+            reversed_by: reversed_by.remove(&id).unwrap_or_default(),
+            id,
+            entry,
+            lines: parsed_lines,
+        });
     }
     Ok(records)
 }
@@ -168,7 +292,7 @@ pub async fn account_balances(
     let rows = db
         .query(&Statement::with_values(
             "SELECT jl.account_number AS account_number, je.base_currency AS base_currency, \
-             COALESCE(SUM(jl.base_minor), 0) AS total \
+             CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) AS total \
              FROM journal_line jl JOIN journal_entry je ON jl.entry_id = je.id \
              WHERE je.company_id = ? \
              GROUP BY jl.account_number, je.base_currency \

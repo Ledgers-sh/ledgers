@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { entriesGet, entriesList, entriesReverse } from '../api/commands';
+import { ApiError, type ClientConfig } from '../api/client';
 import type { EntryRecord } from '../api/types';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
@@ -23,29 +24,124 @@ export function entryTotal(entry: EntryRecord): { minor: string; currency: strin
   return { minor: total.toString(), currency: entry.base_currency };
 }
 
-export function Journal() {
+/** Entries per journal page; the server's default. Load more fetches the next page. */
+export const JOURNAL_PAGE = 50;
+
+interface JournalPages {
+  rows: EntryRecord[];
+  hasMore: boolean;
+  loading: boolean;
+  error: unknown;
+  loadingMore: boolean;
+  moreError: unknown;
+}
+
+/** The journal's entries, newest first, loaded a page at a time with a cursor. */
+function useJournalPages(): JournalPages & { loadMore: () => void; reload: () => void } {
   const { client } = useSession();
+  const [state, setState] = useState<JournalPages>({
+    rows: [],
+    hasMore: false,
+    loading: true,
+    error: undefined,
+    loadingMore: false,
+    moreError: undefined,
+  });
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    setState((prev) => ({ ...prev, loading: true, error: undefined }));
+    entriesList(client, { limit: JOURNAL_PAGE }).then(
+      (page) =>
+        alive &&
+        setState({
+          rows: page.entries,
+          hasMore: page.entries.length === JOURNAL_PAGE,
+          loading: false,
+          error: undefined,
+          loadingMore: false,
+          moreError: undefined,
+        }),
+      (error: unknown) => alive && setState((prev) => ({ ...prev, loading: false, error })),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client.baseUrl, client.apiKey, tick]);
+
+  const last = state.rows[state.rows.length - 1];
+  const loadMore = () => {
+    if (!last || state.loadingMore) return;
+    setState((prev) => ({ ...prev, loadingMore: true, moreError: undefined }));
+    entriesList(client, { limit: JOURNAL_PAGE, after: last.entry_id }).then(
+      (page) =>
+        setState((prev) => ({
+          ...prev,
+          rows: [...prev.rows, ...page.entries],
+          hasMore: page.entries.length === JOURNAL_PAGE,
+          loadingMore: false,
+        })),
+      (error: unknown) => setState((prev) => ({ ...prev, loadingMore: false, moreError: error })),
+    );
+  };
+
+  return { ...state, loadMore, reload: () => setTick((n) => n + 1) };
+}
+
+/** The detail link of an entry: its external id, or its entry id when it has none. */
+export function entryHref(entry: Pick<EntryRecord, 'external_id' | 'entry_id'>): string {
+  return `#/journal/${encodeURIComponent(entry.external_id ?? entry.entry_id)}`;
+}
+
+/** A click anywhere on a row opens its entry, unless it landed on a control of its own. */
+function openRow(event: MouseEvent, href: string) {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('a, button, input, select, textarea')) return;
+  if (window.getSelection()?.toString()) return;
+  window.location.hash = href;
+}
+
+/**
+ * Finds one entry for the detail page. The entry's external id is the
+ * server's key (`entries.get`). An entry posted without one is reachable
+ * only through the journal listing, so the listing is paged until it turns up.
+ */
+export async function findEntry(client: ClientConfig, id: string): Promise<EntryRecord | null> {
+  try {
+    return await entriesGet(client, id);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+  }
+  let after: string | undefined;
+  for (;;) {
+    const page = await entriesList(client, { limit: 200, after });
+    const hit = page.entries.find((entry) => entry.entry_id === id || entry.external_id === id);
+    if (hit) return hit;
+    if (page.entries.length < 200) return null;
+    after = page.entries[page.entries.length - 1].entry_id;
+  }
+}
+
+export function Journal() {
   const [query, setQuery] = useState('');
-  const state = useAsync(async () => (await entriesList(client)).entries, [client.baseUrl, client.apiKey]);
+  const pages = useJournalPages();
   const searchRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo(() => {
-    const sorted = [...(state.data ?? [])].sort(
-      (a, b) => b.posting_date.localeCompare(a.posting_date) || b.number - a.number,
-    );
     const needle = query.trim().toLowerCase();
-    if (!needle) return sorted;
-    return sorted.filter(
+    if (!needle) return pages.rows;
+    return pages.rows.filter(
       (entry) =>
         entry.description.toLowerCase().includes(needle) ||
         entryRef(entry).toLowerCase().includes(needle) ||
         (entry.external_id ?? '').toLowerCase().includes(needle),
     );
-  }, [state.data, query]);
+  }, [pages.rows, query]);
 
-  if (state.loading && !state.data) return <Skeleton rows={6} label={t('journal.loading')} />;
-  if (state.error && !state.data) return <ErrorBanner error={state.error} onRetry={state.reload} />;
-  const all = state.data ?? [];
+  if (pages.loading && pages.rows.length === 0) return <Skeleton rows={6} label={t('journal.loading')} />;
+  if (pages.error && pages.rows.length === 0) return <ErrorBanner error={pages.error} onRetry={pages.reload} />;
+  const all = pages.rows;
 
   return (
     <>
@@ -109,10 +205,11 @@ export function Journal() {
                 <tbody>
                   {entries.map((entry) => {
                     const total = entryTotal(entry);
+                    const href = entryHref(entry);
                     return (
-                      <tr key={entry.entry_id}>
+                      <tr key={entry.entry_id} class="journal-row" onClick={(event) => openRow(event, href)}>
                         <td class="code" data-label={t('term.entry')}>
-                          <a class="row-link" href={`#/journal/${encodeURIComponent(entry.external_id ?? entry.entry_id)}`}>
+                          <a class="row-link" href={href}>
                             <Ltr>{entryRef(entry)}</Ltr>
                           </a>
                           {entry.reversed_by && (
@@ -138,6 +235,18 @@ export function Journal() {
               </table>
             </div>
           )}
+          {pages.moreError !== undefined && pages.moreError !== null ? (
+            <div class="panel-body">
+              <ErrorBanner error={pages.moreError} onRetry={pages.loadMore} />
+            </div>
+          ) : null}
+          {pages.hasMore ? (
+            <div class="panel-body row-actions">
+              <button type="button" class="btn" onClick={pages.loadMore} disabled={pages.loadingMore}>
+                {pages.loadingMore ? t('journal.loading_more') : t('journal.load_more')}
+              </button>
+            </div>
+          ) : null}
         </section>
       )}
     </>
@@ -147,20 +256,16 @@ export function Journal() {
 /** One entry with its lines, and the reversal action (a new entry, never an edit). */
 export function EntryDetail({ entryId }: { entryId: string }) {
   const { client, online, toast } = useSession();
-  const list = useAsync(async () => (await entriesList(client)).entries, [client.baseUrl, client.apiKey]);
-  const listed = list.data?.find((entry) => entry.external_id === entryId || entry.entry_id === entryId);
-  const fresh = useAsync(
-    async () => (listed?.external_id ? await entriesGet(client, listed.external_id) : listed ?? null),
-    [client.baseUrl, client.apiKey, entryId, listed?.external_id],
-  );
+  const found = useAsync(() => findEntry(client, entryId), [client.baseUrl, client.apiKey, entryId]);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [postingDate, setPostingDate] = useState(todayIso());
 
-  if (list.loading && !list.data) return <Skeleton rows={6} label={t('entry.loading')} />;
-  if (list.error && !list.data) return <ErrorBanner error={list.error} onRetry={list.reload} />;
-  if (!listed) {
+  if (found.loading && !found.data) return <Skeleton rows={6} label={t('entry.loading')} />;
+  if (found.error && !found.data) return <ErrorBanner error={found.error} onRetry={found.reload} />;
+  const entry = found.data;
+  if (!entry) {
     return (
       <Empty
         title={t('entry.not_found_title')}
@@ -174,7 +279,6 @@ export function EntryDetail({ entryId }: { entryId: string }) {
       </Empty>
     );
   }
-  const entry: EntryRecord = fresh.data ?? listed;
   const total = entryTotal(entry);
   const reversible = entry.external_id !== null && entry.reversed_by === null;
   const ref = entryRef(entry);
