@@ -121,6 +121,8 @@ export function ConfirmDialog({
   tone?: 'human';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Each dialog names itself with its own heading id: two dialogs on one page must not share an id.
+  const [titleId] = useState(() => `confirm-title-${Math.random().toString(36).slice(2, 9)}`);
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -131,7 +133,7 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       class="confirm"
-      aria-labelledby="confirm-title"
+      aria-labelledby={titleId}
       onClose={onClose}
       onCancel={(event) => {
         event.preventDefault();
@@ -139,7 +141,7 @@ export function ConfirmDialog({
       }}
     >
       <div class="dialog-body">
-        <h2 id="confirm-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {children}
         {error !== undefined && error !== null && <ErrorBanner error={error} />}
         <div class="dialog-actions">
