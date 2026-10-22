@@ -1,0 +1,63 @@
+# European Union: VAT for the 27 member states, for the EU Commission rate table
+# (OSS and EC Sales List use these rates).
+#
+# TODO (no rates shipped): the standard and reduced rates of all 27 member states
+#   could not be verified in the 2026-10-23 check. The Commission's rate table is a
+#   JavaScript view (TEDB) that did not return data, and the only PDF found is the
+#   2021 edition, which is stale. Rows are added state by state, each with its
+#   valid_from and source, once fetched from TEDB or the national ministry.
+# TODO: 64 derogations (Commission, Oct 2025) apply to some states' reduced rates;
+#   they belong with each state's rows.
+# TODO: per-state VAT-number body rules are not checked (prefix and shape only).
+
+id = "eu"
+iso = "EU"
+covers = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "EL", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"]
+name = "European Union"
+native_name = "Union européenne"
+currency = "EUR"
+fiscal_year_start_month = 1
+decimal_separator = ","
+thousands_separator = "."
+date_format = "DD/MM/YYYY"
+chart = "generic-sme"
+regime = "vat"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "VAT number"
+validator = "eu-vat"
+note = "Member-state prefix and 2 to 12 letters or digits. Per-state body rules are not checked."
+
+[[tax_codes]]
+code = "EU-OUT-STD"
+label = "Output VAT (standard)"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "EU-OUT-RED"
+label = "Output VAT (reduced)"
+kind = "output_vat"
+category = "reduced"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "EU-IC-SUPPLY"
+label = "Intra-EU supply (0%, EC Sales List)"
+kind = "exempt"
+category = "exempt"
+
+[[tax_codes]]
+code = "EU-IN"
+label = "Input VAT"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "VAT return (generic)"
+kind = "generic"

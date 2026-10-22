@@ -18,7 +18,8 @@ use ledgers_ledger::close::{CloseCheckRegistry, DraftEntriesCloseCheck};
 use ledgers_ledger::fiscal::{self, FiscalYear, FiscalYearSpec};
 use ledgers_ledger::period::{self, PeriodState};
 use ledgers_ledger::{AccountsError, EntryJournal};
-use ledgers_tax::rate::{Jurisdiction, RateCategory};
+use ledgers_tax::country::{self, CountryPack};
+use ledgers_tax::rate::{DatedRate, Jurisdiction, RateCategory};
 use ledgers_tax::settings::{TaxSettings, VatBasis};
 use schemars::JsonSchema;
 use sea_query::Value as SeaValue;
@@ -105,17 +106,61 @@ pub struct TaxSettingsInput {
     pub small_business: bool,
     /// The VAT reporting method: `accrual` or `cash`.
     pub vat_basis: String,
+    /// The company's own rates. Only for packs that allow them (generic and
+    /// US sales tax); omitted leaves the stored rates as they are.
+    #[serde(default)]
+    pub user_rates: Option<Vec<UserRate>>,
 }
 
-/// One statutory VAT rate the company's country has on the given day.
+/// A rate the company defines for a pack that allows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UserRate {
+    /// `standard`, `reduced` or `zero`.
+    pub category: String,
+    /// The rate as a percentage, for example `8.25`.
+    pub percent: String,
+    /// The first day the rate applies, `YYYY-MM-DD`.
+    pub valid_from: String,
+    /// What the company says the rate is based on (free text, required).
+    pub source: String,
+}
+
+/// The `company_setting` key holding the company's own rates, as JSON.
+pub const USER_RATES_KEY: &str = "tax.user_rates";
+
+/// One rate the company's country has on the given day.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct TaxRateView {
-    /// `standard` or `reduced`.
+    /// `standard`, `reduced` or `zero`.
     pub category: String,
     /// The rate as a percentage, for example `19`.
     pub percent: String,
-    /// The statute the rate comes from.
+    /// The day the rate took effect, `YYYY-MM-DD`.
+    pub valid_from: String,
+    /// The statute the rate comes from, or the company's own note.
     pub source: String,
+}
+
+/// One tax code entries use, as the company's pack defines it.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TaxCodeView {
+    /// The stable id (`SG-GST-SR-9`).
+    pub code: String,
+    /// The English label.
+    pub label: String,
+    /// `output_vat`, `input_vat`, `reverse_charge`, `exempt`, `zero` or `import_vat`.
+    pub kind: String,
+    /// `standard`, `reduced`, `zero` or `exempt`.
+    pub category: String,
+}
+
+/// One return the pack can draft.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ReturnView {
+    /// The layout id (`generic`, `sg-gst-f5`, `ustva`).
+    pub id: String,
+    /// The English title.
+    pub label: String,
 }
 
 /// The output of `tax_settings.get`.
@@ -131,6 +176,26 @@ pub struct TaxSettingsOutput {
     pub rate_table: bool,
     /// The rates in force today; empty when there is no table.
     pub rates: Vec<TaxRateView>,
+    /// The pack id that applies (`sg`, `de`, `generic`); empty without a country.
+    pub pack: String,
+    /// The pack's English name.
+    pub pack_name: String,
+    /// `vat`, `gst`, `sales_tax` or `none`.
+    pub regime: String,
+    /// True when the company defines its own rates for this pack.
+    pub user_rates_allowed: bool,
+    /// `complete`, or `pending` while some statutory rates are still unverified.
+    pub rates_status: String,
+    /// The registration number's name (`UEN`, `NPWP`, `USt-IdNr.`).
+    pub registration_label: String,
+    /// What the registration check covers.
+    pub registration_note: String,
+    /// The returns the pack can draft, generic first.
+    pub returns: Vec<ReturnView>,
+    /// The tax codes entries and bills use.
+    pub tax_codes: Vec<TaxCodeView>,
+    /// The company's own rates as stored.
+    pub user_rates: Vec<UserRate>,
 }
 
 /// One period of a fiscal year and its state.
@@ -592,6 +657,22 @@ pub fn clean_company(input: &CompanyUpdateInput) -> Result<(String, CompanyProfi
     Ok((name, profile))
 }
 
+/// Refuses a country change once the company has an entry: like the base
+/// currency, the country (and so its tax pack) is fixed from the first entry.
+async fn ensure_country_change_allowed(
+    db: &dyn Database,
+    company_id: &str,
+    country: &str,
+) -> Result<(), CommandError> {
+    let current = company_view(db, company_id).await?;
+    if current.profile.country != country && current.base_currency_locked {
+        return Err(CommandError::InvalidInput(
+            "The company country can only change before the first entry is posted.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /// `company.get`: the name, base currency (with its lock) and profile.
 pub struct CompanyGet;
 
@@ -639,11 +720,12 @@ impl Command for CompanyUpdate {
 
     async fn preview(
         &self,
-        _db: &dyn Database,
-        _ctx: &CommandContext,
+        db: &dyn Database,
+        ctx: &CommandContext,
         input: &Self::Input,
     ) -> Result<JournalPreview, CommandError> {
-        clean_company(input)?;
+        let (_, profile) = clean_company(input)?;
+        ensure_country_change_allowed(db, &ctx.company_id, &profile.country).await?;
         Ok(JournalPreview::empty())
     }
 
@@ -655,6 +737,7 @@ impl Command for CompanyUpdate {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         let (name, profile) = clean_company(input)?;
+        ensure_country_change_allowed(db, &ctx.company_id, &profile.country).await?;
         let stored = serde_json::to_string(&profile)
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
         let statements = vec![
@@ -680,8 +763,79 @@ impl Command for CompanyUpdate {
 }
 
 /// `tax_settings.get`: the small-business and VAT-basis settings, and the
-/// statutory rates in force today for the company's country.
+/// rates the company's pack has for its country today.
 pub struct TaxSettingsGet;
+
+/// The company's own rates as stored, empty when there are none.
+pub async fn user_rates(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<Vec<UserRate>, CommandError> {
+    match setting(db, company_id, USER_RATES_KEY)
+        .await
+        .map_err(CommandError::Database)?
+    {
+        Some(text) => serde_json::from_str(&text)
+            .map_err(|err| CommandError::InvalidInput(format!("stored tax rates: {err}"))),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The pack that applies to a country: its own pack, or the generic pack.
+/// `None` when the country is empty.
+pub fn pack_for(country: &str) -> Result<Option<CountryPack>, CommandError> {
+    if country.is_empty() {
+        return Ok(None);
+    }
+    let found = country::pack_for_country(country)
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    match found {
+        Some(pack) => Ok(Some(pack)),
+        None => country::generic_pack()
+            .map(Some)
+            .map_err(|err| CommandError::InvalidInput(err.to_string())),
+    }
+}
+
+/// Converts the company's own rates into dated rates. Each rate runs from its
+/// `valid_from` to the day before the next rate of the same category.
+pub fn company_dated_rates(
+    country: &str,
+    rates: &[UserRate],
+) -> Result<Vec<DatedRate>, CommandError> {
+    let jurisdiction = Jurisdiction::new(country);
+    let mut out = Vec::with_capacity(rates.len());
+    for rate in rates {
+        let category = RateCategory::from_code(&rate.category)
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+        let valid_from = Date::parse(
+            &rate.valid_from,
+            format_description!("[year]-[month]-[day]"),
+        )
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+        out.push(DatedRate {
+            jurisdiction: jurisdiction.clone(),
+            category,
+            rate: country::percent_rate(&rate.percent)
+                .map_err(|err| CommandError::InvalidInput(err.to_string()))?,
+            valid_from,
+            valid_to: None,
+            source: rate.source.clone(),
+        });
+    }
+    for idx in 0..out.len() {
+        let category = out[idx].category;
+        let from = out[idx].valid_from;
+        let end = out
+            .iter()
+            .filter(|other| other.category == category && other.valid_from > from)
+            .map(|other| other.valid_from)
+            .min()
+            .and_then(time::Date::previous_day);
+        out[idx].valid_to = end;
+    }
+    Ok(out)
+}
 
 /// The tax settings view for a company.
 pub async fn tax_view(
@@ -696,28 +850,95 @@ pub async fn tax_view(
         .await
         .map_err(CommandError::Database)?
         .country;
+    let stored = user_rates(db, company_id).await?;
+    let Some(pack) = pack_for(&country)? else {
+        return Ok(TaxSettingsOutput {
+            small_business: settings.small_business,
+            vat_basis: settings.vat_basis.code().to_owned(),
+            country,
+            rate_table: false,
+            rates: Vec::new(),
+            pack: String::new(),
+            pack_name: String::new(),
+            regime: String::new(),
+            user_rates_allowed: false,
+            rates_status: String::new(),
+            registration_label: String::new(),
+            registration_note: String::new(),
+            returns: Vec::new(),
+            tax_codes: Vec::new(),
+            user_rates: Vec::new(),
+        });
+    };
+    let company_rates = if pack.user_rates {
+        company_dated_rates(&country, &stored)?
+    } else {
+        Vec::new()
+    };
+    let table = pack
+        .rate_table(&company_rates)
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    let jurisdiction = Jurisdiction::new(&country);
     let mut rates = Vec::new();
-    let mut rate_table = false;
-    if country == "DE" {
-        rate_table = true;
-        let table = ledgers_tax::rate::germany_rates()
-            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
-        for category in [RateCategory::Standard, RateCategory::Reduced] {
-            if let Ok(dated) = table.rate_on(Jurisdiction::Germany, category, today) {
-                rates.push(TaxRateView {
-                    category: category.code().to_owned(),
-                    percent: percent_text(&dated.rate.to_string()),
-                    source: dated.source.clone(),
-                });
-            }
+    for category in [RateCategory::Standard, RateCategory::Reduced] {
+        if let Ok(dated) = table.rate_on(&jurisdiction, category, today) {
+            rates.push(TaxRateView {
+                category: category.code().to_owned(),
+                percent: percent_text(&dated.rate.to_string()),
+                valid_from: dated.valid_from.to_string(),
+                source: dated.source.clone(),
+            });
         }
     }
+    let returns = pack
+        .returns
+        .iter()
+        .map(|layout| match layout {
+            country::ReturnLayout::Generic => ReturnView {
+                id: "generic".to_owned(),
+                label: "Generic VAT/GST return".to_owned(),
+            },
+            country::ReturnLayout::Ustva => ReturnView {
+                id: "ustva".to_owned(),
+                label: "Umsatzsteuer-Voranmeldung (UStVA)".to_owned(),
+            },
+            country::ReturnLayout::Boxes { id, label, .. } => ReturnView {
+                id: id.clone(),
+                label: label.clone(),
+            },
+        })
+        .collect();
+    let tax_codes = pack
+        .tax_codes
+        .iter()
+        .map(|code| TaxCodeView {
+            code: code.code.clone(),
+            label: code.label.clone(),
+            kind: code.kind.to_string(),
+            category: code.category.code().to_owned(),
+        })
+        .collect();
     Ok(TaxSettingsOutput {
         small_business: settings.small_business,
         vat_basis: settings.vat_basis.code().to_owned(),
         country,
-        rate_table,
+        rate_table: !pack.rates.is_empty() || pack.user_rates,
         rates,
+        pack: pack.id.clone(),
+        pack_name: pack.name.clone(),
+        regime: pack.regime.code().to_owned(),
+        user_rates_allowed: pack.user_rates,
+        rates_status: if pack.rates_pending {
+            "pending"
+        } else {
+            "complete"
+        }
+        .to_owned(),
+        registration_label: pack.registration.label.clone(),
+        registration_note: pack.registration.note.clone(),
+        returns,
+        tax_codes,
+        user_rates: stored,
     })
 }
 
@@ -1613,16 +1834,34 @@ impl ServerDispatch {
         let settings = clean_tax(&body).map_err(fail)?;
         let audit = person_audit(deps, &person, request_id);
         let at = super::rfc3339_utc(deps.clock.now());
+        let audit_config = ledgers_audit::AuditConfig::default();
         ledgers_tax::settings::set_tax_settings(
             deps.db.as_ref(),
             &self.company_id,
             &settings,
             &at,
             &audit,
-            &ledgers_audit::AuditConfig::default(),
+            &audit_config,
         )
         .await
         .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        if let Some(rates) = &body.user_rates {
+            let stored = clean_user_rates(&self.company_id, deps.db.as_ref(), rates)
+                .await
+                .map_err(fail)?;
+            let json = serde_json::to_string(&stored)
+                .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+            ledgers_tax::settings::set_user_rates(
+                deps.db.as_ref(),
+                &self.company_id,
+                &json,
+                &at,
+                &audit,
+                &audit_config,
+            )
+            .await
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        }
         let today = Date::parse(&at[..10], format_description!("[year]-[month]-[day]"))
             .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
         let view = tax_view(deps.db.as_ref(), &self.company_id, today)
@@ -1630,6 +1869,57 @@ impl ServerDispatch {
             .map_err(fail)?;
         serde_json::to_value(view).map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
     }
+}
+
+/// Validates the company's own rates for its pack and returns them cleaned.
+/// Only a pack that allows company rates accepts them; the rates must form a
+/// sequence with no gaps or overlaps once dated.
+pub async fn clean_user_rates(
+    company_id: &str,
+    db: &dyn Database,
+    rates: &[UserRate],
+) -> Result<Vec<UserRate>, CommandError> {
+    let country = profile(db, company_id)
+        .await
+        .map_err(CommandError::Database)?
+        .country;
+    let pack = pack_for(&country)?.ok_or_else(|| {
+        CommandError::InvalidInput("Choose the company country before entering rates.".to_owned())
+    })?;
+    if !pack.user_rates {
+        return Err(CommandError::InvalidInput(format!(
+            "{} uses statutory rates; company rates are only for packs that allow them.",
+            pack.name
+        )));
+    }
+    let mut cleaned = Vec::with_capacity(rates.len());
+    for rate in rates {
+        let category = RateCategory::from_code(rate.category.trim())
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+        let source = rate.source.trim();
+        if source.is_empty() {
+            return Err(CommandError::InvalidInput(
+                "Each rate needs a source note.".to_owned(),
+            ));
+        }
+        let percent = rate.percent.trim().to_owned();
+        country::percent_rate(&percent)
+            .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+        let valid_from = rate.valid_from.trim().to_owned();
+        Date::parse(&valid_from, format_description!("[year]-[month]-[day]")).map_err(|_| {
+            CommandError::InvalidInput(format!("{valid_from:?} is not a YYYY-MM-DD date"))
+        })?;
+        cleaned.push(UserRate {
+            category: category.code().to_owned(),
+            percent,
+            valid_from,
+            source: source.to_owned(),
+        });
+    }
+    let dated = company_dated_rates(&country, &cleaned)?;
+    pack.rate_table(&dated)
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    Ok(cleaned)
 }
 
 /// The audit context a person's domain write records under.
@@ -1688,11 +1978,13 @@ mod tests {
     #[test]
     fn tax_basis_codes_are_checked() {
         let ok = clean_tax(&TaxSettingsInput {
+            user_rates: None,
             small_business: false,
             vat_basis: "cash".to_owned(),
         });
         assert!(ok.is_ok());
         let bad = clean_tax(&TaxSettingsInput {
+            user_rates: None,
             small_business: false,
             vat_basis: "monthly".to_owned(),
         });

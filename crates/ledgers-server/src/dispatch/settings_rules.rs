@@ -28,25 +28,6 @@ pub const MIN_REQUEST_TTL_HOURS: u32 = 1;
 /// The longest request expiry, in hours (one week).
 pub const MAX_REQUEST_TTL_HOURS: u32 = 168;
 
-/// One VAT-ID pattern. Class letters: `d` digit, `b` digit 0 or 1, `a` capital
-/// letter, `x` capital letter or digit. Any other capital letter is literal.
-/// A class letter may be followed by a repeat count (`d9` is nine digits).
-/// The pattern includes the country prefix.
-const VAT_PATTERNS: &[(&str, &[&str])] = &[
-    ("AT", &["ATUd8"]),
-    ("BE", &["BEbd9"]),
-    ("DE", &["DEd9"]),
-    ("DK", &["DKd8"]),
-    ("ES", &["ESxd7x"]),
-    ("FR", &["FRxxd9"]),
-    ("GB", &["GBd9", "GBd12", "GBGDd3", "GBHAd3"]),
-    ("IE", &["IEdxd5a", "IEdxd5aa"]),
-    ("IT", &["ITd11"]),
-    ("NL", &["NLd9Bd2"]),
-    ("PL", &["PLd10"]),
-    ("SE", &["SEd12"]),
-];
-
 /// Upper-cases a VAT ID and drops the spaces, dots and dashes people type
 /// between its groups.
 #[must_use]
@@ -57,52 +38,9 @@ pub fn normalize_vat_id(raw: &str) -> String {
         .collect()
 }
 
-/// Whether `text` matches one pattern from [`VAT_PATTERNS`].
-fn matches_pattern(text: &str, pattern: &str) -> bool {
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = 0;
-    let mut spec = pattern.chars().peekable();
-    while let Some(class) = spec.next() {
-        let mut count_text = String::new();
-        while let Some(digit) = spec.peek().filter(|c| c.is_ascii_digit()) {
-            count_text.push(*digit);
-            spec.next();
-        }
-        if matches!(class, 'd' | 'b' | 'a' | 'x') {
-            let count: usize = if count_text.is_empty() {
-                1
-            } else {
-                count_text.parse().unwrap_or(1)
-            };
-            for _ in 0..count {
-                let Some(&c) = chars.get(pos) else {
-                    return false;
-                };
-                let ok = match class {
-                    'd' => c.is_ascii_digit(),
-                    'b' => c == '0' || c == '1',
-                    'a' => c.is_ascii_uppercase(),
-                    _ => c.is_ascii_uppercase() || c.is_ascii_digit(),
-                };
-                if !ok {
-                    return false;
-                }
-                pos += 1;
-            }
-        } else {
-            // A literal capital letter: one character, matched exactly.
-            if chars.get(pos) != Some(&class) {
-                return false;
-            }
-            pos += 1;
-        }
-    }
-    pos == chars.len()
-}
-
-/// Checks a VAT ID against its country. An empty VAT ID is allowed (the
-/// company may not be VAT registered). Countries without a listed pattern
-/// accept a two-letter prefix and two to twelve letters or digits.
+/// Checks a VAT ID against its country's pack (`ledgers_tax::country`). An
+/// empty VAT ID is allowed (the company may not be VAT registered). A country
+/// no pack covers accepts its own prefix and two to twelve letters or digits.
 ///
 /// # Errors
 /// A plain message, shown next to the field.
@@ -116,17 +54,13 @@ pub fn check_vat_id(country: &str, vat_id: &str) -> Result<(), String> {
     if !vat_id.starts_with(country) {
         return Err(format!("A {country} VAT ID starts with {country}."));
     }
-    let listed = VAT_PATTERNS.iter().find(|(code, _)| *code == country);
-    let ok = if let Some((_, patterns)) = listed {
-        patterns.iter().any(|p| matches_pattern(vat_id, p))
-    } else {
-        let body = &vat_id[country.len()..];
-        (2..=12).contains(&body.len())
-            && body
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-    };
-    if ok {
+    let number = ledgers_tax::Validator::normalize(vat_id);
+    let pack = ledgers_tax::pack_for_country(country).map_err(|err| err.to_string())?;
+    if let Some(pack) = pack {
+        return pack.registration.validator.check(&number);
+    }
+    let body = number.get(country.len()..).unwrap_or("");
+    if (2..=12).contains(&body.len()) && body.bytes().all(|b| b.is_ascii_alphanumeric()) {
         Ok(())
     } else {
         Err(format!("This is not a valid {country} VAT ID format."))
@@ -302,14 +236,14 @@ mod tests {
     #[test]
     fn vat_ids_follow_their_country() {
         for (country, vat) in [
-            ("DE", "DE123456789"),
+            ("DE", "DE136695976"),
             ("AT", "ATU12345678"),
             ("BE", "BE0123456789"),
             ("FR", "FR12345678901"),
             ("NL", "NL123456789B01"),
             ("IT", "IT12345678901"),
             ("ES", "ESX1234567Z"),
-            ("GB", "GB123456789"),
+            ("GB", "GB999999973"),
             ("GB", "GBGD123"),
             ("PL", "PL1234567890"),
             ("SE", "SE123456789012"),
@@ -328,6 +262,7 @@ mod tests {
     #[test]
     fn vat_ids_reject_wrong_shapes_with_a_reason() {
         assert!(check_vat_id("DE", "DE12345678").is_err(), "too short");
+        assert!(check_vat_id("DE", "DE123456789").is_err(), "check digit");
         assert!(check_vat_id("DE", "DE1234567890").is_err(), "too long");
         assert!(
             check_vat_id("DE", "DEA23456789").is_err(),

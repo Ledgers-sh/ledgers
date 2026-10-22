@@ -1,0 +1,65 @@
+# Generic / other country: no bundled statutory rates. The company defines its
+# own rates in Settings → Tax (stored per company), with the rate's name, its
+# valid-from date and a source note the company writes. Ledgers does not supply
+# a rate for this pack.
+#
+# Used for any country without its own pack. The currency is the company's base
+# currency (empty here).
+
+id = "generic"
+iso = "XX"
+covers = []
+name = "Generic / other country"
+native_name = "Generic / other country"
+currency = ""
+fiscal_year_start_month = 1
+decimal_separator = "."
+thousands_separator = ","
+date_format = "YYYY-MM-DD"
+chart = "generic-sme"
+regime = "vat"
+rounding = "per_line"
+user_rates = true
+
+[registration]
+label = "Tax number"
+validator = "any"
+note = "Any text. Ledgers does not check the format for this country."
+
+[[tax_codes]]
+code = "GEN-OUT-STD"
+label = "Output tax (standard, company rate)"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "GEN-OUT-RED"
+label = "Output tax (reduced, company rate)"
+kind = "output_vat"
+category = "reduced"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "GEN-ZERO"
+label = "Zero-rated supply"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "GEN-EXEMPT"
+label = "Exempt supply"
+kind = "exempt"
+category = "exempt"
+
+[[tax_codes]]
+code = "GEN-IN"
+label = "Input tax"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "Tax return (generic)"
+kind = "generic"

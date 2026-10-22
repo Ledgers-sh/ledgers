@@ -1,0 +1,94 @@
+# Singapore: Goods and Services Tax (GST).
+#
+# Sources:
+#   GST rate 9% from 2024-01-01: IRAS, "Frequently asked questions for businesses:
+#     GST rate change 2024",
+#     https://www.iras.gov.sg/media/docs/default-source/e-tax/frequently-asked-questions-for-businesses-gst-rate-change-2024.pdf
+#   GST F5 box layout: IRAS, "GST F5 Return" https://www.iras.gov.sg/taxes/goods-services-tax-(gst)
+#   UEN shapes: ACRA, https://www.acra.gov.sg (the annex used for the shapes is older; see TODO)
+#
+# Stable tax code ids (the demo and entry code refer to them by name; do not
+# rename one without a migration note). Accounts are chosen by chart tag:
+#   SG-GST-SR-9  standard-rated supplies (9%)   output account (vat-output)
+#   SG-GST-ZR    zero-rated supplies (0%)       no account
+#   SG-GST-ES    exempt supplies                no account
+#   SG-GST-TX    taxable purchases (input tax)  input account (vat-input)
+#
+# TODO (not in the pack, not verified):
+#   - the 7% (to 2022-12-31) and 8% (2023) history rows;
+#   - the zero-rate row (valid_from not verified), so SG-GST-ZR lines cannot be
+#     priced until it is added;
+#   - reverse charge for imported services (SG-GST-RC) and the F5 boxes for it
+#     and for out-of-scope supplies;
+#   - the UEN check letter (shape only).
+
+id = "sg"
+iso = "SG"
+covers = ["SG"]
+name = "Singapore"
+native_name = "Singapore"
+currency = "SGD"
+fiscal_year_start_month = 1
+decimal_separator = "."
+thousands_separator = ","
+date_format = "DD/MM/YYYY"
+chart = "generic-sme"
+regime = "gst"
+rounding = "per_line"
+rates_pending = true
+
+[registration]
+label = "UEN"
+validator = "sg-uen"
+note = "Shape only: 8 digits and a letter, 9 digits and a letter (local companies), or T/S/R, two digits, two letters, four digits and a letter. The check letter is not verified."
+
+[[rates]]
+jurisdiction = "SG"
+category = "standard"
+percent = "9"
+valid_from = "2024-01-01"
+source = "IRAS, GST rate change to 9% from 1 January 2024 (FAQ 2024)"
+
+[[tax_codes]]
+code = "SG-GST-SR-9"
+label = "Standard-rated supplies (9%)"
+kind = "output_vat"
+category = "standard"
+output_tag = "vat-output"
+
+[[tax_codes]]
+code = "SG-GST-ZR"
+label = "Zero-rated supplies (0%)"
+kind = "zero"
+category = "zero"
+
+[[tax_codes]]
+code = "SG-GST-ES"
+label = "Exempt supplies"
+kind = "exempt"
+category = "exempt"
+
+[[tax_codes]]
+code = "SG-GST-TX"
+label = "Taxable purchases (input tax)"
+kind = "input_vat"
+category = "standard"
+input_tag = "vat-input"
+
+[[returns]]
+id = "generic"
+label = "GST return (generic)"
+kind = "generic"
+
+[[returns]]
+id = "sg-gst-f5"
+label = "GST F5 return"
+kind = "boxes"
+boxes = [
+  { number = "1", label = "Total value of standard-rated supplies", figure = "standard_net" },
+  { number = "2", label = "Total value of zero-rated supplies", figure = "zero_rated_net" },
+  { number = "3", label = "Total value of exempt supplies", figure = "exempt_net" },
+  { number = "6", label = "Output tax due", figure = "output_vat" },
+  { number = "7", label = "Input tax and refunds claimed", figure = "input_vat" },
+  { number = "8", label = "Net GST to be paid or reclaimed", figure = "net_payable" },
+]
