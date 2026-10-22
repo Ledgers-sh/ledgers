@@ -158,8 +158,8 @@ pub async fn trial_balance_for_dimension(
         SELECT
             jl.account_number,
             je.base_currency,
-            COALESCE(SUM(CASE WHEN jl.base_minor > 0 THEN jl.base_minor ELSE 0 END), 0) as total_debits,
-            COALESCE(SUM(CASE WHEN jl.base_minor < 0 THEN -jl.base_minor ELSE 0 END), 0) as total_credits
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor > 0 THEN jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_debits,
+            CAST(COALESCE(SUM(CASE WHEN jl.base_minor < 0 THEN -jl.base_minor ELSE 0 END), 0) AS BIGINT) as total_credits
         FROM journal_line jl
         JOIN journal_entry je ON jl.entry_id = je.id
         JOIN journal_line_dimension jld ON jl.entry_id = jld.entry_id AND jl.line_no = jld.line_no
