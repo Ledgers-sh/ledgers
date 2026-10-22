@@ -488,3 +488,202 @@ where
 fn request_id(deps: &Deps) -> String {
     format!("demo-{}", deps.id_gen.ulid())
 }
+
+/// What verifying the seeded company checks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CheckReport {
+    /// Entries posted and now verified.
+    pub entries_verified: usize,
+    /// Reversals posted and now verified.
+    pub reversals_verified: usize,
+    /// Fixture entries found and checked.
+    pub fixture_entries_found: usize,
+    /// Fixture reversals found reversed.
+    pub fixture_reversals_found: usize,
+}
+
+/// Verifies that the seeded company passes every invariant check.
+///
+/// # Errors
+/// A message naming the first broken invariant if any check fails.
+pub async fn check(deps: &Deps, company_id: &str, book: &DemoBook) -> Result<CheckReport, String> {
+    let db = deps.db.as_ref();
+    let mut report = CheckReport::default();
+
+    // Check 1: audit chain verifies
+    ledgers_audit::verify_db(db, company_id)
+        .await
+        .map_err(|err| format!("audit chain: {err}"))?;
+
+    // Check 2: every posted entry's lines balance in base currency
+    check_entry_balances(db, company_id, book.currency).await?;
+
+    // Check 3: entry numbers are gapless per journal and fiscal year
+    check_numbering_gaps(db, company_id).await?;
+
+    // Check 4: trial balance debits == credits for the year
+    let year = deps.clock.now().year();
+    check_trial_balance(db, company_id, year).await?;
+
+    // Check 5: balance sheet balances
+    check_balance_sheet(db, company_id, year).await?;
+
+    // Check 6: every fixture entry is present and reversals are reversed
+    for entry in &book.entries {
+        match &entry.kind {
+            EntryKind::Post { .. } => {
+                let found = query::entry_by_external_id(db, company_id, &entry.external_id)
+                    .await
+                    .map_err(|err| format!("read {}: {err}", entry.external_id))?;
+                if found.is_none() {
+                    return Err(format!("fixture entry {} is not posted", entry.external_id));
+                }
+                report.fixture_entries_found += 1;
+            }
+            EntryKind::Reverse { of } => {
+                // Verify the target entry is posted and has been reversed
+                let target = query::entry_by_external_id(db, company_id, of)
+                    .await
+                    .map_err(|err| format!("read {of}: {err}"))?
+                    .ok_or_else(|| {
+                        format!(
+                            "fixture reversal {} target {} is not posted",
+                            entry.external_id, of
+                        )
+                    })?;
+                if target.reversed_by.is_empty() {
+                    return Err(format!(
+                        "fixture reversal {} does not reverse {}",
+                        entry.external_id, of
+                    ));
+                }
+                report.fixture_reversals_found += 1;
+            }
+        }
+    }
+
+    report.entries_verified = count_posted_entries(db, company_id)
+        .await
+        .map_err(|err| format!("count posted entries: {err}"))?;
+    report.reversals_verified = count_reversals(db, company_id)
+        .await
+        .map_err(|err| format!("count reversals: {err}"))?;
+
+    Ok(report)
+}
+
+/// Count all posted (non-reversed) journal entries.
+async fn count_posted_entries(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<usize, cratefield_core::DbError> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT COUNT(*) AS cnt FROM journal_entry WHERE company_id = ? AND reverses IS NULL"
+                .to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await?;
+    Ok(rows
+        .rows
+        .first()
+        .and_then(|r| r.get("cnt"))
+        .unwrap_or(0usize))
+}
+
+/// Count all reversed journal entries.
+async fn count_reversals(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<usize, cratefield_core::DbError> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT COUNT(*) AS cnt FROM journal_entry WHERE company_id = ? AND reverses IS NOT NULL"
+                .to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await?;
+    Ok(rows
+        .rows
+        .first()
+        .and_then(|r| r.get("cnt"))
+        .unwrap_or(0usize))
+}
+
+/// Verify every entry's lines sum to zero in base currency.
+async fn check_entry_balances(
+    db: &dyn Database,
+    company_id: &str,
+    _currency: &str,
+) -> Result<(), String> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT entry_id FROM journal_line \
+             WHERE entry_id IN (SELECT id FROM journal_entry WHERE company_id = ?) \
+             GROUP BY entry_id HAVING SUM(base_minor) != 0"
+                .to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await
+        .map_err(|err| format!("read unbalanced entries: {err}"))?;
+
+    if !rows.rows.is_empty() {
+        return Err("entry does not balance in base currency".to_owned());
+    }
+    Ok(())
+}
+
+/// Verify numbering is gapless per journal and fiscal year.
+async fn check_numbering_gaps(db: &dyn Database, company_id: &str) -> Result<(), String> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT journal_id, fiscal_year FROM journal_entry \
+             WHERE company_id = ? \
+             GROUP BY journal_id, fiscal_year HAVING COUNT(*) != MAX(number)"
+                .to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await
+        .map_err(|err| format!("check numbering: {err}"))?;
+
+    if !rows.rows.is_empty() {
+        return Err("journal has gaps in numbering".to_owned());
+    }
+    Ok(())
+}
+
+/// Verify trial balance debits == credits.
+async fn check_trial_balance(db: &dyn Database, company_id: &str, year: i32) -> Result<(), String> {
+    let period_id = format!("{year}-12-31");
+    let tb = ledgers_ledger::report::trial_balance(db, company_id, &period_id)
+        .await
+        .map_err(|err| format!("trial balance: {err}"))?;
+
+    let (mut debits_minor, mut credits_minor) = (0i128, 0i128);
+    for row in tb {
+        let balance_minor = row.balance.minor();
+        if balance_minor >= 0 {
+            debits_minor += balance_minor;
+        } else {
+            credits_minor += -balance_minor;
+        }
+    }
+
+    if debits_minor != credits_minor {
+        return Err("trial balance does not balance".to_owned());
+    }
+    Ok(())
+}
+
+/// Verify balance sheet balances.
+async fn check_balance_sheet(db: &dyn Database, company_id: &str, year: i32) -> Result<(), String> {
+    let as_of = format!("{year}-12-31");
+    let bs = ledgers_ledger::report::balance_sheet(db, company_id, &as_of)
+        .await
+        .map_err(|err| format!("balance sheet: {err}"))?;
+
+    if !bs.balanced {
+        return Err("balance sheet does not balance".to_owned());
+    }
+    Ok(())
+}

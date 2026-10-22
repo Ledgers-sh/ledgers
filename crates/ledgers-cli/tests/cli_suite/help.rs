@@ -41,7 +41,7 @@ fn words(path: &str) -> Vec<String> {
 #[test]
 fn root_and_builtin_help() {
     snapshot(&[]);
-    for path in ["serve", "completions", "mcp"] {
+    for path in ["serve", "completions", "mcp", "demo"] {
         snapshot(&words(path));
     }
 }

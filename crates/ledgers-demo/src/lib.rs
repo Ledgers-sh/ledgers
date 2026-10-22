@@ -3,11 +3,14 @@
 //! The demo company fixture (issue #51): Halden Works `GmbH`, an invented
 //! German small manufacturer, and one believable fiscal year of books.
 //!
-//! This crate is data only. It names the entries, the dimension values and
-//! the golden totals the reports must reproduce; the server loads it through
-//! the same executor path as real commands (`ledgers-server`'s `demo`
-//! module). Every name, number and reference here is invented. Nothing is
-//! real company data.
+//! This crate is data only: fixtures for every milestone's seeded entries,
+//! dimension values, and golden totals the reports must reproduce. The server
+//! loads fixtures through the same executor path as real commands
+//! (`ledgers-server`'s `demo` module). **Every name, number and reference
+//! here is invented.** Nothing is real company data.
+//!
+//! Later milestones add their fixtures to this shared crate, not private test
+//! folders, so integration and data integrity remain testable and shared.
 //!
 //! Amounts are integer minor units of EUR (cents), debit and credit as
 //! separate sides, never floats (docs/PLAN.md section 3).

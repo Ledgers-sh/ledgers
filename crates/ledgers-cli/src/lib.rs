@@ -25,6 +25,7 @@
 //! - `3`: denied by policy (HTTP 403)
 
 pub mod app;
+pub mod demo;
 pub mod error;
 pub mod http;
 pub mod mcp;
@@ -134,6 +135,14 @@ async fn dispatch(
             mcp::run_mcp(session, sub.get_flag("read_only")).await?;
             Ok(ExitCode::Ok)
         }
+        Some(("demo", sub)) => match sub.subcommand() {
+            Some(("init", init_sub)) => {
+                let year = init_sub.get_one::<i32>("year").copied().unwrap_or(2026);
+                demo::init_from_env(year).await?;
+                Ok(ExitCode::Ok)
+            }
+            _ => Err(CliError::InvalidInput("demo subcommand required".into())),
+        },
         Some(_) => run_registry_command(matches, globals, ctx, registry, out, err).await,
         None => Err(CliError::InvalidInput("no command given".into())),
     }

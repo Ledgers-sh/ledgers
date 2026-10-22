@@ -10,6 +10,7 @@ Commands:
   serve        Start the native Ledgers server
   completions  Generate shell completions
   mcp          Serve MCP over stdio, relaying to the server with your agent key
+  demo         Demo company operations
   accounts     Commands under `ledgers accounts`
   approvals    Commands under `ledgers approvals`
   bills        Commands under `ledgers bills`

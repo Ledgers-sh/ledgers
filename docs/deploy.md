@@ -300,6 +300,18 @@ agent or a person posted it. Dimension values are created with the store's domai
 Re-running is a no-op: an entry whose `external_id` exists is skipped, and a reversal whose
 target is already reversed is skipped.
 
+### Seeding locally
+
+The CLI command `ledgers demo init` creates and seeds the demo company with Halden Works GmbH,
+verifying that every invariant check passes. It is idempotent: running it twice posts nothing
+new the second time. Use it to initialize a development database:
+
+```sh
+DATABASE_PATH=./ledgers.db LEDGERS_COMPANY_ID=01DEVCOMPANY0000000000000A ledgers demo init
+```
+
+Pass `--year <YEAR>` to seed a different fiscal year (default: 2026).
+
 ### Seeding staging
 
 Staging can load the same book with `POST /admin/seed-demo`, after the bootstrap in step 6.
