@@ -1,0 +1,4 @@
+Invoice INV-500 from Vendor Corp
+Date: 2026-09-10
+Currency: EUR
+Amount: EUR 750.00

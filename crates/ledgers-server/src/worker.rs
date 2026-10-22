@@ -27,8 +27,12 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
         // Create configuration from environment
         let cfg = WorkerConfig { env: env.clone() };
 
-        // Set up the Cloudflare runtime with D1 and R2 bindings
-        let runtime = Cloudflare::new().db("DB").blob("DOCUMENTS");
+        // Set up the Cloudflare runtime with D1, R2, and rate limiting bindings.
+        // The limiter binding (wrangler.toml) is resolved per request in serve().
+        let runtime = Cloudflare::new()
+            .db("DB")
+            .blob("DOCUMENTS")
+            .rate_limiter("RATE_LIMITER");
 
         // Build the harness with the runtime (so it knows which ports are provided)
         let registry = crate::dispatch::registry();

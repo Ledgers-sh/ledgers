@@ -9,6 +9,7 @@ pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 pub mod openapi;
+pub mod rate_limiting;
 pub mod routes;
 
 /// Cloudflare Workers entry point (wasm32 only)
@@ -75,8 +76,13 @@ pub fn harness(
         .cors_origins(cors_origins)
         .env(VentureEnv::Development);
 
-    // Create dispatch
-    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(dispatch::ServerDispatch::new(company_id));
+    // Every command surface (HTTP, MCP) dispatches through the rate-limiting
+    // wrapper. The limiter comes from the request's ports (`Deps`), so it is
+    // resolved per request on Workers as well as natively; agent keys are
+    // throttled, person principals pass through.
+    let dispatch: Arc<dyn routes::Dispatch> = Arc::new(rate_limiting::RateLimitingDispatch::new(
+        Arc::new(dispatch::ServerDispatch::new(company_id)),
+    ));
 
     // Generate domain modules
     let domain_mods = routes::domain_modules(registry, &dispatch).map_err(|e| {

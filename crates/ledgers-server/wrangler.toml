@@ -17,6 +17,12 @@ migrations_dir = "d1/migrations"
 binding = "DOCUMENTS"
 bucket_name = "ledgers-documents"
 
+# Rate Limiting binding for agent key throttling
+[[ratelimits]]
+binding = "RATE_LIMITER"
+namespace_id = 1
+simple = { limit = 100, period = 60 }
+
 # Environment variables (non-secret, dev environment)
 [vars]
 ENV = "dev"

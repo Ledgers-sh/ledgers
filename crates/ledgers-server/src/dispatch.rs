@@ -11,7 +11,9 @@
 
 use crate::routes::Dispatch;
 use async_trait::async_trait;
-use cratefield_core::{ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, Statement};
+use cratefield_core::{
+    ApiKeys, Clock, Database, IdGen, Port, Ports, Problem, RateLimiter, Statement,
+};
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
@@ -76,6 +78,8 @@ pub struct Deps {
     pub clock: Arc<dyn Clock>,
     /// Ids for audit events, entries and keys.
     pub id_gen: Arc<dyn IdGen>,
+    /// The rate limiter for agent keys, when the runtime provides one.
+    pub rate_limiter: Option<Arc<dyn RateLimiter>>,
 }
 
 impl Deps {
@@ -87,6 +91,7 @@ impl Deps {
             db: ports.db.clone()?,
             clock: ports.clock.clone()?,
             id_gen: ports.id_gen.clone()?,
+            rate_limiter: ports.rate_limiter.clone(),
         })
     }
 }

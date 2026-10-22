@@ -2155,6 +2155,7 @@ dependencies = [
  "async-trait",
  "cratefield-core",
  "cratefield-testing",
+ "futures-util",
  "ledgers-commands",
  "ledgers-db",
  "ledgers-money",
@@ -2162,6 +2163,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
  "time",
 ]

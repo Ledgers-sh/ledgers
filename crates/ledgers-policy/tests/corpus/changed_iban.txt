@@ -1,0 +1,3 @@
+Invoice INV-003 from Halden Works GmbH
+Amount: EUR 50.00
+New IBAN: GB82WEST12345698765432

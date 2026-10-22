@@ -154,8 +154,20 @@ impl DomainModule {
 fn respond(result: Result<Value, Problem>) -> axum::response::Response {
     match result {
         Ok(body) => (axum::http::StatusCode::OK, Json(body)).into_response(),
-        Err(problem) => problem.into_response(),
+        Err(problem) => problem_to_response(problem),
     }
+}
+
+/// Convert a problem to a response, adding Retry-After for rate-limited errors.
+fn problem_to_response(problem: Problem) -> axum::response::Response {
+    let mut response = problem.into_response();
+    // Add Retry-After for rate-limited responses (429 status).
+    if response.status() == axum::http::StatusCode::TOO_MANY_REQUESTS {
+        response
+            .headers_mut()
+            .insert(header::RETRY_AFTER, "60".parse().unwrap());
+    }
+    response
 }
 
 impl Module for DomainModule {
