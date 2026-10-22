@@ -18,3 +18,31 @@ SKR03/SKR04 mapping numbers (templates/mappings/)
   industry-standard interchange interface for German bookkeeping exports.
   No DATEV account names or other DATEV texts are bundled ("Nachdruck -
   auch auszugsweise - nicht gestattet"); see templates/LICENSES.md.
+
+ISO 4217 currency table (crates/ledgers-money/src/currency.rs)
+  Active and historic ISO 4217 currency codes with numeric codes and
+  decimal exponents. Primary source: Wikipedia, ISO 4217 article
+  (https://en.wikipedia.org/wiki/ISO_4217), retrieved 2026-10-18.
+  Only the alphabetic codes, numeric codes, and exponents (facts, not
+  copyrightable) are bundled; no Wikipedia article text (which carries
+  CC BY-SA 4.0) is included. Secondary source and cross-check:
+  datasets/currency-codes (https://raw.githubusercontent.com/datasets/
+  currency-codes/master/data/codes-all.csv), which mirrors the ISO 4217
+  maintenance-agency data under the Open Data Commons Public Domain
+  Dedication and Licence (ODC-PDDL).
+
+Data file licences (templates/LICENSES.md)
+  Per-file licence index of every bundled template file, including charts,
+  mappings, and translations. See templates/LICENSES.md for details.
+  Ledgers' own templates are licensed under MIT (repository licence).
+
+German statutory tax rates (crates/ledgers-tax/src/rate.rs)
+  German VAT rates (Umsatzsteuer, §12 UStG) with effective date ranges.
+  Bundled standard and reduced rates: 19%/7% (2007–2020-06-30, 2021–open),
+  16%/5% temporary reduction (2020-07-01–2020-12-31 per Zweites Corona-
+  Steuerhilfegesetz, BGBl. I 2020 S. 1512), and 0% zero rate (2007–open).
+  Rates are public domain per §5 UrhG (German Copyright Act).
+
+E-invoice and e-filing samples
+  No e-invoice samples (XRechnung, ZUGFeRD) are bundled. Test fixtures
+  use invented company names (e.g., Halden Works GmbH, Acme GmbH).

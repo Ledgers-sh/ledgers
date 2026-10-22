@@ -19,3 +19,5 @@ Options:
       --key <KEY>       API key (overrides profile) [env: LEDGERS_KEY=]
   -h, --help            Print help (see more with '--help')
   -V, --version         Print version
+
+Ledgers is not tax or legal advice. Check rates and returns before you file.

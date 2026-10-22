@@ -4,7 +4,7 @@
 
 use clap::Command;
 use ledgers_cli::app;
-use ledgers_commands::Registry;
+use ledgers_commands::{NOT_TAX_ADVICE, Registry};
 
 fn format_help(cmd: &mut Command) -> String {
     let mut help = Vec::new();
@@ -45,4 +45,16 @@ fn test_completions_help() {
     } else {
         panic!("completions subcommand not found");
     }
+}
+
+#[test]
+fn test_root_help_contains_disclaimer() {
+    let registry = Registry::new();
+    let mut cmd = app::build_root(&registry);
+    let help = format_help(&mut cmd);
+
+    assert!(
+        help.contains(NOT_TAX_ADVICE),
+        "root help must contain NOT_TAX_ADVICE: {NOT_TAX_ADVICE}"
+    );
 }
