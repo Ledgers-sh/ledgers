@@ -1,8 +1,8 @@
 //! MCP tests: tool listing by tier, JSON-RPC protocol, approval cards.
 
 use ledgers_commands::mcp::{
-    ApprovalAmount, ApprovalCard, ApprovalCardLine, ToolCaller, ToolOutcome, ToolScope,
-    UNTRUSTED_DATA_RULE, handle, tools,
+    ApprovalAmount, ApprovalCard, ApprovalCardLine, NOT_TAX_ADVICE, ToolCaller, ToolOutcome,
+    ToolScope, UNTRUSTED_DATA_RULE, handle, tools,
 };
 use ledgers_commands::{CommandDescriptor, Registry, Tier};
 use serde_json::{Value, json};
@@ -131,6 +131,21 @@ fn test_jsonrpc_methods() {
         .expect("init");
         assert_eq!(init.get("id").and_then(Value::as_i64), Some(1));
         assert!(init.get("result").is_some());
+
+        // Verify instructions contain both rules
+        let instructions = init
+            .get("result")
+            .and_then(|r| r.get("instructions"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(
+            instructions.contains(UNTRUSTED_DATA_RULE),
+            "initialize instructions must contain UNTRUSTED_DATA_RULE"
+        );
+        assert!(
+            instructions.contains(NOT_TAX_ADVICE),
+            "initialize instructions must contain NOT_TAX_ADVICE"
+        );
 
         let ping = handle(
             &registry,
