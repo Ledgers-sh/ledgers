@@ -67,6 +67,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
 
+# Source documents (issue #20): hashing, sniffing, signed links, the document store.
+ledgers-documents = { path = "crates/ledgers-documents" }
+# Vendor bills (issue #22): bills from extracted documents, posted through the executor.
+ledgers-bills = { path = "crates/ledgers-bills" }
+# LLM and rule extraction with arithmetic checks (issue #21).
+ledgers-extract = { path = "crates/ledgers-extract" }
 # Guard-statement helpers on the Database port (issue #40): every writing
 # crate shares the same numbering, period, limit and chain patterns.
 ledgers-db = { path = "crates/ledgers-db" }
@@ -97,6 +103,14 @@ ledgers-tax = { path = "crates/ledgers-tax" }
 # Exact match to the time release cratefield-core pins (its Usage
 # statements take OffsetDateTime): one `time` in the workspace graph.
 time = "=0.3.55"
+
+# PDF text layer for extraction (issue #21): pure Rust, no default features
+# (no rayon, image, or time/chrono), exact pin.
+lopdf = { version = "=0.46.0", default-features = false }
+# Protects numbers and names in document text (cratefield-text-guard, crates.io).
+cratefield-text-guard = "=0.1.0"
+# Base64 for the PDF and image blocks of the Messages API request (issue #21).
+base64 = "=0.22.1"
 
 # SHA-256: ledgers-audit (#9) owns audit hashing and verification with
 # this; ledgers-ledger's interim period hashes still stamp with it.

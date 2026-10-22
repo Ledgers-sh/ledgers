@@ -951,6 +951,15 @@ pub async fn post_raw_entry_with(
     options: &PostOptions,
     audit: &AuditContext,
 ) -> Result<PostedEntry, JournalError> {
+    // Validate that the entry's base currency matches the company's base currency.
+    let company_base_currency = read_company_base_currency(db, &raw.company_id).await?;
+    if company_base_currency != raw.base_currency {
+        return Err(JournalError::BaseCurrencyMismatch {
+            company_currency: company_base_currency,
+            entry_currency: raw.base_currency.clone(),
+        });
+    }
+
     // Idempotent resubmit: checked inside each attempt's planning. If the
     // entry already exists and belongs to this journal/fiscal year, we return
     // an empty statement list (which batch_atomic commits as a no-op), then
@@ -1263,9 +1272,9 @@ async fn diagnose_refusal(
         )
         .await?;
         if present == 0 {
-            return Some(JournalError::UnknownAccount {
-                account: line.account_number.clone(),
-            });
+            return missing_or_archived(db, company, &line.account_number)
+                .await
+                .ok();
         }
     }
 
@@ -1293,6 +1302,34 @@ async fn diagnose_refusal(
     }
 
     None
+}
+
+/// Why a posting line's account refused: [`JournalError::AccountArchived`]
+/// when the account exists but is archived, else
+/// [`JournalError::UnknownAccount`]. The guard only says "not active", so
+/// this reads the chart to say which.
+///
+/// # Errors
+/// [`JournalError::Database`] when the lookup fails.
+async fn missing_or_archived(
+    db: &dyn Database,
+    company: &str,
+    account: &str,
+) -> Result<JournalError, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT archived FROM account WHERE company_id = ? AND number = ?".to_owned(),
+            vec![SeaValue::from(company), SeaValue::from(account)],
+        ))
+        .await?;
+    Ok(match rows.first() {
+        Some(_) => JournalError::AccountArchived {
+            account: account.to_owned(),
+        },
+        None => JournalError::UnknownAccount {
+            account: account.to_owned(),
+        },
+    })
 }
 
 /// The usage-meter day of a post: the UTC day it is made (`created_at`),
@@ -1378,6 +1415,31 @@ fn dimensions_json(line: &RawLine) -> String {
     serde_json::to_string(&line.dimensions).unwrap_or_else(|_| "{}".to_owned())
 }
 
+/// Reads the company's base currency from the database.
+///
+/// # Errors
+/// [`JournalError::Database`] when the query fails or the company has no
+/// base currency configured.
+async fn read_company_base_currency(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<String, JournalError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT base_currency FROM company WHERE id = ?".to_owned(),
+            vec![SeaValue::from(company_id)],
+        ))
+        .await?;
+    rows.rows
+        .first()
+        .and_then(|row| row.get::<String>("base_currency"))
+        .ok_or_else(|| {
+            JournalError::Database(DbError::Query(format!(
+                "company {company_id} has no base currency configured"
+            )))
+        })
+}
+
 /// The outbox event payload: the identities a subscriber needs,
 /// without the number (see the enqueue site for why). Serialisation
 /// of strings into a JSON object cannot fail; the fallback keeps the
@@ -1453,9 +1515,7 @@ pub async fn dry_run_entry(
             .await?;
 
         if rows.is_empty() {
-            return Err(JournalError::UnknownAccount {
-                account: line.account_number.clone(),
-            });
+            return Err(missing_or_archived(db, company, &line.account_number).await?);
         }
     }
 

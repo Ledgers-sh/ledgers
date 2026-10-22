@@ -17,16 +17,26 @@
 //!   and (at parse time, wherever a code string is accepted) currency
 //!   via `ledgers-money`.
 
-use crate::account::{Account, AccountDraft, AccountEntry};
+use crate::account::{Account, AccountDraft, AccountEntry, AccountType};
 use crate::chart::ChartTemplate;
 use crate::error::AccountsError;
 use crate::lint::{self, REQUIRED_SYSTEM_TAGS, Violation, ViolationKind};
+use crate::query;
 use crate::store;
 use cratefield_core::{Database, Statement};
-use ledgers_audit::{AuditConfig, AuditContext, AuditRecord, Outcome, append_statements, record};
+use ledgers_audit::{
+    Actor, AuditConfig, AuditContext, AuditRecord, Outcome, append_statements, record,
+};
 use ledgers_db::chain;
+use ledgers_db::guard;
 use ledgers_db::retry::{self, RetryPolicy};
+use sea_query::Value as SeaValue;
 use std::time::Duration;
+
+/// The most ancestors a parent walk visits before it gives up. A chart
+/// this deep is not a real chart; the cap only stops a corrupt cycle from
+/// looping forever.
+const MAX_TREE_DEPTH: usize = 256;
 
 /// What [`import_template`] did: which template, and the account numbers
 /// it created (sorted).
@@ -132,12 +142,20 @@ async fn validate_and_create_statement(
     now: &str,
 ) -> Result<(Account, Vec<Statement>), AccountsError> {
     let account = draft.clone().into_account(company_id, now)?;
-    if let Some(parent) = &account.parent
-        && store::find_account(db, company_id, parent).await?.is_none()
-    {
-        return Err(AccountsError::ParentNotFound {
-            parent: parent.clone(),
-        });
+    if let Some(parent) = &account.parent {
+        let parent_account = store::find_account(db, company_id, parent)
+            .await?
+            .ok_or_else(|| AccountsError::ParentNotFound {
+                parent: parent.clone(),
+            })?;
+        check_child_of(
+            db,
+            company_id,
+            &account.number,
+            account.account_type,
+            &parent_account,
+        )
+        .await?;
     }
     if store::find_account(db, company_id, &account.number)
         .await?
@@ -202,8 +220,18 @@ pub async fn create_account(
     now: String,
     audit: &AuditContext,
 ) -> Result<AccountEntry, AccountsError> {
-    let (account, statements) = validate_and_create_statement(db, company_id, &draft, &now).await?;
+    let (account, mut statements) =
+        validate_and_create_statement(db, company_id, &draft, &now).await?;
     let input = account_draft_input(&account);
+    statements.push(change_row(
+        company_id,
+        &account.number,
+        COMMAND_CREATE_ACCOUNT,
+        audit,
+        &now,
+        None,
+        &account,
+    ));
     change_with_audit(
         db,
         company_id,
@@ -234,6 +262,7 @@ fn account_draft_input(account: &Account) -> serde_json::Value {
         "currency": account.currency.map(|code| code.code().to_owned()),
         "parent": account.parent,
         "tags": account.tags,
+        "displayName": account.display_name,
     })
 }
 
@@ -272,16 +301,20 @@ pub async fn list_accounts(
 }
 
 /// Archives an account so it accepts no new postings but keeps its
-/// history. Works regardless of postings — that is the point of
-/// archiving: posted entries are immutable, so the account they reference
-/// is retired, never removed. Idempotent: archiving an archived account
-/// returns it unchanged (and writes no audit event — nothing changed).
+/// history. Posted entries are immutable, so the account they reference
+/// is retired, never removed — and only once it nets to zero: an account
+/// with a non-zero balance in any base currency is refused
+/// ([`AccountsError::AccountHasBalance`]), because archiving it would
+/// hide money the books still hold. Idempotent: archiving an archived
+/// account returns it unchanged and writes no audit event.
 ///
-/// The `archived` update and its `account.archive` audit event are one
-/// batch.
+/// The `archived` update, the zero-balance guard and the
+/// `account.archive` audit event are one batch; the balance is read first
+/// only so the refusal can name the account.
 ///
 /// # Errors
 /// [`AccountsError::AccountNotFound`] when the account does not exist;
+/// [`AccountsError::AccountHasBalance`] when it does not net to zero;
 /// [`AccountsError::Database`] otherwise.
 pub async fn archive_account(
     db: &dyn Database,
@@ -294,24 +327,362 @@ pub async fn archive_account(
     if existing.account.archived {
         return Ok(existing);
     }
+    if query::account_has_nonzero_balance(db, company_id, number).await? {
+        return Err(AccountsError::AccountHasBalance {
+            number: number.to_owned(),
+        });
+    }
+    let key = guard::guard_key(&["account-archive", "zero-balance", company_id, number]);
+    let statements = vec![
+        guard::assert_statement(
+            &key,
+            &format!("NOT EXISTS ({})", query::NONZERO_BALANCE_SQL),
+            vec![SeaValue::from(company_id), SeaValue::from(number)],
+        ),
+        store::set_archived_statement(company_id, number, true, &now),
+        change_row(
+            company_id,
+            number,
+            "account.archive",
+            audit,
+            &now,
+            Some(&existing.account),
+            &Account {
+                archived: true,
+                updated_at: now.clone(),
+                ..existing.account.clone()
+            },
+        ),
+        guard::release_statement(key),
+    ];
     change_with_audit(
         db,
         company_id,
         audit,
         &AuditRecord::from_input(
             "account.archive",
-            &serde_json::json!({ "number": number }),
+            &serde_json::json!({ "number": number, "before": snapshot(&existing.account), "after": { "archived": true } }),
             Outcome::Allowed,
             vec![number.to_owned()],
             None,
         ),
         &now,
-        &[store::set_archived_statement(
-            company_id, number, true, &now,
-        )],
+        &statements,
     )
     .await?;
     entry_for(db, company_id, number).await
+}
+
+/// Restores an archived account to posting. Idempotent: restoring an
+/// active account returns it unchanged and writes no audit event.
+///
+/// # Errors
+/// [`AccountsError::AccountNotFound`] when the account does not exist;
+/// [`AccountsError::Database`] otherwise.
+pub async fn restore_account(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+    now: String,
+    audit: &AuditContext,
+) -> Result<AccountEntry, AccountsError> {
+    let existing = entry_for(db, company_id, number).await?;
+    if !existing.account.archived {
+        return Ok(existing);
+    }
+    change_with_audit(
+        db,
+        company_id,
+        audit,
+        &AuditRecord::from_input(
+            "account.restore",
+            &serde_json::json!({ "number": number, "before": snapshot(&existing.account), "after": { "archived": false } }),
+            Outcome::Allowed,
+            vec![number.to_owned()],
+            None,
+        ),
+        &now,
+        &[
+            store::set_archived_statement(company_id, number, false, &now),
+            change_row(
+                company_id,
+                number,
+                "account.restore",
+                audit,
+                &now,
+                Some(&existing.account),
+                &Account {
+                    archived: false,
+                    updated_at: now.clone(),
+                    ..existing.account.clone()
+                },
+            ),
+        ],
+    )
+    .await?;
+    entry_for(db, company_id, number).await
+}
+
+/// What `accounts.update` changes. `None` keeps a field as it is; for
+/// `parent`, `Some(None)` moves the account to the root.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct AccountChanges {
+    /// A new custom display name (validated), or `None` to keep it.
+    pub display_name: Option<String>,
+    /// A new account class. Allowed only while the account has no
+    /// postings and no children; its normal balance then follows the class.
+    pub account_type: Option<AccountType>,
+    /// A new tag list (validated), replacing the old one.
+    pub tags: Option<Vec<String>>,
+    /// A new parent: `Some(Some(number))` to move under it, `Some(None)`
+    /// to move to the root, `None` to keep the parent.
+    pub parent: Option<Option<String>>,
+}
+
+/// Changes an account's name, class, tags or parent. The account number
+/// never changes, and entries never change: the account keeps its history
+/// under whatever name it now carries.
+///
+/// The rules, checked here and re-proved by guard statements in the same
+/// batch as the change and its `account.update` audit event (which records
+/// the before and after snapshots):
+///
+/// - the class changes only while the account has no postings and no
+///   children, and a child always shares its parent's class;
+/// - a parent takes children only while it has no postings;
+/// - an account cannot be moved under its own descendant.
+///
+/// A call that changes nothing returns the account unchanged, with no
+/// audit event.
+///
+/// # Errors
+/// [`AccountsError::AccountNotFound`], [`AccountsError::ParentNotFound`],
+/// [`AccountsError::ParentCycle`], [`AccountsError::ParentTypeMismatch`],
+/// [`AccountsError::ParentHasPostings`],
+/// [`AccountsError::TypeChangeRefused`], the draft validation errors, or
+/// [`AccountsError::Database`].
+#[allow(clippy::too_many_lines)]
+pub async fn update_account(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+    changes: AccountChanges,
+    now: String,
+    audit: &AuditContext,
+) -> Result<AccountEntry, AccountsError> {
+    let before_entry = entry_for(db, company_id, number).await?;
+    let before = before_entry.account.clone();
+    let mut after = before.clone();
+    let mut guards: Vec<(&str, String, Vec<SeaValue>)> = Vec::new();
+
+    if let Some(name) = &changes.display_name {
+        after.display_name = Some(Account::validate_display_name(name)?);
+    }
+    if let Some(tags) = &changes.tags {
+        Account::validate_tags(tags)?;
+        after.tags = tags.clone();
+    }
+    if let Some(new_type) = changes.account_type
+        && new_type != before.account_type
+    {
+        let reason = if query::account_has_postings(db, company_id, number).await? {
+            Some("postings")
+        } else if before_entry.has_children {
+            Some("children")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(AccountsError::TypeChangeRefused {
+                number: number.to_owned(),
+                reason,
+            });
+        }
+        guards.push((
+            "type-unposted",
+            format!("NOT EXISTS ({})", query::POSTING_EXISTS_SQL),
+            vec![SeaValue::from(company_id), SeaValue::from(number)],
+        ));
+        after.account_type = new_type;
+        after.normal_balance = new_type.default_normal_balance();
+    }
+    if let Some(parent_change) = &changes.parent {
+        after.parent = match parent_change {
+            None => None,
+            Some(parent) => {
+                if parent == number {
+                    return Err(AccountsError::ParentCycle {
+                        number: number.to_owned(),
+                        parent: parent.clone(),
+                    });
+                }
+                let parent_account = store::find_account(db, company_id, parent)
+                    .await?
+                    .ok_or_else(|| AccountsError::ParentNotFound {
+                        parent: parent.clone(),
+                    })?;
+                check_no_cycle(db, company_id, number, parent).await?;
+                check_child_of(db, company_id, number, after.account_type, &parent_account).await?;
+                guards.push((
+                    "parent-unposted",
+                    format!("NOT EXISTS ({})", query::POSTING_EXISTS_SQL),
+                    vec![SeaValue::from(company_id), SeaValue::from(parent.as_str())],
+                ));
+                Some(parent.clone())
+            }
+        };
+    } else if let (Some(parent), true) = (&after.parent, after.account_type != before.account_type)
+    {
+        // A class change under an unchanged parent must still match it.
+        let parent_account = store::find_account(db, company_id, parent)
+            .await?
+            .ok_or_else(|| AccountsError::ParentNotFound {
+                parent: parent.clone(),
+            })?;
+        check_child_of(db, company_id, number, after.account_type, &parent_account).await?;
+    }
+
+    if after == before {
+        return Ok(before_entry);
+    }
+    after.updated_at = now.clone();
+
+    let mut statements = Vec::new();
+    let mut releases = Vec::new();
+    for (name, condition, values) in guards {
+        let key = guard::guard_key(&["account-update", name, company_id, number]);
+        statements.push(guard::assert_statement(&key, &condition, values));
+        releases.push(guard::release_statement(key));
+    }
+    statements.push(store::update_account_statement(&after));
+    statements.push(change_row(
+        company_id,
+        number,
+        "account.update",
+        audit,
+        &now,
+        Some(&before),
+        &after,
+    ));
+    statements.extend(releases);
+
+    change_with_audit(
+        db,
+        company_id,
+        audit,
+        &AuditRecord::from_input(
+            "account.update",
+            &serde_json::json!({
+                "number": number,
+                "before": snapshot(&before),
+                "after": snapshot(&after),
+            }),
+            Outcome::Allowed,
+            vec![number.to_owned()],
+            None,
+        ),
+        &now,
+        &statements,
+    )
+    .await?;
+    entry_for(db, company_id, number).await
+}
+
+/// Checks that a child of `parent` may carry `account_type`: the class
+/// matches the parent's, and the parent holds no postings (a heading must
+/// not carry a balance).
+async fn check_child_of(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+    account_type: AccountType,
+    parent: &Account,
+) -> Result<(), AccountsError> {
+    if parent.account_type != account_type {
+        return Err(AccountsError::ParentTypeMismatch {
+            number: number.to_owned(),
+            parent: parent.number.clone(),
+            account_type: account_type.to_string(),
+            parent_type: parent.account_type.to_string(),
+        });
+    }
+    if query::account_has_postings(db, company_id, &parent.number).await? {
+        return Err(AccountsError::ParentHasPostings {
+            parent: parent.number.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Refuses a parent that is the account itself or one of its descendants:
+/// walks up from `parent` and fails if the walk meets `number`.
+async fn check_no_cycle(
+    db: &dyn Database,
+    company_id: &str,
+    number: &str,
+    parent: &str,
+) -> Result<(), AccountsError> {
+    let mut cursor = Some(parent.to_owned());
+    for _ in 0..MAX_TREE_DEPTH {
+        let Some(current) = cursor else {
+            return Ok(());
+        };
+        if current == number {
+            return Err(AccountsError::ParentCycle {
+                number: number.to_owned(),
+                parent: parent.to_owned(),
+            });
+        }
+        cursor = store::find_account(db, company_id, &current)
+            .await?
+            .and_then(|account| account.parent);
+    }
+    Err(AccountsError::ParentCycle {
+        number: number.to_owned(),
+        parent: parent.to_owned(),
+    })
+}
+
+/// The before/after row for one chart change, in the change's batch.
+fn change_row(
+    company_id: &str,
+    number: &str,
+    command: &str,
+    audit: &AuditContext,
+    at: &str,
+    before: Option<&Account>,
+    after: &Account,
+) -> Statement {
+    let actor = match &audit.actor {
+        Actor::Person { person_id } => format!("person:{person_id}"),
+        Actor::Agent { key_id, .. } => format!("agent:{key_id}"),
+    };
+    let before = before.map(snapshot);
+    let after = snapshot(after);
+    store::account_change_statement(&store::AccountChangeRow {
+        company_id,
+        number,
+        command,
+        actor: &actor,
+        event_id: &audit.event_id,
+        changed_at: at,
+        before: before.as_ref(),
+        after: &after,
+    })
+}
+
+/// The audit snapshot of an account: the fields `accounts.update` can
+/// change, plus the archive bit, as the audit log records them.
+fn snapshot(account: &Account) -> serde_json::Value {
+    serde_json::json!({
+        "nameKey": account.name_key,
+        "displayName": account.display_name,
+        "accountType": account.account_type.to_string(),
+        "normalBalance": account.normal_balance.to_string(),
+        "parent": account.parent,
+        "tags": account.tags,
+        "archived": account.archived,
+    })
 }
 
 /// Deleting accounts is not an operation; this thin wrapper over

@@ -43,6 +43,7 @@ pub fn insert_account_statement(account: &Account) -> Statement {
         Alias::new("company_id"),
         Alias::new("number"),
         Alias::new("name_key"),
+        Alias::new("display_name"),
         Alias::new("account_type"),
         Alias::new("normal_balance"),
         Alias::new("currency"),
@@ -57,6 +58,7 @@ pub fn insert_account_statement(account: &Account) -> Statement {
             account.company_id.as_str().into(),
             account.number.as_str().into(),
             account.name_key.as_str().into(),
+            Expr::value(account.display_name.clone()),
             account.account_type.to_string().into(),
             account.normal_balance.to_string().into(),
             Expr::value(account.currency.map(|currency| currency.code().to_owned())),
@@ -124,6 +126,7 @@ pub async fn find_account(
         .column(Alias::new("company_id"))
         .column(Alias::new("number"))
         .column(Alias::new("name_key"))
+        .column(Alias::new("display_name"))
         .column(Alias::new("account_type"))
         .column(Alias::new("normal_balance"))
         .column(Alias::new("currency"))
@@ -230,6 +233,78 @@ pub async fn list_account_entries(
         .collect())
 }
 
+/// Renders the UPDATE that rewrites an account's mutable fields from
+/// `account` (display name, class, normal balance, parent, tags) and
+/// stamps `updated_at`. The number, name key, currency and archive bit
+/// are not touched here: they have their own paths.
+#[must_use]
+pub fn update_account_statement(account: &Account) -> Statement {
+    let mut update = Query::update();
+    update
+        .table(Alias::new(TABLE))
+        .value(
+            Alias::new("display_name"),
+            Expr::value(account.display_name.clone()),
+        )
+        .value(Alias::new("account_type"), account.account_type.to_string())
+        .value(
+            Alias::new("normal_balance"),
+            account.normal_balance.to_string(),
+        )
+        .value(
+            Alias::new("parent_number"),
+            Expr::value(account.parent.clone()),
+        )
+        .value(Alias::new("tags"), join_tags(account))
+        .value(Alias::new("updated_at"), account.updated_at.as_str())
+        .and_where(Expr::col(Alias::new("company_id")).eq(account.company_id.as_str()))
+        .and_where(Expr::col(Alias::new("number")).eq(account.number.as_str()));
+    Statement::render(&update)
+}
+
+/// One before/after row for a chart change: the fields the
+/// `account_change` table stores (see migration 0008).
+pub struct AccountChangeRow<'a> {
+    /// The company the account belongs to.
+    pub company_id: &'a str,
+    /// The account number.
+    pub number: &'a str,
+    /// The command name: `account.create`, `account.update`, ...
+    pub command: &'a str,
+    /// Who made the change: `person:<id>` or `agent:<key id>`.
+    pub actor: &'a str,
+    /// The audit event the change belongs to.
+    pub event_id: &'a str,
+    /// When the change was made (ISO 8601 UTC).
+    pub changed_at: &'a str,
+    /// The snapshot before the change; `None` for a creation.
+    pub before: Option<&'a serde_json::Value>,
+    /// The snapshot after the change.
+    pub after: &'a serde_json::Value,
+}
+
+/// The statement that writes one before/after row. Written in the change's
+/// batch so the record exists exactly when the change does.
+#[must_use]
+pub fn account_change_statement(row: &AccountChangeRow<'_>) -> Statement {
+    use sea_query::Value as SeaValue;
+    Statement::with_values(
+        "INSERT INTO account_change (event_id, company_id, number, command, actor, changed_at, before_json, after_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            .to_owned(),
+        vec![
+            SeaValue::from(row.event_id),
+            SeaValue::from(row.company_id),
+            SeaValue::from(row.number),
+            SeaValue::from(row.command),
+            SeaValue::from(row.actor),
+            SeaValue::from(row.changed_at),
+            SeaValue::from(row.before.map(serde_json::Value::to_string)),
+            SeaValue::from(row.after.to_string()),
+        ],
+    )
+}
+
 /// Renders the UPDATE that sets `archived` on one account, stamping
 /// `updated_at`. Returned as a statement so the archive can ride the
 /// same batch as its audit event; [`set_archived`] is the standalone
@@ -311,6 +386,7 @@ fn all_columns() -> sea_query::SelectStatement {
         .column(Alias::new("company_id"))
         .column(Alias::new("number"))
         .column(Alias::new("name_key"))
+        .column(Alias::new("display_name"))
         .column(Alias::new("account_type"))
         .column(Alias::new("normal_balance"))
         .column(Alias::new("currency"))
@@ -363,6 +439,7 @@ fn row_to_account(row: &cratefield_core::Row) -> Result<Account, AccountsError> 
         company_id: required("company_id")?,
         number: required("number")?,
         name_key: required("name_key")?,
+        display_name: row.get::<Option<String>>("display_name").flatten(),
         account_type,
         normal_balance,
         currency,
@@ -523,6 +600,7 @@ mod tests {
             company_id: "co".to_owned(),
             number: "01000".to_owned(),
             name_key: "account.t.a".to_owned(),
+            display_name: None,
             account_type: AccountType::Asset,
             normal_balance: NormalBalance::Debit,
             currency: None,

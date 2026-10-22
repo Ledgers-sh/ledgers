@@ -22,7 +22,7 @@ export function NewEntry() {
   const { client, period, currency: sessionCurrency, setCurrency, online, toast } = useSession();
   const accounts = useAsync(async () => (await accountsList(client)).accounts, [client.baseUrl, client.apiKey]);
   const postable = useMemo(
-    () => (accounts.data ?? []).filter((account) => account.is_postable).sort((a, b) => a.number.localeCompare(b.number)),
+    () => (accounts.data ?? []).filter((account) => account.is_postable && !account.archived).sort((a, b) => a.number.localeCompare(b.number)),
     [accounts.data],
   );
 

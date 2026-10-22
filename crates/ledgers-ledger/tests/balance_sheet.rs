@@ -14,7 +14,7 @@
 //!
 //! The scenarios run on every backing engine the environment provides.
 
-use cratefield_core::Database;
+use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_db::DbModule;
@@ -139,6 +139,12 @@ fn entry(id: &str, date: &str, lines: &[(&str, i128)]) -> NewEntry {
 
 /// Imports the chart, opens the journal and fiscal year 2026.
 async fn setup(db: &dyn Database) {
+    db.execute(&Statement::new(format!(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+         VALUES ('{COMPANY}', 'Balance sheet company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+    )))
+    .await
+    .expect("create the company");
     let template = chart::parse_chart(CHART).expect("the chart parses");
     commands::import_template(db, COMPANY, &template, NOW.to_owned(), &person())
         .await
@@ -215,7 +221,13 @@ fn assert_balances(sheet: &BalanceSheet) {
 
 #[test]
 fn a_mid_year_sheet_balances_with_the_current_year_result() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(mid_year(&*kit.db));
     }
 }
@@ -237,7 +249,13 @@ async fn mid_year(db: &dyn Database) {
 
 #[test]
 fn a_year_with_a_loss_balances_with_a_negative_result() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(loss(&*kit.db));
     }
 }
@@ -258,7 +276,13 @@ async fn loss(db: &dyn Database) {
 
 #[test]
 fn the_result_is_not_counted_twice_after_the_year_end_close() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(after_close(&*kit.db));
     }
 }

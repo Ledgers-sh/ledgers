@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use cratefield_core::{IdGen, Module, Ports};
-use cratefield_testing::{TestHarness, request, request_as};
+use cratefield_testing::{MemoryBlob, TestHarness, request, request_as};
 use ledgers_commands::auth::Tier;
 use ledgers_ledger::LedgerModule;
 use ledgers_policy::key::CurrencyLimit;
@@ -21,6 +21,8 @@ pub mod http;
 pub use cratefield_core::axum::http::Method;
 pub use cratefield_testing::TestResponse;
 
+/// The download-link key every fixture signs with (invented, test only).
+pub const DOCUMENT_KEY: &[u8] = b"fixture-document-signing-key-0123456789";
 /// The company every fixture serves: the dev bootstrap's fixture id.
 pub const COMPANY: &str = dispatch::DEV_COMPANY_ID;
 /// The fixed clock: a date inside the bootstrap's fiscal year.
@@ -53,6 +55,8 @@ pub struct Keys {
 pub struct Fixture {
     /// The router the HTTP tests send requests through.
     pub kit: TestHarness,
+    /// The blob store the documents are kept in.
+    pub blob: Arc<MemoryBlob>,
     /// The ports the dispatch runs on (same database as the router).
     pub deps: Deps,
     /// The issued keys.
@@ -128,9 +132,20 @@ pub fn fixture_with_options(
     app_origins: Vec<String>,
 ) -> Fixture {
     let registry = dispatch::registry();
-    let dispatch: Arc<dyn Dispatch> =
-        Arc::new(ServerDispatch::new(COMPANY).with_app_origins(app_origins));
+    let server_dispatch = ServerDispatch::new(COMPANY)
+        .with_app_origins(app_origins)
+        .with_document_key(DOCUMENT_KEY.to_vec());
+    let dispatch: Arc<dyn Dispatch> = Arc::new(server_dispatch);
     let mut domain = routes::domain_modules(&registry, &dispatch).expect("domain modules");
+    // The documents module mounts the `documents` command routes and the upload
+    // and download routes.
+    let document_routes = routes::domain_routes(&registry, "documents");
+    domain.push(Arc::new(ledgers_server::documents::DocumentsModule::new(
+        COMPANY,
+        DOCUMENT_KEY.to_vec(),
+        dispatch.clone(),
+        document_routes,
+    )));
     domain.extend(extra);
 
     let clock = Arc::new(cratefield_testing::FixedClock(
@@ -149,9 +164,13 @@ pub fn fixture_with_options(
         Box::new(ApiKeysModule),
         // Carries the session table the owner sessions are stored in.
         Box::new(ledgers_server::people::PeopleModule::new(None)),
+        Box::new(ledgers_documents::DocumentsStoreModule),
+        Box::new(ledgers_bills::BillsModule),
     ];
+    let blob = Arc::new(MemoryBlob::new());
     let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
     let patch_limiter = limiter.clone();
+    let patch_blob = blob.clone();
     let kit = TestHarness::with_builder(
         builtin,
         move |builder| {
@@ -163,6 +182,7 @@ pub fn fixture_with_options(
             ports.clock = Some(patch_clock as Arc<dyn cratefield_core::Clock>);
             ports.id_gen = Some(patch_ids as Arc<dyn IdGen>);
             ports.rate_limiter = patch_limiter;
+            ports.blob = Some(patch_blob as Arc<dyn cratefield_core::Blob>);
         },
     );
     let deps = Deps {
@@ -170,6 +190,8 @@ pub fn fixture_with_options(
         clock,
         id_gen: ids,
         rate_limiter: limiter,
+        blob: Some(blob.clone() as Arc<dyn cratefield_core::Blob>),
+        http: None,
     };
 
     // The company row approval requests reference; the served bootstrap creates it.
@@ -192,6 +214,7 @@ pub fn fixture_with_options(
     let unlimited = issue(&deps, Tier::PostWithinLimits, BTreeMap::new());
     Fixture {
         kit,
+        blob,
         deps,
         keys: Keys {
             full,

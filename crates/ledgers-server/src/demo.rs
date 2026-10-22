@@ -214,9 +214,10 @@ pub async fn seed_if_empty(
     company_id: &str,
     agent_key: &str,
 ) -> Result<Option<SeedReport>, String> {
-    let existing = query::list_entries(deps.db.as_ref(), company_id, None, 1)
+    let existing = query::list_entries(deps.db.as_ref(), company_id, None, None, 1)
         .await
-        .map_err(|err| format!("read entries: {err}"))?;
+        .map_err(|err| format!("read entries: {err}"))?
+        .unwrap_or_default();
     if !existing.is_empty() {
         return Ok(None);
     }

@@ -1,0 +1,27 @@
+[package]
+name = "ledgers-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+cratefield-text-guard = { workspace = true }
+ledgers-money = { workspace = true }
+lopdf = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+pollster = { workspace = true }
+# The live MiniMax check (tests/minimax_live.rs, ignored in CI only).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+
+[lints]
+workspace = true

@@ -45,6 +45,7 @@ async-trait = { workspace = true }
 # status, the retry policy, the genesis hash).
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-db = { workspace = true }
+ledgers-storage = { workspace = true }
 pollster = { workspace = true, features = ["macro"] }
 # Golden snapshot testing for the command registry surface.
 insta = { workspace = true }

@@ -35,6 +35,7 @@ impl Module for LedgerModule {
     fn tables(&self) -> &'static [&'static str] {
         &[
             "account",
+            "account_change",
             "journal",
             "journal_entry",
             "journal_line",

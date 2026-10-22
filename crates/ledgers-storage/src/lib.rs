@@ -47,8 +47,35 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "company_setting",
         include_str!("../migrations/sqlite/0002_company_setting.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "company_currency_frozen",
+        include_str!("../migrations/sqlite/0003_company_currency_frozen.sql"),
+    ),
 ];
 
-// Compile-time check on the set: ids run contiguously from 0001 in the
+/// The Postgres set: the same tables (the SQLite DDL is portable), and the
+/// base-currency trigger as a plpgsql function, which SQLite's trigger
+/// dialect cannot express. The Postgres runner prefers this set.
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
+        "0001",
+        "company",
+        include_str!("../migrations/sqlite/0001_company.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "company_setting",
+        include_str!("../migrations/sqlite/0002_company_setting.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "company_currency_frozen",
+        include_str!("../migrations/postgres/0003_company_currency_frozen.sql"),
+    ),
+];
+
+// Compile-time check on the sets: ids run contiguously from 0001 in the
 // order they are listed (cratefield-core, `assert_migration_set`).
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
+const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);

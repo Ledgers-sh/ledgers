@@ -551,6 +551,17 @@ pub enum JournalError {
         account: String,
     },
 
+    /// The entry names an account that exists but is archived: it keeps
+    /// its history and takes no new postings. Restore it, or post to an
+    /// active account.
+    #[error(
+        "account {account} is archived and takes no new postings; restore it or post to an active account"
+    )]
+    AccountArchived {
+        /// The archived account number.
+        account: String,
+    },
+
     /// The entry's posting period is closed (or unknown — the guard
     /// fails closed), mapped back from the write-time refusal.
     #[error("posting period {period} is not open")]
@@ -594,6 +605,17 @@ pub enum JournalError {
     /// An agent attempted to reverse a human-posted entry, which is human-only.
     #[error("reversing a human-posted entry is human-only; an agent key cannot perform it")]
     HumanOnlyReversal,
+
+    /// The entry's base currency does not match the company's base currency.
+    #[error(
+        "entry base currency {entry_currency} does not match company base currency {company_currency}"
+    )]
+    BaseCurrencyMismatch {
+        /// The company's base currency code.
+        company_currency: String,
+        /// The entry's base currency code.
+        entry_currency: String,
+    },
 
     /// The entry id was already used to post an entry to a different
     /// journal. Entry ids are idempotency keys: a resubmit with the same
@@ -732,6 +754,7 @@ impl JournalError {
     /// Never on this dependency graph; `serde_json::Value` construction
     /// from strings and arrays is infallible here.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn to_problem(&self) -> cratefield_core::Problem {
         use cratefield_core::Problem;
         match self {
@@ -767,9 +790,17 @@ impl JournalError {
             | JournalError::UnknownAccount { account } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("account", account.clone()),
+            JournalError::AccountArchived { account } => Problem::new(&JOURNAL_ENTRY_REFUSED)
+                .with_detail(self.to_string())
+                .with_extension("account", account.clone())
+                .with_extension("reason", "account-archived".to_owned()),
             JournalError::FxSameCurrency { currency } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("currency", currency.clone()),
+            JournalError::BaseCurrencyMismatch {
+                company_currency,
+                entry_currency,
+            } => base_currency_mismatch_problem(self, company_currency, entry_currency),
             JournalError::InvalidJournalCode { code, .. } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("code", code.clone()),
@@ -860,6 +891,18 @@ pub async fn reversed_by(
         .map(|row| row.get::<String>("id"))
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default())
+}
+
+/// The refusal for an entry whose base currency is not the company's.
+fn base_currency_mismatch_problem(
+    error: &JournalError,
+    company_currency: &str,
+    entry_currency: &str,
+) -> cratefield_core::Problem {
+    cratefield_core::Problem::new(&JOURNAL_ENTRY_REFUSED)
+        .with_detail(error.to_string())
+        .with_extension("companyCurrency", company_currency.to_owned())
+        .with_extension("entryCurrency", entry_currency.to_owned())
 }
 
 #[cfg(test)]

@@ -1,86 +1,82 @@
-//! `DocumentsModule`: document uploads via streaming to the Blob port.
+//! `DocumentsModule`: the upload and download routes for source documents
+//! (docs/PLAN.md section 6, issue #20).
 //!
-//! Provides `/v1/documents/upload` for streaming document uploads with
-//! configurable size limits. Default cap is `MAX_BLOB_BYTES` (10 MiB);
-//! opt-in to larger objects via `DOCUMENTS_MAX_LARGE_BLOB_BYTES`.
+//! `POST /v1/documents/upload` reads the body (at most 10 MiB), sniffs the
+//! type from its bytes, hashes it, and registers it through the command
+//! `documents.register` with the caller's own credential, so the tier check
+//! and the audit trail are the executor's. A file already stored is not
+//! stored twice: the response says so and the upload is still recorded.
+//!
+//! `GET /v1/documents/{id}/file?expires=&signature=` serves the original to
+//! anyone holding a link made by `documents.download_url` before it expires.
 
+use crate::dispatch::Deps;
+use crate::people::presented_from;
+use crate::rate_limiting::admit;
+use crate::routes::{Dispatch, DomainModule};
 use axum::Json;
 use axum::http::StatusCode;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use cratefield_core::axum::{
-    self, extract::State, http::header, response::IntoResponse, routing::post,
+    self, extract::Query, extract::State, http::header, response::IntoResponse, routing::get,
+    routing::post,
 };
 use cratefield_core::{
-    Blob, BlobError, BoxStream, Config, ConfigError, IdGen, MAX_BLOB_BYTES, MAX_LARGE_BLOB_BYTES,
-    Migrations, Module, ModuleContext, Port, Problem, RequestStream, StreamError, StreamRoute,
+    Blob, BlobError, Clock, Config, ConfigError, Database, Migrations, Module, ModuleContext, Port,
+    Problem, RequestStream, Scope, StreamError, StreamRoute,
 };
-use serde::Serialize;
+use futures_util::StreamExt;
+use ledgers_commands::CommandError;
+use ledgers_documents::sign::{self, LinkError};
+use ledgers_documents::sniff::{self, Refusal};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Default per-object cap = `MAX_BLOB_BYTES` (10 MiB).
-const DEFAULT_MAX_OBJECT_BYTES: u64 = MAX_BLOB_BYTES as u64;
-
-/// Content types allowed for document uploads.
-const ALLOWED_CONTENT_TYPES: &[&str] = &[
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "application/xml",
-    "text/xml",
-];
-
-/// Upload state: shared across all handlers.
-#[derive(Clone)]
-struct UploadState {
-    blob: Arc<dyn Blob>,
-    id_gen: Arc<dyn IdGen>,
-    max_object_bytes: u64,
+/// The blob key of a document's original: content-addressed by SHA-256.
+#[must_use]
+pub fn blob_key(sha256: &str) -> String {
+    format!("documents/{sha256}")
 }
 
-/// The documents module: document uploads via streaming to the Blob port.
-#[derive(Debug)]
+/// Upload and download state, shared by the handlers.
+#[derive(Clone)]
+struct DocState {
+    blob: Arc<dyn Blob>,
+    db: Arc<dyn Database>,
+    clock: Arc<dyn Clock>,
+    deps: Arc<Deps>,
+    dispatch: Arc<dyn Dispatch>,
+    company_id: String,
+    signing_key: Arc<Vec<u8>>,
+}
+
+/// The documents module: the upload and download routes, and the command
+/// routes of the `documents` domain (`routes` from [`routes::domain_routes`]).
 pub struct DocumentsModule {
-    /// The configured per-object ceiling, or `MAX_BLOB_BYTES` if not set.
-    max_object_bytes: u64,
+    company_id: String,
+    signing_key: Vec<u8>,
+    dispatch: Arc<dyn Dispatch>,
+    routes: Vec<(String, String, String)>,
 }
 
 impl DocumentsModule {
-    /// Creates a module with default settings.
+    /// A module serving `company_id` through `dispatch`, signing download
+    /// links with `signing_key`, and mounting the `documents` command routes.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(
+        company_id: impl Into<String>,
+        signing_key: Vec<u8>,
+        dispatch: Arc<dyn Dispatch>,
+        routes: Vec<(String, String, String)>,
+    ) -> Self {
         Self {
-            max_object_bytes: DEFAULT_MAX_OBJECT_BYTES,
+            company_id: company_id.into(),
+            signing_key,
+            dispatch,
+            routes,
         }
-    }
-
-    /// Creates a module reading `DOCUMENTS_MAX_LARGE_BLOB_BYTES` from config.
-    ///
-    /// # Errors
-    ///
-    /// Returns a string error if the config value is invalid or exceeds
-    /// the harness ceiling.
-    pub fn from_config(cfg: &dyn Config) -> Result<Self, String> {
-        let max_object_bytes = match cfg.get("DOCUMENTS_MAX_LARGE_BLOB_BYTES") {
-            None => DEFAULT_MAX_OBJECT_BYTES,
-            Some(s) => {
-                let bytes: u64 = s.parse().map_err(|_| {
-                    format!("DOCUMENTS_MAX_LARGE_BLOB_BYTES must be a number, got '{s}'")
-                })?;
-                if bytes > MAX_LARGE_BLOB_BYTES {
-                    return Err(format!(
-                        "DOCUMENTS_MAX_LARGE_BLOB_BYTES must be <= {MAX_LARGE_BLOB_BYTES}, got {bytes}"
-                    ));
-                }
-                bytes
-            }
-        };
-        Ok(Self { max_object_bytes })
-    }
-}
-
-impl Default for DocumentsModule {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -94,297 +90,319 @@ impl Module for DocumentsModule {
     }
 
     fn requires(&self) -> &'static [Port] {
-        &[Port::Blob, Port::IdGen]
+        &[Port::Blob, Port::IdGen, Port::Db, Port::Clock]
     }
 
     fn router(&self, ctx: ModuleContext) -> axum::Router {
-        // Create the shared upload state
-        let state = UploadState {
+        let deps = Deps::from_ports(&ctx.ports).expect("db, clock and id generator are required");
+        let state = DocState {
             blob: ctx.ports.blob.clone().expect("blob port is required"),
-            id_gen: ctx.ports.id_gen.clone().expect("id_gen port is required"),
-            max_object_bytes: self.max_object_bytes,
+            db: deps.db.clone(),
+            clock: deps.clock.clone(),
+            deps: Arc::new(deps),
+            dispatch: self.dispatch.clone(),
+            company_id: self.company_id.clone(),
+            signing_key: Arc::new(self.signing_key.clone()),
         };
-
-        // Mount the streaming upload route
-        axum::Router::new()
-            .route("/upload", post(handle_upload_handler))
-            .with_state(state)
+        let commands =
+            DomainModule::new("documents", self.dispatch.clone(), self.routes.clone()).router(ctx);
+        let files = axum::Router::new()
+            .route("/upload", post(upload))
+            .route("/{id}/file", get(download))
+            .with_state(state);
+        commands.merge(files)
     }
 
     fn migrations(&self) -> Migrations {
         Migrations::default()
     }
 
-    fn validate_config(&self, cfg: &dyn Config) -> Result<(), ConfigError> {
-        // Validate config by trying to create a module
-        match Self::from_config(cfg) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let mut errors = ConfigError::default();
-                errors.push(e);
-                Err(errors)
-            }
-        }
+    fn validate_config(&self, _cfg: &dyn Config) -> Result<(), ConfigError> {
+        Ok(())
     }
 
     fn max_blob_object_bytes(&self) -> u64 {
-        self.max_object_bytes
+        sniff::MAX_BYTES as u64
     }
 
     fn streaming_routes(&self) -> &'static [StreamRoute] {
-        // Set max_bytes to MAX_LARGE_BLOB_BYTES (the harness ceiling) so the
-        // streamer cannot buffer more than we're willing to accept. Per-request
-        // enforcement happens in the handler via the configured max_object_bytes.
         #[allow(clippy::cast_possible_truncation)]
-        const ROUTES: &[StreamRoute] =
-            &[StreamRoute::post("/upload", MAX_LARGE_BLOB_BYTES as usize)];
+        const ROUTES: &[StreamRoute] = &[StreamRoute::post(
+            "/upload",
+            cratefield_core::MAX_LARGE_BLOB_BYTES as usize,
+        )];
         ROUTES
     }
 }
 
-/// Response body for successful document upload (201).
-#[derive(Debug, Serialize)]
-struct UploadResponse {
-    /// The document's key in blob storage (module-scoped).
-    key: String,
-    /// The number of bytes uploaded.
-    bytes: u64,
-    /// The content type stored with the document.
-    content_type: String,
+/// Reads the streamed body, refusing anything over the upload limit.
+async fn read_body(mut stream: RequestStream) -> Result<Bytes, Problem> {
+    let mut buffer = BytesMut::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk: Result<Bytes, StreamError> = chunk;
+        let chunk = chunk.map_err(|_| Problem::validation_failed("the upload was interrupted"))?;
+        if buffer.len() + chunk.len() > sniff::MAX_BYTES {
+            return Err(refusal_problem(&Refusal::TooLarge {
+                size: buffer.len() + chunk.len(),
+            }));
+        }
+        buffer.extend_from_slice(&chunk);
+    }
+    Ok(buffer.freeze())
 }
 
-/// Axum handler for streaming uploads: extracts stream, state, and headers.
-#[allow(clippy::result_large_err)]
-async fn handle_upload_handler(
-    State(state): State<UploadState>,
+fn refusal_problem(refusal: &Refusal) -> Problem {
+    match refusal {
+        Refusal::TooLarge { .. } => Problem::request_too_large().with_detail(refusal.to_string()),
+        Refusal::UnsupportedType | Refusal::TypeMismatch { .. } => {
+            Problem::validation_failed(refusal.to_string())
+        }
+        _ => Problem::validation_failed(refusal.to_string()),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+/// `POST /v1/documents/upload`: stores a PDF, PNG or JPEG (201), or records
+/// another upload of a file already stored (200 with `duplicate: true`).
+async fn upload(
+    scope: Scope,
+    State(state): State<DocState>,
     headers: axum::http::HeaderMap,
     stream: RequestStream,
-) -> Result<(StatusCode, Json<UploadResponse>), axum::response::Response> {
-    // Extract content-type from headers
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(ToString::to_string);
-
-    // Check content-type early to return 415 instead of 400
-    if let Some(ref ct) = content_type
-        && !ALLOWED_CONTENT_TYPES.contains(&ct.as_str())
-    {
-        return Err((
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            format!(
-                "content-type '{}' not allowed; supported: {}",
-                ct,
-                ALLOWED_CONTENT_TYPES.join(", ")
-            ),
-        )
-            .into_response());
+) -> axum::response::Response {
+    let request_id = scope.request_id.clone();
+    let presented = presented_from(&headers, false);
+    if presented.is_none() {
+        return CommandError::Unauthenticated
+            .to_problem()
+            .instance(&request_id)
+            .into_response();
     }
-
-    handle_upload(
-        stream,
-        content_type,
-        Some(Arc::clone(&state.blob)),
-        Some(Arc::clone(&state.id_gen)),
-        state.max_object_bytes,
-    )
-    .await
-    .map_err(IntoResponse::into_response)
-}
-
-/// The document upload handler: streams the body to blob storage.
-async fn handle_upload(
-    stream: RequestStream,
-    content_type: Option<String>,
-    blob: Option<std::sync::Arc<dyn Blob>>,
-    id_gen: Option<std::sync::Arc<dyn IdGen>>,
-    max_bytes: u64,
-) -> Result<(StatusCode, Json<UploadResponse>), Problem> {
-    // Get the blob port; documents requires it.
-    let blob = blob.ok_or_else(|| Problem::internal().with_detail("blob port not available"))?;
-
-    // Get the IdGen port; documents requires it.
-    let id_gen = id_gen
-        .ok_or_else(|| Problem::internal().with_detail("id generation port not available"))?;
-
-    // Validate content-type is present (content-type check happens in the handler)
-    let ct =
-        content_type.ok_or_else(|| Problem::validation_failed("content-type header required"))?;
-
-    // Convert RequestStream into a BoxStream. RequestStream implements Stream
-    // over Result<Bytes, StreamError>, so we can box it directly.
-    let box_stream: BoxStream<'static, Result<Bytes, StreamError>> = Box::pin(stream);
-
-    // Generate a unique document id using the IdGen port (wasm-safe).
-    let doc_id = format!("doc_{}", id_gen.ulid());
-
-    // Upload via put_stream. The blob port will enforce max_bytes
-    // and return the actual number of bytes written.
-    let uploaded_bytes = blob
-        .put_stream(&doc_id, box_stream, &ct, max_bytes)
-        .await
-        .map_err(|e| match e {
-            BlobError::TooLarge(msg) => Problem::request_too_large().with_detail(msg),
-            BlobError::BadKey(msg) => Problem::validation_failed(msg),
-            other => {
-                tracing::error!("blob error: {:?}", other);
-                Problem::internal().with_detail("document upload failed")
+    if let Err(limited) = admit(state.dispatch.as_ref(), &state.deps, presented.as_ref()).await {
+        return limited.into_response();
+    }
+    let bytes = match read_body(stream).await {
+        Ok(bytes) => bytes,
+        Err(problem) => return problem.instance(&request_id).into_response(),
+    };
+    let kind = match sniff::sniff(&bytes) {
+        Ok(kind) => kind,
+        Err(refusal) => {
+            return refusal_problem(&refusal)
+                .instance(&request_id)
+                .into_response();
+        }
+    };
+    let declared = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    if let Err(refusal) = sniff::check_declared(declared, kind) {
+        return refusal_problem(&refusal)
+            .instance(&request_id)
+            .into_response();
+    }
+    let text = if kind == sniff::Kind::Pdf {
+        match ledgers_extract::pdf::text_layer(&bytes) {
+            Ok(text) => text,
+            Err(err) => {
+                return Problem::validation_failed(format!("this PDF cannot be read: {err}"))
+                    .instance(&request_id)
+                    .into_response();
             }
-        })?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(UploadResponse {
-            key: format!("documents/{doc_id}"),
-            bytes: uploaded_bytes,
-            content_type: ct,
-        }),
-    ))
+        }
+    } else {
+        None
+    };
+    let sha256 = hex::encode(Sha256::digest(&bytes));
+    let original_name = headers
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map_or_else(|| "document".to_owned(), ToString::to_string);
+    let input = json!({
+        "id": "",
+        "sha256": sha256,
+        "size_bytes": bytes.len(),
+        "mime": kind.mime(),
+        "original_name": original_name,
+        "uploaded_by": "",
+        "text_layer": text,
+    });
+    let result = state
+        .dispatch
+        .dispatch(
+            &state.deps,
+            "documents.register",
+            input,
+            &request_id,
+            presented,
+        )
+        .await;
+    let registered = match result {
+        Ok(value) => value,
+        Err(problem) => return problem.into_response(),
+    };
+    let duplicate = registered
+        .get("duplicate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let key = blob_key(&sha256);
+    let stored = match state.blob.get(&key).await {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(err) => {
+            tracing::error!("blob read failed: {err:?}");
+            return Problem::internal()
+                .with_detail("document storage is unavailable")
+                .into_response();
+        }
+    };
+    if !stored && let Err(err) = state.blob.put(&key, &bytes, kind.mime()).await {
+        return blob_failure(err);
+    }
+    let body = json!({
+        "document": registered.get("document").cloned().unwrap_or(Value::Null),
+        "duplicate": duplicate,
+        "warning": if duplicate {
+            Value::String("This file was already stored. It is linked to the existing document and no second copy was kept.".to_owned())
+        } else {
+            Value::Null
+        },
+    });
+    let status = if duplicate {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    (status, Json(body)).into_response()
 }
+
+fn blob_failure(err: BlobError) -> axum::response::Response {
+    match err {
+        BlobError::TooLarge(msg) => Problem::request_too_large()
+            .with_detail(msg)
+            .into_response(),
+        other => {
+            tracing::error!("blob write failed: {other:?}");
+            Problem::internal()
+                .with_detail("document upload failed")
+                .into_response()
+        }
+    }
+}
+
+/// `GET /v1/documents/{id}/file`: serves the original to a valid, unexpired link.
+async fn download(
+    State(state): State<DocState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    let forbidden = |detail: &str| {
+        Problem::new(&FORBIDDEN_LINK)
+            .with_detail(detail)
+            .into_response()
+    };
+    let (Some(expires), Some(signature)) = (query.get("expires"), query.get("signature")) else {
+        return forbidden("the link has no expiry or signature");
+    };
+    let Ok(expires_at) = expires.parse::<i64>() else {
+        return forbidden("the link expiry is not a timestamp");
+    };
+    let document =
+        match ledgers_documents::store::get(state.db.as_ref(), &state.company_id, &id).await {
+            Ok(Some(document)) => document,
+            Ok(None) => return Problem::not_found().into_response(),
+            Err(err) => {
+                tracing::error!("document read failed: {err:?}");
+                return Problem::internal().into_response();
+            }
+        };
+    let now = state.clock.now().unix_timestamp();
+    match sign::verify(
+        &state.signing_key,
+        &id,
+        &document.sha256,
+        expires_at,
+        signature,
+        now,
+    ) {
+        Ok(()) => {}
+        Err(LinkError::Expired) => return forbidden("the link has expired; ask for a new one"),
+        Err(LinkError::BadSignature) => return forbidden("the link signature does not match"),
+    }
+    let object = match state.blob.get(&blob_key(&document.sha256)).await {
+        Ok(Some(object)) => object,
+        Ok(None) => return Problem::not_found().into_response(),
+        Err(err) => {
+            tracing::error!("blob read failed: {err:?}");
+            return Problem::internal().into_response();
+        }
+    };
+    let safe_name: String = document
+        .original_name
+        .chars()
+        .filter(|c| *c != '"' && !c.is_control())
+        .collect();
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, document.mime.clone()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{safe_name}\""),
+            ),
+            (header::CACHE_CONTROL, "private, no-store".to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+        ],
+        object.bytes,
+    )
+        .into_response()
+}
+
+const FORBIDDEN_LINK: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "document-link-refused",
+    status: StatusCode::FORBIDDEN,
+    title: "The download link is not valid",
+    description: "A document download link was expired or altered.",
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn module_has_correct_name() {
-        let module = DocumentsModule::new();
+    fn blob_keys_are_content_addressed() {
+        assert_eq!(blob_key("ab12"), "documents/ab12");
+    }
+
+    #[test]
+    fn module_declares_its_ports_and_the_upload_route() {
+        struct NoDispatch;
+        #[async_trait::async_trait]
+        impl Dispatch for NoDispatch {
+            async fn dispatch(
+                &self,
+                _deps: &Deps,
+                _command: &str,
+                _input: Value,
+                _request_id: &str,
+                _presented: Option<crate::routes::Presented>,
+            ) -> Result<Value, Problem> {
+                Err(Problem::internal())
+            }
+            async fn principal(
+                &self,
+                _deps: &Deps,
+                _credential: &str,
+            ) -> Result<ledgers_commands::auth::Principal, Problem> {
+                Err(Problem::internal())
+            }
+        }
+        let module = DocumentsModule::new("c", b"k".to_vec(), Arc::new(NoDispatch), Vec::new());
         assert_eq!(module.name(), "documents");
-    }
-
-    #[test]
-    fn module_requires_blob_port() {
-        let module = DocumentsModule::new();
-        assert_eq!(module.requires(), &[Port::Blob, Port::IdGen]);
-    }
-
-    #[test]
-    fn module_from_config_no_large_blob_bytes() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, _key: &str) -> Option<String> {
-                None
-            }
-        }
-        let result = DocumentsModule::from_config(&TestConfig);
-        assert!(result.is_ok());
-        let module = result.unwrap();
-        assert_eq!(module.max_object_bytes, DEFAULT_MAX_OBJECT_BYTES);
-    }
-
-    #[test]
-    fn module_from_config_with_valid_large_blob_bytes() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, key: &str) -> Option<String> {
-                if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                    Some("33554432".to_string())
-                } else {
-                    None
-                }
-            }
-        }
-        let result = DocumentsModule::from_config(&TestConfig);
-        assert!(result.is_ok());
-        let module = result.unwrap();
-        assert_eq!(module.max_object_bytes, 33_554_432);
-    }
-
-    #[test]
-    fn module_from_config_invalid_large_blob_bytes() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, key: &str) -> Option<String> {
-                if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                    Some("not-a-number".to_string())
-                } else {
-                    None
-                }
-            }
-        }
-        let result = DocumentsModule::from_config(&TestConfig);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn module_from_config_exceeds_harness_ceiling() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, key: &str) -> Option<String> {
-                if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                    Some("99999999999999".to_string())
-                } else {
-                    None
-                }
-            }
-        }
-        let result = DocumentsModule::from_config(&TestConfig);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must be <="));
-    }
-
-    #[test]
-    fn max_blob_object_bytes_default() {
-        let module = DocumentsModule::new();
-        assert_eq!(module.max_blob_object_bytes(), DEFAULT_MAX_OBJECT_BYTES);
-    }
-
-    #[test]
-    fn max_blob_object_bytes_from_config() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, key: &str) -> Option<String> {
-                if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                    Some("20971520".to_string()) // 20 MiB
-                } else {
-                    None
-                }
-            }
-        }
-        let module = DocumentsModule::from_config(&TestConfig).unwrap();
-        assert_eq!(module.max_blob_object_bytes(), 20_971_520);
-    }
-
-    #[test]
-    fn streaming_routes_declared() {
-        let module = DocumentsModule::new();
+        assert!(module.requires().contains(&Port::Blob));
         let routes = module.streaming_routes();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/upload");
         assert_eq!(routes[0].method, axum::http::Method::POST);
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            assert_eq!(routes[0].max_bytes, MAX_LARGE_BLOB_BYTES as usize);
-        }
-    }
-
-    #[test]
-    fn validate_config_success() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, _key: &str) -> Option<String> {
-                None
-            }
-        }
-        let module = DocumentsModule::new();
-        let result = module.validate_config(&TestConfig);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn validate_config_invalid_value() {
-        struct TestConfig;
-        impl Config for TestConfig {
-            fn get(&self, key: &str) -> Option<String> {
-                if key == "DOCUMENTS_MAX_LARGE_BLOB_BYTES" {
-                    Some("invalid".to_string())
-                } else {
-                    None
-                }
-            }
-        }
-        let module = DocumentsModule::new();
-        let result = module.validate_config(&TestConfig);
-        assert!(result.is_err());
     }
 }

@@ -61,7 +61,13 @@ const HERD_POLICY: RetryPolicy = RetryPolicy {
 
 #[test]
 fn a_thousand_journal_posts_stay_gapless_linked_and_emitted() {
-    for kit in TestHarness::all_dialects(|| vec![Box::new(LedgerModule), Box::new(DbModule)]) {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(LedgerModule),
+            Box::new(DbModule),
+        ]
+    }) {
         pollster::block_on(set_up(&kit.db));
         // The fixtures (the chart, the journal) are audited too, so the
         // chain starts with them; the posts follow.
@@ -102,6 +108,17 @@ fn a_thousand_journal_posts_stay_gapless_linked_and_emitted() {
 
 /// The chart, the journal, and the open posting period.
 async fn set_up(db: &Arc<dyn Database>) {
+    // Create the company with EUR base currency
+    let _ = db
+        .as_ref()
+        .execute(&cratefield_core::Statement::new(
+            format!(
+                "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+                 VALUES ('{COMPANY_ID}', 'Test Company', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+            ),
+        ))
+        .await;
+
     create_chart(db.as_ref(), COMPANY_ID).await;
     journal::create_journal(
         db.as_ref(),

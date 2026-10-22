@@ -5,14 +5,16 @@
 //! One route sits in front of the harness: the one-shot deployment bootstrap
 //! (`POST /admin/bootstrap`, see docs/deploy.md).
 
+use crate::Composed;
 use crate::demo::{self, SeedGate};
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
 use crate::harness;
 use crate::people::{allowed_origin, credentialed_cors_headers};
+use crate::timing;
 use cratefield_core::{Config, NoopDefer, constant_time_eq};
 use cratefield_runtime_cloudflare::{Cloudflare, serve};
 use serde_json::json;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use worker::{Context, Env, Method, Request, Response, console_error, console_log, event};
 
 /// The bootstrap route. Enabled only while the `BOOTSTRAP_TOKEN` secret is set
@@ -23,13 +25,14 @@ pub const BOOTSTRAP_PATH: &str = "/admin/bootstrap";
 /// is set and `LEDGERS_ALLOW_DEMO_SEED` is `"1"`; see docs/deploy.md.
 pub const SEED_DEMO_PATH: &str = "/admin/seed-demo";
 
-/// Global harness, built once at first request
-static HARNESS: OnceLock<(cratefield_core::Harness, Cloudflare)> = OnceLock::new();
+/// The composed Ledgers app (the harness and its runtime), built once per
+/// isolate at the first request and shared by every request after it.
+static APP: Composed<(cratefield_core::Harness, Cloudflare)> = Composed::new();
 
 /// Cloudflare Workers fetch event handler
 #[event(fetch)]
 pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Response> {
-    let (harness_instance, runtime) = HARNESS.get_or_init(|| {
+    let composed = APP.get_or_build(|| {
         // Create configuration from environment
         let cfg = WorkerConfig { env: env.clone() };
 
@@ -47,6 +50,7 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
 
         (harness_instance, runtime)
     });
+    let (harness_instance, runtime) = (&composed.0, &composed.1);
 
     if req.method() == Method::Post && req.path() == BOOTSTRAP_PATH {
         return bootstrap_route(req, &env, runtime).await;
@@ -88,11 +92,22 @@ pub async fn fetch(req: Request, env: Env, ctx: Context) -> worker::Result<Respo
     }
 
     // Call the runtime's serve function to handle the request
-    let mut response = serve(harness_instance, runtime, req, env, ctx).await?;
+    let started = timing::now_ms();
+    let mut response = serve(harness_instance, runtime, req, env.clone(), ctx).await?;
     if let Some(origin) = origin.as_deref() {
         for (name, value) in credentialed_cors_headers(origin) {
             response.headers_mut().set(name, &value)?;
         }
+    }
+    if timing::enabled(&WorkerConfig { env }) {
+        let total = format!("total;dur={:.2}", timing::now_ms() - started);
+        // The routes add their database counters to the same header; the
+        // total goes first.
+        let joined = match response.headers().get("server-timing")? {
+            Some(existing) => format!("{total}, {existing}"),
+            None => total,
+        };
+        response.headers_mut().set("server-timing", &joined)?;
     }
     Ok(response)
 }

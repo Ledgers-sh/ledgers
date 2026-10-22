@@ -112,6 +112,7 @@ impl ChartAccount {
             company_id: company_id.to_owned(),
             number: self.number.clone(),
             name_key: self.name.clone(),
+            display_name: None,
             account_type: self.account_type,
             normal_balance: self.normal_balance,
             currency: self.currency,

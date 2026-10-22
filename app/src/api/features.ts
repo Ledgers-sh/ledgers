@@ -5,9 +5,6 @@
  * ever a dead button. Any failure reads as "nothing offered".
  */
 
-/** The operationId of bills.match (dots become underscores in the document). */
-export const BILLS_MATCH_OPERATION = 'bills_match';
-
 /** The operationIds an OpenAPI 3 document lists. A malformed document lists none. */
 export function operationIds(document: unknown): Set<string> {
   const ids = new Set<string>();

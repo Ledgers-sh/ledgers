@@ -10,7 +10,223 @@
     }
   },
   "paths": {
+    "/v1/accounts/{number}/archive": {
+      "post": {
+        "operationId": "accounts_archive",
+        "description": "Execute command: accounts.archive",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsNumberInput",
+                "description": "The input of `accounts.archive`, `accounts.restore` and `accounts.get`:\nthe account number (from the path).",
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "description": "The account number.",
+                    "type": "string",
+                    "default": ""
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsChangedOutput",
+                  "description": "The output of the four writes: the account after the change.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account, with its balance.",
+                      "$ref": "#/components/schemas/AccountView"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.archive",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers accounts archive",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/accounts/{number}/archive\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/accounts": {
+      "post": {
+        "operationId": "accounts_create",
+        "description": "Execute command: accounts.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsCreateInput",
+                "description": "The input of `accounts.create`. `type` is the account class.",
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "description": "The account number: 2 to 10 ASCII digits, unique in the chart.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The name shown for the account (a custom name).",
+                    "type": "string"
+                  },
+                  "type": {
+                    "description": "The account class: asset, liability, equity, income or expense.",
+                    "type": "string"
+                  },
+                  "parent": {
+                    "description": "The parent account number; absent means the root of the chart.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "description": "Kebab-case tags.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "currency": {
+                    "description": "The account's currency code; absent means the company base currency.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "number",
+                  "name",
+                  "type"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsChangedOutput",
+                  "description": "The output of the four writes: the account after the change.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account, with its balance.",
+                      "$ref": "#/components/schemas/AccountView"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers accounts create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
       "get": {
         "operationId": "accounts_list",
         "description": "Execute command: accounts.list",
@@ -81,6 +297,306 @@
         "x-ledgers-cli": "ledgers accounts list",
         "x-ledgers-mcp": "accounts_list",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/accounts\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/accounts/{number}": {
+      "get": {
+        "operationId": "accounts_get",
+        "description": "Execute command: accounts.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsGetOutput",
+                  "description": "The output of `accounts.get`: the account and its recent activity.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account, with its balance.",
+                      "$ref": "#/components/schemas/AccountView"
+                    },
+                    "activity": {
+                      "description": "The most recent entries touching the account, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccountActivityView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "account",
+                    "activity"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers accounts get",
+        "x-ledgers-mcp": "accounts_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/accounts/{number}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/accounts/{number}/restore": {
+      "post": {
+        "operationId": "accounts_restore",
+        "description": "Execute command: accounts.restore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsNumberInput",
+                "description": "The input of `accounts.archive`, `accounts.restore` and `accounts.get`:\nthe account number (from the path).",
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "description": "The account number.",
+                    "type": "string",
+                    "default": ""
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsChangedOutput",
+                  "description": "The output of the four writes: the account after the change.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account, with its balance.",
+                      "$ref": "#/components/schemas/AccountView"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.restore",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers accounts restore",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/accounts/{number}/restore\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/accounts/{number}/update": {
+      "post": {
+        "operationId": "accounts_update",
+        "description": "Execute command: accounts.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "accounts"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AccountsUpdateInput",
+                "description": "The input of `accounts.update`. `number` comes from the path. Only the\nfields present change; `clear_parent` moves the account to the root.",
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "description": "The account number (from the path).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "type": {
+                    "description": "A new class; refused once the account has postings or children.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "description": "A new tag list, replacing the old one.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": null
+                  },
+                  "parent": {
+                    "description": "A new parent account number.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "clear_parent": {
+                    "description": "Move the account to the root of the chart.",
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AccountsChangedOutput",
+                  "description": "The output of the four writes: the account after the change.",
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "description": "The account, with its balance.",
+                      "$ref": "#/components/schemas/AccountView"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "accounts.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers accounts update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/accounts/{number}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
       }
     },
     "/v1/approval-requests/{id}/decision": {
@@ -325,6 +841,1204 @@
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/approval-requests\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
         "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bills/{id}/confirm": {
+      "post": {
+        "operationId": "bills_confirm",
+        "description": "Execute command: bills.confirm",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ConfirmInput",
+                "description": "Input of `bills.confirm`: a person confirms the vendor and the IBAN of a bill.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bill id (from the path).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `bills.get`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.confirm",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills confirm",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/confirm\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/bills": {
+      "post": {
+        "operationId": "bills_create",
+        "description": "Execute command: bills.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "BillInput",
+                "description": "The input of `bills.create`, and of `bills.update` (where the bill id comes\nfrom the path and the document stays as it was). The id and the document\nare filled by the server on create.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The new bill's id (server-generated on create).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "document_id": {
+                    "description": "The document the bill is for (create only).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "vendor_name": {
+                    "description": "The vendor's name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vendor_vat_id": {
+                    "description": "The vendor's VAT id.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vendor_iban": {
+                    "description": "The IBAN printed on the invoice.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "invoice_number": {
+                    "description": "The invoice number.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "invoice_date": {
+                    "description": "The invoice date, `YYYY-MM-DD`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "due_date": {
+                    "description": "The due date, `YYYY-MM-DD`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "currency": {
+                    "description": "The ISO 4217 currency.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "net_minor": {
+                    "description": "The net total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "vat_minor": {
+                    "description": "The VAT total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "gross_minor": {
+                    "description": "The gross total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "lines": {
+                    "description": "The lines.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/BillLine"
+                    },
+                    "default": []
+                  },
+                  "confidence": {
+                    "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "default": {}
+                  },
+                  "source": {
+                    "description": "Which extractor (or `manual`) produced the fields.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "reader": {
+                    "description": "Which reader produced the fields: `rules`, `anthropic`, `minimax`, or\n`unread-scan` for a scanned PDF no configured reader takes. Filled by\nthe server from the extraction.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "created_by": {
+                    "description": "The caller, recorded on the bill (filled by the server).",
+                    "type": "string",
+                    "default": ""
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CreateOutput",
+                  "description": "Output of `bills.create`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The new bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills create",
+        "x-ledgers-mcp": "bills_create",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      },
+      "get": {
+        "operationId": "bills_list",
+        "description": "Execute command: bills.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ListOutput",
+                  "description": "Output of `bills.list`.",
+                  "type": "object",
+                  "properties": {
+                    "bills": {
+                      "description": "Bills, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BillView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "bills"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bills list",
+        "x-ledgers-mcp": "bills_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bills\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bills/{id}/discard": {
+      "post": {
+        "operationId": "bills_discard",
+        "description": "Execute command: bills.discard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "DiscardInput",
+                "description": "Input of `bills.discard`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bill id (from the path).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `bills.get`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.discard",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills discard",
+        "x-ledgers-mcp": "bills_discard",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/discard\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bills/extract": {
+      "post": {
+        "operationId": "bills_extract",
+        "description": "Execute command: bills.extract",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ExtractInput",
+                "description": "`bills.extract`'s gate and reader: the caller needs the draft tier, and\nthe document must be stored.",
+                "type": "object",
+                "properties": {
+                  "document_id": {
+                    "description": "The stored document to read.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "document_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ExtractResponse",
+                  "description": "The response of `bills.extract`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The draft bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    },
+                    "document": {
+                      "description": "The document it is for.",
+                      "$ref": "#/components/schemas/Document"
+                    },
+                    "extraction": {
+                      "description": "How the fields were read.",
+                      "$ref": "#/components/schemas/ExtractReport"
+                    }
+                  },
+                  "required": [
+                    "bill",
+                    "document",
+                    "extraction"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.extract",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills extract",
+        "x-ledgers-mcp": "bills_extract",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/extract\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bills/{id}": {
+      "get": {
+        "operationId": "bills_get",
+        "description": "Execute command: bills.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `bills.get`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bills get",
+        "x-ledgers-mcp": "bills_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bills/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bills/{id}/post": {
+      "post": {
+        "operationId": "bills_post",
+        "description": "Execute command: bills.post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "PostInput",
+                "description": "Input of `bills.post`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bill id (from the path).",
+                    "type": "string"
+                  },
+                  "journal_id": {
+                    "description": "The journal to post into; defaults to the general journal `GN`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "fiscal_year": {
+                    "description": "The fiscal year; defaults to the year of the posting date.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PostOutput",
+                  "description": "Output of `bills.post`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill, now posted.",
+                      "$ref": "#/components/schemas/BillView"
+                    },
+                    "entry": {
+                      "description": "The journal entry it became.",
+                      "$ref": "#/components/schemas/PostedEntryView"
+                    }
+                  },
+                  "required": [
+                    "bill",
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.post",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers bills post",
+        "x-ledgers-mcp": "bills_post",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/post\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/bills/{id}/update": {
+      "post": {
+        "operationId": "bills_update",
+        "description": "Execute command: bills.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UpdateInput",
+                "description": "Input of `bills.update`: the bill id and the corrected fields.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The new bill's id (server-generated on create).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "document_id": {
+                    "description": "The document the bill is for (create only).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "vendor_name": {
+                    "description": "The vendor's name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vendor_vat_id": {
+                    "description": "The vendor's VAT id.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vendor_iban": {
+                    "description": "The IBAN printed on the invoice.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "invoice_number": {
+                    "description": "The invoice number.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "invoice_date": {
+                    "description": "The invoice date, `YYYY-MM-DD`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "due_date": {
+                    "description": "The due date, `YYYY-MM-DD`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "currency": {
+                    "description": "The ISO 4217 currency.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "net_minor": {
+                    "description": "The net total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "vat_minor": {
+                    "description": "The VAT total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "gross_minor": {
+                    "description": "The gross total, minor units.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "default": null
+                  },
+                  "lines": {
+                    "description": "The lines.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/BillLine"
+                    },
+                    "default": []
+                  },
+                  "confidence": {
+                    "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "default": {}
+                  },
+                  "source": {
+                    "description": "Which extractor (or `manual`) produced the fields.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "reader": {
+                    "description": "Which reader produced the fields: `rules`, `anthropic`, `minimax`, or\n`unread-scan` for a scanned PDF no configured reader takes. Filled by\nthe server from the extraction.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "created_by": {
+                    "description": "The caller, recorded on the bill (filled by the server).",
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CreateOutput",
+                  "description": "Output of `bills.create`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The new bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers bills update",
+        "x-ledgers-mcp": "bills_update",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/documents/{id}/url": {
+      "get": {
+        "operationId": "documents_download_url",
+        "description": "Execute command: documents.download_url",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "DocumentUrlOutput",
+                  "description": "The output of `documents.download_url`: a relative link and its expiry.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "description": "The link, relative to the API origin.",
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "description": "When the link stops working (Unix seconds).",
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "expires_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.download_url",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers documents url",
+        "x-ledgers-mcp": "documents_download_url",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/documents/{id}/url\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/documents/{id}": {
+      "get": {
+        "operationId": "documents_get",
+        "description": "Execute command: documents.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `documents.get`.",
+                  "type": "object",
+                  "properties": {
+                    "document": {
+                      "description": "The document.",
+                      "$ref": "#/components/schemas/Document"
+                    }
+                  },
+                  "required": [
+                    "document"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers documents get",
+        "x-ledgers-mcp": "documents_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/documents/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/documents": {
+      "get": {
+        "operationId": "documents_list",
+        "description": "Execute command: documents.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ListOutput",
+                  "description": "Output of `documents.list`.",
+                  "type": "object",
+                  "properties": {
+                    "documents": {
+                      "description": "Documents, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Document"
+                      }
+                    }
+                  },
+                  "required": [
+                    "documents"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers documents list",
+        "x-ledgers-mcp": "documents_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/documents\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
     "/v1/entries/{external_id}": {
@@ -1397,6 +3111,13 @@
             "description": "The translatable name key.",
             "type": "string"
           },
+          "display_name": {
+            "description": "The custom name a person gave the account, or `null` to show the\ntranslated `name_key`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "account_type": {
             "description": "The account class: asset, liability, equity, income, expense.",
             "type": "string"
@@ -1430,6 +3151,10 @@
             "description": "Whether the account accepts postings (a leaf of the chart).",
             "type": "boolean"
           },
+          "archived": {
+            "description": "Whether the account is archived: kept for history, no new postings.",
+            "type": "boolean"
+          },
           "balances": {
             "description": "The balance per base currency, debit-positive (empty when no postings).",
             "type": "array",
@@ -1445,6 +3170,7 @@
           "normal_balance",
           "tags",
           "is_postable",
+          "archived",
           "balances"
         ]
       },
@@ -1464,6 +3190,518 @@
         "required": [
           "minor",
           "currency"
+        ]
+      },
+      "AccountActivityView": {
+        "description": "One recent entry of an account, as the account page lists it.",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry's id: the journal entry to open.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal the entry posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year the entry number is scoped to.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless entry number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "posting_date": {
+            "description": "The accounting date (YYYY-MM-DD).",
+            "type": "string"
+          },
+          "description": {
+            "description": "The entry's description.",
+            "type": "string"
+          },
+          "minor": {
+            "description": "The account's signed base amount in the entry (debit positive).",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The base currency code of the amount.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "posting_date",
+          "description",
+          "minor",
+          "currency"
+        ]
+      },
+      "BillView": {
+        "description": "A bill as commands and the app see it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The bill id.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The derived status.",
+            "$ref": "#/components/schemas/Status"
+          },
+          "document_id": {
+            "description": "The document the bill is for.",
+            "type": "string"
+          },
+          "vendor": {
+            "description": "The vendor.",
+            "$ref": "#/components/schemas/VendorView"
+          },
+          "invoice_number": {
+            "description": "The invoice number.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invoice_date": {
+            "description": "The invoice date.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_date": {
+            "description": "The due date.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "The currency.",
+            "type": "string"
+          },
+          "net_minor": {
+            "description": "Net total, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "vat_minor": {
+            "description": "VAT total, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "gross_minor": {
+            "description": "Gross total, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "lines": {
+            "description": "The lines.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillLine"
+            }
+          },
+          "confidence": {
+            "description": "Confidence per extracted field, 0 to 100 (empty for manual bills).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "checks": {
+            "description": "Every check on the bill.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckView"
+            }
+          },
+          "flags": {
+            "description": "The open flags.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "description": "Which extractor produced the fields.",
+            "type": "string"
+          },
+          "reader": {
+            "description": "Which reader produced the fields, when one did (see `BillInput::reader`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "posted_entry_id": {
+            "description": "The posted journal entry, once posted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "journal_preview": {
+            "description": "The entry the bill posts as, when every amount and account is known.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewLine"
+            }
+          },
+          "created_by": {
+            "description": "Who created the bill.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When it was created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When it last changed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "document_id",
+          "vendor",
+          "currency",
+          "lines",
+          "confidence",
+          "checks",
+          "flags",
+          "source",
+          "journal_preview",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "Status": {
+        "description": "The status of a bill, derived on every read.",
+        "oneOf": [
+          {
+            "description": "A check failed or a flag is open.",
+            "type": "string",
+            "const": "needs-review"
+          },
+          {
+            "description": "Every check passed and nothing is open: it can be posted.",
+            "type": "string",
+            "const": "ready"
+          },
+          {
+            "description": "The journal entry exists.",
+            "type": "string",
+            "const": "posted"
+          },
+          {
+            "description": "A person discarded the draft; it can no longer post.",
+            "type": "string",
+            "const": "discarded"
+          }
+        ]
+      },
+      "VendorView": {
+        "description": "The vendor, as the bill shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The vendor id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The vendor's name.",
+            "type": "string"
+          },
+          "vat_id": {
+            "description": "The VAT id, if known.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "iban": {
+            "description": "The known IBAN, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needs_review": {
+            "description": "True until a person confirms the vendor.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "needs_review"
+        ]
+      },
+      "BillLine": {
+        "description": "One bill line as entered or extracted, with its expense account.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "The description as printed.",
+            "type": "string",
+            "default": ""
+          },
+          "net_minor": {
+            "description": "The net amount, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "default": null
+          },
+          "vat_rate_bp": {
+            "description": "The VAT rate in basis points.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "default": null
+          },
+          "vat_minor": {
+            "description": "The VAT amount, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "default": null
+          },
+          "gross_minor": {
+            "description": "The gross amount, minor units.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "default": null
+          },
+          "expense_account": {
+            "description": "The expense account the line debits (a chart account number).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "suggested_from": {
+            "description": "The bill whose line this account was suggested from, when it was.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "CheckView": {
+        "description": "A check as the API shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The check's id.",
+            "type": "string"
+          },
+          "ok": {
+            "description": "Whether it passed.",
+            "type": "boolean"
+          },
+          "detail": {
+            "description": "What it found.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ok",
+          "detail"
+        ]
+      },
+      "PreviewLine": {
+        "description": "One line of the journal preview: account, side and amount in minor units.",
+        "type": "object",
+        "properties": {
+          "account": {
+            "description": "The account number.",
+            "type": "string"
+          },
+          "side": {
+            "description": "`debit` or `credit`.",
+            "type": "string"
+          },
+          "minor": {
+            "description": "The amount, minor units of the bill currency.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "account",
+          "side",
+          "minor"
+        ]
+      },
+      "Document": {
+        "description": "A stored document, as commands and the app see it. The PDF text layer is\nnot part of the view: it is read by the policy screen, not returned.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The document id.",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "The SHA-256 of the file bytes, lowercase hex.",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "The size in bytes.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "mime": {
+            "description": "The sniffed MIME type.",
+            "type": "string"
+          },
+          "original_name": {
+            "description": "The file name as uploaded (display only; never trusted for type).",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "description": "Who uploaded the first copy.",
+            "type": "string"
+          },
+          "retention_class": {
+            "description": "The retention class.",
+            "$ref": "#/components/schemas/RetentionClass"
+          },
+          "created_at": {
+            "description": "When the document was first stored (ISO 8601, UTC).",
+            "type": "string"
+          },
+          "has_text_layer": {
+            "description": "Whether the PDF text layer was read (false for images and scans).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "size_bytes",
+          "mime",
+          "original_name",
+          "uploaded_by",
+          "retention_class",
+          "created_at",
+          "has_text_layer"
+        ]
+      },
+      "RetentionClass": {
+        "description": "How long the original must be kept.",
+        "oneOf": [
+          {
+            "description": "Ten years (the default; the German `GoBD` period for books and vouchers).",
+            "type": "string",
+            "const": "ten-years"
+          },
+          {
+            "description": "Six years.",
+            "type": "string",
+            "const": "six-years"
+          },
+          {
+            "description": "Kept until someone removes it by hand.",
+            "type": "string",
+            "const": "indefinite"
+          }
+        ]
+      },
+      "ExtractReport": {
+        "description": "Output of `bills.extract`: the bill and how its fields were read.",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "description": "`model`, `text-layer` or `manual` (nothing could be read).",
+            "type": "string"
+          },
+          "warnings": {
+            "description": "What the person should know about the reading.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "needs_photo": {
+            "description": "True when the file is a scanned PDF that no configured reader takes:\nit needs a photo upload or the fields typed in by hand.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "warnings",
+          "needs_photo"
+        ]
+      },
+      "PostedEntryView": {
+        "description": "The journal entry a bill became.",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year the number is scoped to.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_at": {
+            "description": "The recorded-at timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "recorded_at"
         ]
       },
       "EntryLineRecordView": {

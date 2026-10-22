@@ -9,25 +9,34 @@
 //! and writes the audit event in the same guard batch as the change
 //! (docs/PLAN.md sections 3 and 5).
 
+mod accounts;
 mod approvals;
+mod bills;
 
 use crate::people::SessionAuthenticator;
 use crate::routes::{Dispatch, Presented};
+use accounts::AccountsGet;
 use approvals::{APPROVAL_TTL, ApprovalsGet, ApprovalsList};
 use async_trait::async_trait;
 use cratefield_core::{
-    ApiKeys, Clock, Database, DbError, IdGen, Port, Ports, Problem, RateLimiter, Statement,
+    ApiKeys, Blob, Clock, Database, DbError, HttpClient, IdGen, Port, Ports, Problem, RateLimiter,
+    Statement,
 };
 use ledgers_approvals::{
     ApprovalEvent, ApprovalRequest, NewRequest, notice_statement, request_statement,
 };
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
+use ledgers_bills::commands::{
+    BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
+};
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
     Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
     PendingApproval, Plan, Registry,
 };
+use ledgers_documents::commands::{DocumentsGet, DocumentsList, DocumentsRegister};
+use ledgers_extract::provider::ModelSettings;
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
 use ledgers_ledger::report;
@@ -72,6 +81,22 @@ const PROTECTED_TAGS: &[&str] = &[
     "fx-loss",
     "rounding",
 ];
+/// The input of `documents.download_url`: the document id, from the path.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentUrlInput {
+    /// The document id.
+    pub id: String,
+}
+
+/// The output of `documents.download_url`: a relative link and its expiry.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentUrlOutput {
+    /// The link, relative to the API origin.
+    pub url: String,
+    /// When the link stops working (Unix seconds).
+    pub expires_at: i64,
+}
+
 /// Rows a list query returns when the caller names no limit, and the cap.
 const DEFAULT_LIST_LIMIT: u32 = 50;
 const MAX_LIST_LIMIT: u32 = 200;
@@ -87,6 +112,10 @@ pub struct Deps {
     pub id_gen: Arc<dyn IdGen>,
     /// The rate limiter for agent keys, when the runtime provides one.
     pub rate_limiter: Option<Arc<dyn RateLimiter>>,
+    /// The blob store the original documents are kept in.
+    pub blob: Option<Arc<dyn Blob>>,
+    /// The HTTP client the model extractor calls the Messages API with.
+    pub http: Option<Arc<dyn HttpClient>>,
 }
 
 impl Deps {
@@ -99,6 +128,8 @@ impl Deps {
             clock: ports.clock.clone()?,
             id_gen: ports.id_gen.clone()?,
             rate_limiter: ports.rate_limiter.clone(),
+            blob: ports.blob.clone(),
+            http: ports.http.clone(),
         })
     }
 }
@@ -111,6 +142,11 @@ pub struct ServerDispatch {
     company_id: String,
     app_origins: Vec<String>,
     app_url: String,
+    /// The key that signs document download links; empty until configured,
+    /// and then download links are refused.
+    document_key: Vec<u8>,
+    /// The model reader the configuration selected, when one is configured.
+    model: Option<ModelSettings>,
 }
 
 impl ServerDispatch {
@@ -122,7 +158,23 @@ impl ServerDispatch {
             company_id: company_id.into(),
             app_origins: Vec::new(),
             app_url: String::new(),
+            document_key: Vec::new(),
+            model: None,
         }
+    }
+
+    /// The key that signs document download links.
+    #[must_use]
+    pub fn with_document_key(mut self, key: Vec<u8>) -> Self {
+        self.document_key = key;
+        self
+    }
+
+    /// The model reader for documents (its key is never logged or shown).
+    #[must_use]
+    pub fn with_model_reader(mut self, settings: Option<ModelSettings>) -> Self {
+        self.model = settings;
+        self
     }
 
     /// The app's absolute URL: approval links point at `{app_url}/approvals/{id}`.
@@ -170,9 +222,16 @@ impl ServerDispatch {
             now: rfc3339_utc(now_at),
         };
         let now = ctx.now.clone();
-        let policy = load_policy(deps.db.as_ref(), &self.company_id, now_at)
-            .await
-            .map_err(fail)?;
+        // Reads never touch protected accounts (their previews are empty), so
+        // only a command that can move money loads the protected-account set.
+        let policy = load_policy_with(
+            deps.db.as_ref(),
+            &self.company_id,
+            now_at,
+            C::TIER != Tier::Read,
+        )
+        .await
+        .map_err(fail)?;
         let policy = match &presented {
             Presented::Principal(principal) => internal_agent_policy(policy, principal, now_at),
             Presented::Bearer(_) | Presented::Session(_) => policy,
@@ -183,6 +242,9 @@ impl ServerDispatch {
                     db: Arc::clone(&deps.db),
                     clock: Arc::clone(&deps.clock),
                     company_id: self.company_id.clone(),
+                    // The policy above already read every agent key of the
+                    // company, so the key is not read a second time.
+                    preloaded: Some(policy.agent_keys().clone()),
                 }),
                 token,
             ),
@@ -302,6 +364,7 @@ impl ServerDispatch {
                 db: Arc::clone(&deps.db),
                 clock: Arc::clone(&deps.clock),
                 company_id: self.company_id.clone(),
+                preloaded: None,
             }
             .authenticate(&token)
             .await
@@ -378,8 +441,77 @@ impl ServerDispatch {
     }
 }
 
+impl ServerDispatch {
+    /// `documents.register`: the server fills the id and the uploader from the
+    /// credential; the caller cannot choose either.
+    async fn documents_register(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        mut input: Value,
+    ) -> Result<Value, Problem> {
+        let caller = self
+            .caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        fill_server_fields(&mut input, deps, "id", &caller);
+        self.execute(deps, &DocumentsRegister, presented, request_id, input)
+            .await
+    }
+
+    /// `bills.create`: the server fills the id and the author from the credential.
+    async fn bills_create(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        mut input: Value,
+    ) -> Result<Value, Problem> {
+        let caller = self
+            .caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        fill_server_fields(&mut input, deps, "id", &caller);
+        self.execute(deps, &BillsCreate, presented, request_id, input)
+            .await
+    }
+
+    /// `bills.confirm`: a person only. An agent gets 403 (`human-only`).
+    async fn bills_confirm(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        self.person_id(deps, presented.clone(), request_id).await?;
+        self.execute(deps, &BillsConfirm, presented, request_id, input)
+            .await
+    }
+}
+
+/// Sets the id (when the caller left it empty) and the caller label on a
+/// command input. Values the caller sent for these are overwritten.
+fn fill_server_fields(input: &mut Value, deps: &Deps, id_field: &str, caller: &str) {
+    if let Value::Object(map) = input {
+        let empty = map
+            .get(id_field)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty);
+        if empty {
+            map.insert(id_field.to_owned(), Value::String(deps.id_gen.ulid()));
+        }
+        let label_field = if map.contains_key("uploaded_by") {
+            "uploaded_by"
+        } else {
+            "created_by"
+        };
+        map.insert(label_field.to_owned(), Value::String(caller.to_owned()));
+    }
+}
+
 #[async_trait]
 impl Dispatch for ServerDispatch {
+    #[allow(clippy::too_many_lines)]
     async fn dispatch(
         &self,
         deps: &Deps,
@@ -425,6 +557,14 @@ impl Dispatch for ServerDispatch {
                 self.execute(deps, &AccountsList, presented, request_id, input)
                     .await
             }
+            "accounts.get" => {
+                self.execute(deps, &AccountsGet, presented, request_id, input)
+                    .await
+            }
+            "accounts.create" | "accounts.update" | "accounts.archive" | "accounts.restore" => {
+                self.accounts_write(deps, presented, request_id, command, input)
+                    .await
+            }
             "reports.trial_balance" => {
                 self.execute(deps, &ReportsTrialBalance, presented, request_id, input)
                     .await
@@ -447,6 +587,45 @@ impl Dispatch for ServerDispatch {
                 )
                 .await
             }
+            "documents.register" => {
+                self.documents_register(deps, presented, request_id, input)
+                    .await
+            }
+            "documents.list" => {
+                self.execute(deps, &DocumentsList, presented, request_id, input)
+                    .await
+            }
+            "documents.get" => {
+                self.execute(deps, &DocumentsGet, presented, request_id, input)
+                    .await
+            }
+            "documents.download_url" => {
+                self.documents_download_url(deps, presented, request_id, input)
+                    .await
+            }
+            "bills.extract" => self.bills_extract(deps, presented, request_id, input).await,
+            "bills.create" => self.bills_create(deps, presented, request_id, input).await,
+            "bills.list" => {
+                self.execute(deps, &BillsList, presented, request_id, input)
+                    .await
+            }
+            "bills.get" => {
+                self.execute(deps, &BillsGet, presented, request_id, input)
+                    .await
+            }
+            "bills.update" => {
+                self.execute(deps, &BillsUpdate, presented, request_id, input)
+                    .await
+            }
+            "bills.post" => {
+                self.execute(deps, &BillsPost, presented, request_id, input)
+                    .await
+            }
+            "bills.confirm" => self.bills_confirm(deps, presented, request_id, input).await,
+            "bills.discard" => {
+                self.execute(deps, &BillsDiscard, presented, request_id, input)
+                    .await
+            }
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
@@ -457,11 +636,23 @@ impl Dispatch for ServerDispatch {
         }
     }
 
+    async fn verified_key_id(&self, deps: &Deps, credential: &str) -> Option<String> {
+        // The same verify the command path runs, without the policy read:
+        // a revoked or unknown credential verifies to nothing.
+        api_keys(&deps.db, &deps.clock)
+            .verify(credential)
+            .await
+            .ok()
+            .flatten()
+            .map(|verified| verified.subject)
+    }
+
     async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem> {
         let authenticator = KeyStore {
             db: Arc::clone(&deps.db),
             clock: Arc::clone(&deps.clock),
             company_id: self.company_id.clone(),
+            preloaded: None,
         };
         authenticator
             .authenticate(&credential.to_owned())
@@ -512,6 +703,7 @@ fn internal_agent_policy(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     })
 }
 
@@ -541,6 +733,9 @@ pub(crate) struct KeyStore {
     pub(crate) db: Arc<dyn Database>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) company_id: String,
+    /// The company's agent keys when the caller already loaded them (the
+    /// command path loads the policy first); `None` reads the key row.
+    pub(crate) preloaded: Option<BTreeMap<String, AgentKey>>,
 }
 
 #[async_trait]
@@ -550,9 +745,11 @@ impl Authenticator for KeyStore {
             .verify(credential)
             .await?
             .ok_or(CommandError::Unauthenticated)?;
-        let key = load_key(self.db.as_ref(), &self.company_id, &verified.subject)
-            .await?
-            .ok_or(CommandError::Unauthenticated)?;
+        let key = match &self.preloaded {
+            Some(keys) => keys.get(&verified.subject).cloned(),
+            None => load_key(self.db.as_ref(), &self.company_id, &verified.subject).await?,
+        }
+        .ok_or(CommandError::Unauthenticated)?;
         let now = self.clock.now();
         if key.revoked_at.is_some_and(|at| at <= now) || key.expires_at.is_some_and(|at| at <= now)
         {
@@ -635,6 +832,19 @@ pub(crate) async fn load_policy(
     company_id: &str,
     now: OffsetDateTime,
 ) -> Result<KeyPolicy, CommandError> {
+    load_policy_with(db, company_id, now, true).await
+}
+
+/// [`load_policy`], with the chart's protected-account set read only when
+/// `with_protected` is set. An empty set makes the protected-account rule a
+/// no-op, so the caller must pass `false` only for a command whose preview
+/// touches no accounts (every read-tier command's preview is empty).
+pub(crate) async fn load_policy_with(
+    db: &dyn Database,
+    company_id: &str,
+    now: OffsetDateTime,
+    with_protected: bool,
+) -> Result<KeyPolicy, CommandError> {
     let rows = db
         .query(&Statement::with_values(
             "SELECT id, policy FROM agent_key WHERE company_id = ?".to_owned(),
@@ -649,20 +859,24 @@ pub(crate) async fn load_policy(
     let keys = parse_keys(pairs)
         .map_err(|err| CommandError::InvalidInput(format!("agent key policy: {err}")))?;
 
-    let accounts = ledgers_ledger::commands::list_accounts(db, company_id, true)
-        .await
-        .map_err(|err| CommandError::Domain(err.to_problem()))?;
-    let protected: BTreeSet<String> = accounts
-        .iter()
-        .filter(|entry| {
-            entry
-                .account
-                .tags
-                .iter()
-                .any(|tag| PROTECTED_TAGS.contains(&tag.as_str()))
-        })
-        .map(|entry| entry.account.number.clone())
-        .collect();
+    let protected: BTreeSet<String> = if with_protected {
+        let accounts = ledgers_ledger::commands::list_accounts(db, company_id, true)
+            .await
+            .map_err(|err| CommandError::Domain(err.to_problem()))?;
+        accounts
+            .iter()
+            .filter(|entry| {
+                entry
+                    .account
+                    .tags
+                    .iter()
+                    .any(|tag| PROTECTED_TAGS.contains(&tag.as_str()))
+            })
+            .map(|entry| entry.account.number.clone())
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
 
     Ok(KeyPolicy::new(keys, protected, now, UtcOffset::UTC))
 }
@@ -729,6 +943,7 @@ fn agent_key_policy_statement(
         created_at: now,
         last_used_at: None,
         revoked_at: None,
+        chart_changes: false,
     };
     let policy = serialize_key(&key).map_err(|err| format!("encode key policy: {err}"))?;
     Ok(Statement::with_values(
@@ -842,6 +1057,44 @@ fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
     limits
 }
 
+/// The display name of the development company.
+const DEV_COMPANY_NAME: &str = "Development company";
+
+/// The base currency of the development company (and of the demo book).
+pub const DEV_BASE_CURRENCY: &str = "EUR";
+
+/// Creates the company row with its base currency when it does not exist yet.
+/// An existing row is left as it is: the base currency is set once, at
+/// creation, and never rewritten here.
+///
+/// # Errors
+/// A message naming the failed step.
+async fn ensure_company(
+    deps: &Deps,
+    company_id: &str,
+    name: &str,
+    currency: &str,
+) -> Result<(), String> {
+    let stamp = rfc3339_utc(deps.clock.now());
+    deps.db
+        .execute(&Statement::with_values(
+            "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+             SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM company WHERE id = ?)"
+                .to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(name),
+                sea_query::Value::from(currency),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(stamp.as_str()),
+                sea_query::Value::from(company_id),
+            ],
+        ))
+        .await
+        .map(|_| ())
+        .map_err(|err| format!("create company: {err}"))
+}
+
 /// Development bootstrap for `company_id`: when the company has no chart,
 /// imports the generic SME chart, opens the general journal `GN` and the
 /// current calendar year; then issues one local key with full tier
@@ -850,13 +1103,14 @@ fn bootstrap_limits(currency: &str) -> BTreeMap<String, CurrencyLimit> {
 /// # Errors
 /// A message naming the failed step.
 pub async fn bootstrap_dev(deps: &Deps, company_id: &str) -> Result<String, String> {
+    ensure_company(deps, company_id, DEV_COMPANY_NAME, DEV_BASE_CURRENCY).await?;
     seed_company(deps, company_id, DEV_OWNER).await?;
     issue_key(
         deps,
         company_id,
         "dev local key",
         Tier::PostWithinLimits,
-        bootstrap_limits("EUR"),
+        bootstrap_limits(DEV_BASE_CURRENCY),
     )
     .await
 }
@@ -888,10 +1142,13 @@ impl CompanyBootstrap {
                 "company must be 1 to {BOOTSTRAP_NAME_MAX} characters"
             ));
         }
-        if self.currency.len() != 3 || !self.currency.bytes().all(|b| b.is_ascii_uppercase()) {
-            return Err("currency must be a three-letter ISO 4217 code, such as EUR".to_owned());
+        // The code must be the table's own spelling of an ISO 4217 currency
+        // (uppercase, a known code), so a company is never stored in a code
+        // the amount types cannot represent.
+        match ledgers_money::Currency::from_code(&self.currency) {
+            Ok(currency) if currency.code() == self.currency => Ok(()),
+            _ => Err("currency must be an uppercase ISO 4217 code, such as EUR".to_owned()),
         }
-        Ok(())
     }
 }
 
@@ -1020,6 +1277,7 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 /// # Panics
 /// Never in practice: the command names are fixed and unique.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
         (
@@ -1027,6 +1285,41 @@ pub fn registry() -> Registry {
             (
                 schema_of::<AccountsListInput>(),
                 schema_of::<AccountsListOutput>(),
+            ),
+        ),
+        (
+            "accounts.create",
+            (
+                schema_of::<accounts::AccountsCreateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.update",
+            (
+                schema_of::<accounts::AccountsUpdateInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.archive",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.restore",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsChangedOutput>(),
+            ),
+        ),
+        (
+            "accounts.get",
+            (
+                schema_of::<accounts::AccountsNumberInput>(),
+                schema_of::<accounts::AccountsGetOutput>(),
             ),
         ),
         (
@@ -1104,6 +1397,86 @@ pub fn registry() -> Registry {
             (
                 schema_of::<crate::agent_keys::KeysRevokeInput>(),
                 schema_of::<crate::agent_keys::KeysRevokeOutput>(),
+            ),
+        ),
+    ]);
+    let mut schemas = schemas;
+    schemas.extend([
+        (
+            "documents.list",
+            (
+                schema_of::<ledgers_documents::commands::ListInput>(),
+                schema_of::<ledgers_documents::commands::ListOutput>(),
+            ),
+        ),
+        (
+            "documents.get",
+            (
+                schema_of::<ledgers_documents::commands::GetInput>(),
+                schema_of::<ledgers_documents::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "documents.download_url",
+            (
+                schema_of::<DocumentUrlInput>(),
+                schema_of::<DocumentUrlOutput>(),
+            ),
+        ),
+        (
+            "bills.extract",
+            (
+                schema_of::<bills::ExtractInput>(),
+                schema_of::<bills::ExtractResponse>(),
+            ),
+        ),
+        (
+            "bills.create",
+            (
+                schema_of::<ledgers_bills::model::BillInput>(),
+                schema_of::<ledgers_bills::commands::CreateOutput>(),
+            ),
+        ),
+        (
+            "bills.update",
+            (
+                schema_of::<ledgers_bills::commands::UpdateInput>(),
+                schema_of::<ledgers_bills::commands::CreateOutput>(),
+            ),
+        ),
+        (
+            "bills.get",
+            (
+                schema_of::<ledgers_bills::commands::GetInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "bills.list",
+            (
+                schema_of::<ledgers_bills::commands::ListInput>(),
+                schema_of::<ledgers_bills::commands::ListOutput>(),
+            ),
+        ),
+        (
+            "bills.post",
+            (
+                schema_of::<ledgers_bills::commands::PostInput>(),
+                schema_of::<ledgers_bills::commands::PostOutput>(),
+            ),
+        ),
+        (
+            "bills.discard",
+            (
+                schema_of::<ledgers_bills::commands::DiscardInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
+            ),
+        ),
+        (
+            "bills.confirm",
+            (
+                schema_of::<ledgers_bills::commands::ConfirmInput>(),
+                schema_of::<ledgers_bills::commands::GetOutput>(),
             ),
         ),
     ]);
@@ -1467,6 +1840,9 @@ impl From<EntryRecord> for EntryRecordView {
 pub struct EntriesListInput {
     /// Only entries of this VAT period (`YYYY-MM`); all periods when absent.
     pub period: Option<String>,
+    /// The id of the last entry of the previous page: the page starts after
+    /// it. The first page when absent. An id the company does not hold is a 404.
+    pub after: Option<String>,
     /// At most this many entries, newest first (default 50, cap 200).
     #[serde(default, deserialize_with = "de_opt_u32")]
     #[schemars(with = "Option<u32>")]
@@ -1515,9 +1891,16 @@ impl Command for EntriesList {
             .limit
             .unwrap_or(DEFAULT_LIST_LIMIT)
             .clamp(1, MAX_LIST_LIMIT);
-        let records = query::list_entries(db, &ctx.company_id, input.period.as_deref(), limit)
-            .await
-            .map_err(|err| domain(&err))?;
+        let records = query::list_entries(
+            db,
+            &ctx.company_id,
+            input.period.as_deref(),
+            input.after.as_deref(),
+            limit,
+        )
+        .await
+        .map_err(|err| domain(&err))?
+        .ok_or_else(|| CommandError::Domain(cratefield_core::Problem::not_found()))?;
         Ok(Plan::with_output(EntriesListOutput {
             entries: records.into_iter().map(EntryRecordView::from).collect(),
         }))
@@ -1584,6 +1967,9 @@ pub struct AccountView {
     pub number: String,
     /// The translatable name key.
     pub name_key: String,
+    /// The custom name a person gave the account, or `null` to show the
+    /// translated `name_key`.
+    pub display_name: Option<String>,
     /// The account class: asset, liability, equity, income, expense.
     pub account_type: String,
     /// The normal balance side.
@@ -1596,6 +1982,8 @@ pub struct AccountView {
     pub tags: Vec<String>,
     /// Whether the account accepts postings (a leaf of the chart).
     pub is_postable: bool,
+    /// Whether the account is archived: kept for history, no new postings.
+    pub archived: bool,
     /// The balance per base currency, debit-positive (empty when no postings).
     pub balances: Vec<SerializableAmount>,
 }
@@ -1657,12 +2045,14 @@ impl Command for AccountsList {
                     balances: by_account.remove(&account.number).unwrap_or_default(),
                     number: account.number,
                     name_key: account.name_key,
+                    display_name: account.display_name,
                     account_type: account.account_type.to_string(),
                     normal_balance: account.normal_balance.to_string(),
                     currency: account.currency.map(|c| c.code().to_string()),
                     parent: account.parent,
                     tags: account.tags,
                     is_postable,
+                    archived: account.archived,
                 }
             })
             .collect();

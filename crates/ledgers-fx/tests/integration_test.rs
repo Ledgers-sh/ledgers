@@ -45,6 +45,14 @@ use time::{Date, Month};
 fn no_sleep(_: Duration) {}
 
 async fn setup_fx_scenario(db: &dyn Database) -> String {
+    // Posting reads the company's base currency, so the company row exists
+    // before its first entry (as bootstrap and the dev seed create it).
+    db.execute(&Statement::new(format!(
+        "INSERT INTO company (id, name, base_currency, created_at, updated_at) \
+         VALUES ('{COMPANY_ID}', 'Halden Works GmbH', 'EUR', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+    )))
+    .await
+    .expect("create the company");
     for (number, name_key, account_type) in [
         ("1010", "account.inline.bank", AccountType::Asset),
         ("1400", "account.inline.payables", AccountType::Liability),
@@ -62,6 +70,7 @@ async fn setup_fx_scenario(db: &dyn Database) -> String {
                 currency: None,
                 parent: None,
                 tags: Vec::new(),
+                display_name: None,
             },
             "2026-01-01T00:00:00Z".to_owned(),
             &person(),
@@ -297,6 +306,7 @@ fn test_manual_rate_writes_audit_event() {
 fn test_acceptance_posted_fx_lines_are_immutable_when_rates_change() {
     for kit in TestHarness::all_dialects(|| {
         vec![
+            Box::new(ledgers_storage::StorageModule),
             Box::new(LedgerModule),
             Box::new(DbModule),
             Box::new(FxModule),
