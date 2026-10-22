@@ -244,6 +244,114 @@ impl Default for Registry {
     }
 }
 
+/// Default command descriptors for the connected apps API (#79).
+/// These descriptors define the HTTP/MCP/CLI surfaces for entries and reports.
+#[must_use]
+pub fn default_commands() -> Vec<CommandDescriptor> {
+    vec![
+        // Entries commands
+        CommandDescriptor {
+            name: "entries.post".to_string(),
+            tier: "User".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "POST".to_string(),
+            http_path: "/v1/entries".to_string(),
+            cli: "ledgers entries post".to_string(),
+            mcp: Some("entries_post".to_string()),
+            curl: "curl -X POST \"$LEDGERS_URL/v1/entries\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        CommandDescriptor {
+            name: "entries.reverse".to_string(),
+            tier: "User".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "POST".to_string(),
+            http_path: "/v1/entries/{external_id}/reverse".to_string(),
+            cli: "ledgers entries reverse".to_string(),
+            mcp: Some("entries_reverse".to_string()),
+            curl: "curl -X POST \"$LEDGERS_URL/v1/entries/{external_id}/reverse\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        CommandDescriptor {
+            name: "entries.list".to_string(),
+            tier: "Read".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "GET".to_string(),
+            http_path: "/v1/entries".to_string(),
+            cli: "ledgers entries list".to_string(),
+            mcp: Some("entries_list".to_string()),
+            curl: "curl -X GET \"$LEDGERS_URL/v1/entries\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        // Reports commands
+        CommandDescriptor {
+            name: "reports.trial_balance".to_string(),
+            tier: "Read".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "GET".to_string(),
+            http_path: "/v1/reports/trial-balance".to_string(),
+            cli: "ledgers reports trial-balance".to_string(),
+            mcp: Some("reports_trial_balance".to_string()),
+            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/trial-balance\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        CommandDescriptor {
+            name: "reports.profit_and_loss".to_string(),
+            tier: "Read".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "GET".to_string(),
+            http_path: "/v1/reports/p-and-l".to_string(),
+            cli: "ledgers reports p-and-l".to_string(),
+            mcp: Some("reports_profit_and_loss".to_string()),
+            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/p-and-l\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        CommandDescriptor {
+            name: "reports.balance_sheet".to_string(),
+            tier: "Read".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "GET".to_string(),
+            http_path: "/v1/reports/balance-sheet".to_string(),
+            cli: "ledgers reports balance-sheet".to_string(),
+            mcp: Some("reports_balance_sheet".to_string()),
+            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+        CommandDescriptor {
+            name: "reports.account_balance_by_dimension".to_string(),
+            tier: "Read".to_string(),
+            human_only: false,
+            supports_dry_run: false,
+            idempotent: true,
+            http_method: "GET".to_string(),
+            http_path: "/v1/reports/account-balance-by-dimension".to_string(),
+            cli: "ledgers reports account-balance-by-dimension".to_string(),
+            mcp: Some("reports_account_balance_by_dimension".to_string()),
+            curl: "curl -X GET \"$LEDGERS_URL/v1/reports/account-balance-by-dimension\" -H \"Authorization: Bearer $LEDGERS_KEY\"".to_string(),
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -238,6 +238,8 @@ fn the_entry(journal_id: &str) -> Entry {
             base_currency: Currency::from_code("EUR").expect("EUR"),
             description: "Concurrency post".to_owned(),
             source_documents: Vec::new(),
+            external_id: None,
+            source_app: None,
             reverses: None,
             lines: vec![line("1010", Side::Debit), line("4000", Side::Credit)],
         },
