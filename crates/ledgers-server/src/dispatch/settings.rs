@@ -38,6 +38,9 @@ pub const REQUEST_TTL_KEY: &str = "approvals.request_ttl_hours";
 /// Audit events a page returns when the caller names no limit, and the cap.
 const DEFAULT_AUDIT_LIMIT: u32 = 50;
 const MAX_AUDIT_LIMIT: u32 = 200;
+/// The largest sequence number a cursor may name. A D1 bind takes an integer
+/// only as a JavaScript number, so anything past 2^53 - 1 fails serialization.
+const MAX_CURSOR_SEQ: i64 = super::D1_SAFE_INTEGER_MAX;
 /// Rows the audit read fetches per query while it scans for matches.
 const AUDIT_CHUNK: usize = 200;
 /// How many chunks one audit page may scan before it returns a cursor.
@@ -1216,19 +1219,24 @@ impl Command for AuditList {
             .limit
             .unwrap_or(DEFAULT_AUDIT_LIMIT)
             .clamp(1, MAX_AUDIT_LIMIT) as usize;
-        let mut cursor = input.before_seq.unwrap_or(i64::MAX);
+        // The scan position: `None` until the first row is read, unless the
+        // caller named a cursor. The first page has no cursor, so it binds no
+        // sequence number at all (a sentinel such as `i64::MAX` cannot be bound
+        // on D1).
+        let mut cursor = input.before_seq;
         let mut events = Vec::new();
         let mut exhausted = false;
         let mut chunks = 0;
         while events.len() < limit && chunks < AUDIT_MAX_CHUNKS {
             chunks += 1;
             let mut sql = String::from(
-                "SELECT seq, payload, created_at FROM audit_event WHERE company_id = ? AND seq < ?",
+                "SELECT seq, payload, created_at FROM audit_event WHERE company_id = ?",
             );
-            let mut values = vec![
-                SeaValue::from(ctx.company_id.as_str()),
-                SeaValue::BigInt(Some(cursor)),
-            ];
+            let mut values = vec![SeaValue::from(ctx.company_id.as_str())];
+            if let Some(before) = cursor {
+                sql.push_str(" AND seq < ?");
+                values.push(SeaValue::BigInt(Some(before)));
+            }
             if let Some(from) = &filters.from {
                 sql.push_str(" AND created_at >= ?");
                 values.push(SeaValue::from(from.as_str()));
@@ -1252,7 +1260,7 @@ impl Command for AuditList {
             let fetched = rows.rows.len();
             for row in &rows.rows {
                 let seq = row.get::<i64>("seq").unwrap_or(0);
-                cursor = seq;
+                cursor = Some(seq);
                 let payload = row.get::<String>("payload").unwrap_or_default();
                 let event: AuditEvent = serde_json::from_str(&payload).map_err(|err| {
                     CommandError::Database(DbError::Query(format!(
@@ -1273,7 +1281,7 @@ impl Command for AuditList {
         }
         // The cursor is the scan position, not the last match: a page that scanned
         // its whole budget without a match still tells the caller where to go on.
-        let next_before_seq = if exhausted { None } else { Some(cursor) };
+        let next_before_seq = if exhausted { None } else { cursor };
         Ok(Plan::with_output(AuditListOutput {
             events,
             next_before_seq,
@@ -1343,6 +1351,13 @@ fn audit_filters(input: &AuditListInput) -> Result<AuditFilters, CommandError> {
             )));
         }
     };
+    if let Some(before) = input.before_seq
+        && !(0..=MAX_CURSOR_SEQ).contains(&before)
+    {
+        return Err(CommandError::InvalidInput(format!(
+            "before_seq must be between 0 and {MAX_CURSOR_SEQ}, got {before}"
+        )));
+    }
     let from = match input.from.as_deref() {
         None | Some("") => None,
         Some(text) => Some(format!("{}T00:00:00", date(text)?)),

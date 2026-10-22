@@ -796,6 +796,15 @@ button.legend-item:hover { border-color: var(--rule); }
 .pp-month.edge { background: var(--agent); color: var(--bg); font-weight: 600; }
 .pp-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .pp-summary { font-size: 13px; color: var(--muted); min-width: 0; }
+/* Single-day picker (the audit filters): the period picker's trigger and popover, one month of days. */
+.dp { display: block; }
+.dp .pp-trigger { width: 100%; max-width: none; }
+.dp-title { text-align: center; text-transform: capitalize; }
+.dp-week, .dp-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.dp-week { font-size: 12px; color: var(--muted); text-align: center; }
+.dp-days { font-variant-numeric: tabular-nums; }
+.dp-blank { min-height: 34px; }
+.dp-day { color: var(--text-2); }
 
 @media (max-width: 860px) {
   .pp-label { display: none; }

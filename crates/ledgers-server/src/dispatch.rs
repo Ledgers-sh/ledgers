@@ -71,6 +71,12 @@ pub const DEV_COMPANY_ID: &str = "01DEVCOMPANY0000000000000A";
 pub const DEV_JOURNAL_ID: &str = "general";
 /// The owner recorded on dev bootstrap audit events and dev keys.
 const DEV_OWNER: &str = "dev-owner";
+/// The largest integer a D1 bind can take: 2^53 - 1, the JavaScript safe
+/// integer. The Cloudflare runtime binds an `i64` through `serde_wasm_bindgen`,
+/// which refuses anything outside this range ("wasm-bindgen serialization
+/// error"), so a query that binds `i64::MAX` fails on Workers while the same
+/// query runs under SQLite. Bind a value from this range or leave the clause out.
+pub const D1_SAFE_INTEGER_MAX: i64 = (1 << 53) - 1;
 /// The table the harness `ApiKeys` store keeps key hashes in.
 pub const API_KEYS_TABLE: &str = "api_keys";
 /// Chart tags whose accounts only a person may move money through: an
