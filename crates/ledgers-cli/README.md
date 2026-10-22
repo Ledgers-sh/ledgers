@@ -15,21 +15,28 @@ cargo install ledgers-cli
 Every command in the registry is available as a CLI subcommand. For example:
 
 ```bash
-ledgers --url http://localhost:3000 --key $LEDGERS_KEY bills match \
-  --input '{"bill_id": "123", ...}'
+export LEDGERS_API_KEY=...   # or a profile key reference, see below
+ledgers --url http://localhost:3000 entries list
 
-ledgers --profile production bills match \
-  --input @request.json
+ledgers --profile production entries reverse EXT-42 --input '{"reason": "typo"}'
 
-ledgers --profile prod bills match \
-  --dry-run --input @request.json
+ledgers --profile production entries post --input @request.json --dry-run
 ```
 
+Each command takes its path arguments positionally (`entries reverse EXT-42`),
+its whole input as `--input <JSON|@FILE|->`, and one `--<field>` flag per input
+field of its schema (`--bill-id B-1`). `--input` and the flags can be combined;
+a flag wins over the same key in `--input`. `--help` on any command shows its
+HTTP route, tier and the fields it takes.
+
 Global flags:
-- `--json` — output machine JSON (default: human-readable)
+- `--json` — machine-readable output on stdout for every outcome, including
+  approvals, denials and errors (see below)
 - `--profile <NAME>` — select a named profile
-- `--url <URL>` — server URL (overrides profile)
-- `--key <KEY>` — API key (overrides profile)
+- `--url <URL>` — server URL (overrides `LEDGERS_URL` and the profile)
+
+`--dry-run` is offered only on commands that support it. It previews the
+command and its policy decision and writes nothing.
 
 ### Start the server
 
@@ -51,35 +58,42 @@ ledgers completions zsh | sudo tee /usr/share/zsh/site-functions/_ledgers
 
 ## Profiles and Authentication
 
-Configuration file: `$LEDGERS_CONFIG_DIR/config.toml` or `$XDG_CONFIG_HOME/ledgers/config.toml` or `~/.config/ledgers/config.toml`.
+Configuration file: `$LEDGERS_CONFIG_DIR/config.toml`, or `~/.config/ledgers/config.toml`.
 
 ```toml
 [profiles.default]
 url = "http://localhost:3000"
-key = "keychain"  # stored in OS keychain, or use "env:VAR_NAME"
+key = "keychain"  # the OS keychain entry for this profile, or "env:VAR_NAME"
 
 [profiles.production]
 url = "https://ledgers.example.com"
 key = "env:PROD_LEDGERS_KEY"
 ```
 
-Profile selection priority:
-1. `--profile` flag
-2. `LEDGERS_PROFILE` environment variable
-3. `default` profile in config
+The server URL comes from `--url`, then `LEDGERS_URL`, then the profile.
 
-Environment variable overrides:
-- `LEDGERS_URL` — server URL (literal, not a reference)
-- `LEDGERS_KEY` — API key (literal, not a reference)
+The API key comes from `LEDGERS_API_KEY` if it is set. Otherwise it comes from the
+profile's key reference:
+- `keychain` reads the OS keychain item with service `ledgers` and account = the
+  profile name. On macOS, create it with
+  `security add-generic-password -s ledgers -a default -w` (use your profile name for `-a`).
+- `env:VAR_NAME` reads that environment variable.
 
-**Security:** Never store literal API keys in the config file. Use the OS keychain (`keychain`) or environment variables (`env:VAR_NAME`).
+A literal key in the config file is rejected when the file is read, and the error
+does not print the key. There is no `--key` flag, so a key never appears in shell
+history.
+
+Profile selection: `--profile`, then `LEDGERS_PROFILE`, then `default`.
+
+**Security:** keys are never written to the config file.
 
 ## Exit Codes
 
-- `0` — Success
-- `1` — Error (network, server 5xx, invalid input, authentication, etc.)
-- `2` — Needs approval (approval URL printed to stdout)
-- `3` — Denied by policy
+- `0` — Success, or a dry run
+- `1` — Any other error (network, server error, invalid input, missing key or URL)
+- `2` — Needs approval. The approval URL and ID are printed to stdout (`--json`: the
+  `approval` object).
+- `3` — Denied by policy (HTTP 403). The reason is printed to stderr (`--json`: stdout).
 
 ## Architecture
 
@@ -121,12 +135,14 @@ Run the test suite:
 cargo test -p ledgers-cli
 ```
 
-Tests include:
-- Help text snapshots (to detect breaking changes)
-- Exit code verification
-- Output schema validation
+Tests (in `tests/cli_suite`) cover:
+- request mapping for every registry command (method, path, query, body)
+- exit codes 0, 1, 2 and 3, and `--json` output, against a local mock server
+- profiles: key references, literal-key rejection, URL and key precedence
+- help-text snapshots for the root, every built-in, every group and every command
 
-## Future Work
+## Not yet
 
-- `ledgers login` — device flow authentication
-- `ledgers mcp` — run as an MCP server for agent integration
+- `ledgers login` (device flow) and commands that write keychain entries. Until then,
+  store a key with the `security` command above or use `LEDGERS_API_KEY`.
+- Validating command output against its output schema.

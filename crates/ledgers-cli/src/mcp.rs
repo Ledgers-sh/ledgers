@@ -8,7 +8,10 @@ use std::io::{self, BufRead, BufReader, Write};
 /// Runs the MCP stdio relay.
 ///
 /// Reads newline-delimited JSON-RPC messages from stdin, POSTs each to the server's
-/// `/v1/mcp` endpoint with the agent key as Bearer token, and writes responses to stdout.
+/// `/v1/mcp` endpoint with the API key as Bearer token, and writes responses to stdout.
+///
+/// # Errors
+/// Returns an error if stdin cannot be read or stdout cannot be written.
 pub async fn run_mcp(session: Session, read_only: bool) -> Result<(), CliError> {
     let client = Client::new();
     let mut url = session.url.clone();
@@ -40,7 +43,7 @@ pub async fn run_mcp(session: Session, read_only: bool) -> Result<(), CliError> 
                         "message": "Parse error"
                     }
                 });
-                writeln!(stdout, "{}", error_response)
+                writeln!(stdout, "{error_response}")
                     .map_err(|e| CliError::Internal(format!("stdout error: {e}")))?;
                 stdout
                     .flush()
@@ -75,11 +78,11 @@ pub async fn run_mcp(session: Session, read_only: bool) -> Result<(), CliError> 
                             "message": format!("HTTP error: {}", e)
                         }
                     });
-                    writeln!(stdout, "{}", error_response)
+                    writeln!(stdout, "{error_response}")
                         .map_err(|e| CliError::Internal(format!("stdout error: {e}")))?;
                 } else {
                     // Notification: log to stderr only
-                    eprintln!("HTTP error: {}", e);
+                    eprintln!("HTTP error: {e}");
                 }
 
                 stdout

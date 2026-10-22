@@ -77,12 +77,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
-
-[[package]]
 name = "arc-swap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2020,10 +2014,11 @@ dependencies = [
 name = "ledgers-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "async-trait",
  "clap",
  "clap_complete",
+ "cratefield-adapter-sqlite",
+ "cratefield-core",
+ "cratefield-runtime-native",
  "insta",
  "keyring",
  "ledgers-commands",
@@ -2036,8 +2031,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
