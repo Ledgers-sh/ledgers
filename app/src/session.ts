@@ -6,9 +6,11 @@
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 import type { ClientConfig } from './api/client';
+import { defaultServerUrl } from './api/config';
 import { currentPeriod, isPeriod } from './lib/period';
 
-export const DEFAULT_SERVER_URL = 'http://127.0.0.1:3000';
+/** The server origin the Connect screen starts from: VITE_LEDGERS_API at build time, else the local server. */
+export const DEFAULT_SERVER_URL = defaultServerUrl(import.meta.env.VITE_LEDGERS_API);
 
 export interface Credentials {
   baseUrl: string;

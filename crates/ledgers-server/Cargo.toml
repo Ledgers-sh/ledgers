@@ -55,6 +55,7 @@ getrandom = { version = "0.4.3", default-features = false, features = ["wasm_js"
 getrandom_02 = { package = "getrandom", version = "0.2", default-features = false, features = ["js"] }
 
 [dev-dependencies]
+rusqlite = "0.40"
 cratefield-testing = { workspace = true, features = ["harness"] }
 pollster = { workspace = true }
 serde_json = { workspace = true }

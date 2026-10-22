@@ -139,6 +139,16 @@ function problem(status: number, title: string, detail?: string): Reply {
   return { status, problem: true, body: { type: 'about:blank', title, status, detail } };
 }
 
+/** The operations this fake serves, in the shape the server's OpenAPI document uses. */
+const OPENAPI = {
+  openapi: '3.1.0',
+  paths: {
+    '/v1/accounts': { get: { operationId: 'accounts_list' } },
+    '/v1/entries': { get: { operationId: 'entries_list' }, post: { operationId: 'entries_post' } },
+    '/v1/bills/{id}/match': { post: { operationId: 'bills_match' } },
+  },
+};
+
 const state: MockApi = { entries: [], posts: [], reversals: [] };
 let nextNumber = 1;
 
@@ -277,6 +287,12 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
         if (req.method === 'OPTIONS') {
           res.writeHead(204, headers);
           res.end();
+          return;
+        }
+        if (req.method === 'GET' && new URL(req.url ?? '/', API_ORIGIN).pathname === '/v1/openapi') {
+          // The public document the app reads to decide which pages to show.
+          res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(OPENAPI));
           return;
         }
         if (req.headers.authorization !== `Bearer ${API_KEY}`) {

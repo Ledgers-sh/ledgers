@@ -118,7 +118,7 @@ async fn dispatch(
 ) -> Result<ExitCode> {
     match matches.subcommand() {
         Some(("serve", _)) => {
-            serve::serve(registry).await?;
+            serve::serve().await?;
             Ok(ExitCode::Ok)
         }
         Some(("completions", sub)) => {

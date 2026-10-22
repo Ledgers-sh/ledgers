@@ -1,0 +1,11 @@
+{
+  // Cloudflare Pages project for the staging web app (app.ledgers.sh staging).
+  // Build first (`npm run build` writes app/dist), then deploy the folder:
+  //   npx wrangler@4.148.0 pages deploy dist --project-name ledgers-app-staging
+  // The server the build talks to is fixed at build time by VITE_LEDGERS_API
+  // (docs/deploy.md). Nothing here creates the project; that is a manual step.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ledgers-app-staging",
+  "pages_build_output_dir": "dist",
+  "compatibility_date": "2026-10-01"
+}
