@@ -1,0 +1,489 @@
+# Dutch chart of accounts for Eenmanszaak (sole trader), built on the Referentie
+# Grootboekschema (RGS) version 3.7, MKB tab.
+#
+# Sources (checked 2026-10-23):
+#   RGS 3.7 definitive version (Excel, Taakgroep RGS, released 2025-03-03):
+#     https://www.referentiegrootboekschema.nl/definitieve-versie-rgs-37
+#   The RGS referentienummers (the 'rgs-' tags below) are identifiers, not text.
+#   Account names are ours, written in Dutch and translated in templates/i18n/.
+#   RGS 3.7 MKB labels used for the BTW boxes: rubriek 1a-1e, 2a, 3b, 4a, 4b, 5b, 5d
+#   (quoted in the RGS names of codes 8001060, 1205010, 9101000 and others).
+#
+# Each postable account carries one 'rgs-<referentienummer>' tag. Several accounts
+# may share one code where RGS has no separate line (for example the rounding
+# account and the overhead account both sit on 4215010, and both fx lines on
+# 8407010); the tag then records the RGS line the account reports under.
+#
+# TODO: the RGS line for accumulated depreciation (negative asset) is not modelled;
+#   the asset accounts carry net book value only.
+# TODO: the company type (eenmanszaak or BV) is chosen in Settings; the VOF chart is
+#   not built.
+# TODO: the RGS code for income tax of the owner (inkomstenbelasting) is private and
+#   is not in the company chart.
+
+
+id = "nl-rgs-ez"
+name = "template.nl_rgs_ez.name"
+version = 1
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1000"
+name = "account.nl_rgs.vlottende_activa"
+type = "asset"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1010"
+name = "account.nl_rgs.kas"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1001010", "cash"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1020"
+name = "account.nl_rgs.bank"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1002010", "bank"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1030"
+name = "account.nl_rgs.debiteuren"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1101010", "ar"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1031"
+name = "account.nl_rgs.voorziening_oninbaar"
+type = "asset"
+normal = "credit"
+parent = "1000"
+tags = ["rgs-1101030"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1040"
+name = "account.nl_rgs.voorraad_handelsgoederen"
+type = "asset"
+parent = "1000"
+tags = ["rgs-3001010", "inventory"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1050"
+name = "account.nl_rgs.voorbelasting"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1102010", "vat-input"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1060"
+name = "account.nl_rgs.overige_vorderingen"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1103190"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1070"
+name = "account.nl_rgs.overlopende_activa"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1104060"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1080"
+name = "account.nl_rgs.tussenrekening"
+type = "asset"
+parent = "1000"
+tags = ["rgs-1106000", "suspense"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1500"
+name = "account.nl_rgs.vaste_activa"
+type = "asset"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1510"
+name = "account.nl_rgs.inventaris"
+type = "asset"
+parent = "1500"
+tags = ["rgs-0215000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1520"
+name = "account.nl_rgs.auto"
+type = "asset"
+parent = "1500"
+tags = ["rgs-0213000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "1530"
+name = "account.nl_rgs.machines"
+type = "asset"
+parent = "1500"
+tags = ["rgs-0210000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2000"
+name = "account.nl_rgs.kortlopende_schulden"
+type = "liability"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2010"
+name = "account.nl_rgs.crediteuren"
+type = "liability"
+parent = "2000"
+tags = ["rgs-1203010", "ap"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2020"
+name = "account.nl_rgs.af_te_dragen_omzetbelasting"
+type = "liability"
+parent = "2000"
+tags = ["rgs-1205040", "vat-output"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2030"
+name = "account.nl_rgs.loonheffing"
+type = "liability"
+parent = "2000"
+tags = ["rgs-1205009"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2040"
+name = "account.nl_rgs.nog_te_betalen"
+type = "liability"
+parent = "2000"
+tags = ["rgs-1210020"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "2050"
+name = "account.nl_rgs.bankkrediet"
+type = "liability"
+parent = "2000"
+tags = ["rgs-1201080"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "3000"
+name = "account.nl_rgs.eigen_vermogen_groep"
+type = "equity"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "3010"
+name = "account.nl_rgs.eigen_vermogen"
+type = "equity"
+parent = "3000"
+tags = ["rgs-509000", "retained-earnings"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "3020"
+name = "account.nl_rgs.prive_stortingen"
+type = "equity"
+parent = "3000"
+tags = ["rgs-509030"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "3030"
+name = "account.nl_rgs.prive_opnamen"
+type = "equity"
+normal = "debit"
+parent = "3000"
+tags = ["rgs-509040"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4000"
+name = "account.nl_rgs.opbrengsten"
+type = "income"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4010"
+name = "account.nl_rgs.omzet_handelsgoederen"
+type = "income"
+parent = "4000"
+tags = ["rgs-8002000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4020"
+name = "account.nl_rgs.omzet_diensten"
+type = "income"
+parent = "4000"
+tags = ["rgs-8003000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4030"
+name = "account.nl_rgs.omzet_geproduceerde"
+type = "income"
+parent = "4000"
+tags = ["rgs-8001000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4040"
+name = "account.nl_rgs.overige_opbrengsten"
+type = "income"
+parent = "4000"
+tags = ["rgs-8213000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4050"
+name = "account.nl_rgs.rentebaten"
+type = "income"
+parent = "4000"
+tags = ["rgs-8004060"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4060"
+name = "account.nl_rgs.omzetbonificaties"
+type = "income"
+normal = "debit"
+parent = "4000"
+tags = ["rgs-8006020"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "4070"
+name = "account.nl_rgs.koers_positief"
+type = "income"
+parent = "4000"
+tags = ["rgs-8407010", "fx-gain"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5000"
+name = "account.nl_rgs.kosten"
+type = "expense"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5010"
+name = "account.nl_rgs.inkoopwaarde"
+type = "expense"
+parent = "5000"
+tags = ["rgs-7005010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5020"
+name = "account.nl_rgs.kosten_grondstoffen"
+type = "expense"
+parent = "5000"
+tags = ["rgs-7001010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5030"
+name = "account.nl_rgs.uitbesteed_werk"
+type = "expense"
+parent = "5000"
+tags = ["rgs-7003010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5100"
+name = "account.nl_rgs.lonen"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4001040"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5110"
+name = "account.nl_rgs.sociale_lasten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4002010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5120"
+name = "account.nl_rgs.pensioenpremies"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4003010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5200"
+name = "account.nl_rgs.huur"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4201040"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5210"
+name = "account.nl_rgs.energie"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4202000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5220"
+name = "account.nl_rgs.verzekeringen"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4208000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5230"
+name = "account.nl_rgs.reclame"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4203010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5240"
+name = "account.nl_rgs.autokosten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4204000"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5250"
+name = "account.nl_rgs.kantoorkosten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4206010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5260"
+name = "account.nl_rgs.telefoon"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4206030"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5270"
+name = "account.nl_rgs.accountant"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4209005"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5280"
+name = "account.nl_rgs.bankkosten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4210040"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5290"
+name = "account.nl_rgs.contributies"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4206070"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5300"
+name = "account.nl_rgs.representatie"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4203060"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5310"
+name = "account.nl_rgs.verkoopkosten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-8080100"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5320"
+name = "account.nl_rgs.overige_kosten"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4215010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5330"
+name = "account.nl_rgs.afrondingen"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4215010", "rounding"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5400"
+name = "account.nl_rgs.afschr_inventaris"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4102090"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5410"
+name = "account.nl_rgs.afschr_auto"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4102070"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5420"
+name = "account.nl_rgs.afschr_machines"
+type = "expense"
+parent = "5000"
+tags = ["rgs-4102050"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5600"
+name = "account.nl_rgs.financieel"
+type = "expense"
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5610"
+name = "account.nl_rgs.rentelasten"
+type = "expense"
+parent = "5600"
+tags = ["rgs-7004010"]
+
+# -------------------------------------------------------------------------
+[[accounts]]
+number = "5620"
+name = "account.nl_rgs.koers_negatief"
+type = "expense"
+parent = "5600"
+tags = ["rgs-8407010", "fx-loss"]
+

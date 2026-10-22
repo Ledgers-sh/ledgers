@@ -94,7 +94,7 @@ pub use commands::ImportReport;
 pub use entry::{Entry, EntryDraft, Fx, JournalError, Line, Side};
 pub use error::AccountsError;
 pub use fiscal::{FiscalYear, FiscalYearSpec};
-pub use i18n::{I18N_DE_TOML, I18N_EN_TOML, I18N_ID_TOML};
+pub use i18n::{I18N_DE_TOML, I18N_EN_TOML, I18N_ID_TOML, I18N_NL_TOML};
 pub use journal::{Journal, JournalDraft, JournalKind};
 pub use journal_port::{AccountBalance, BoxFuture, Journal as JournalPort, NewEntry, NewEntryLine};
 pub use ledger_journal::EntryJournal;
@@ -122,6 +122,17 @@ pub const GENERIC_SME_TOML: &str = include_str!(concat!(
 pub const DE_HGB_TOML: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../templates/de-hgb.toml"
+));
+
+/// The Dutch sole-trader chart on RGS 3.7 (`templates/nl-rgs-ez.toml`).
+pub const NL_RGS_EZ_TOML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../templates/nl-rgs-ez.toml"
+));
+/// The Dutch private-company chart on RGS 3.7 (`templates/nl-rgs-bv.toml`).
+pub const NL_RGS_BV_TOML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../templates/nl-rgs-bv.toml"
 ));
 
 /// The chart, fiscal-year and journal migrations, in apply order: the
@@ -250,6 +261,22 @@ pub fn de_hgb_template() -> Result<chart::ChartTemplate, error::AccountsError> {
     chart::parse_chart(DE_HGB_TOML)
 }
 
+/// The bundled Dutch sole-trader chart on RGS 3.7, parsed.
+///
+/// # Errors
+/// [`AccountsError::Template`] when the file no longer parses.
+pub fn nl_rgs_ez_template() -> Result<chart::ChartTemplate, error::AccountsError> {
+    chart::parse_chart(NL_RGS_EZ_TOML)
+}
+
+/// The bundled Dutch private-company chart on RGS 3.7, parsed.
+///
+/// # Errors
+/// [`AccountsError::Template`] when the file no longer parses.
+pub fn nl_rgs_bv_template() -> Result<chart::ChartTemplate, error::AccountsError> {
+    chart::parse_chart(NL_RGS_BV_TOML)
+}
+
 /// The bundled SKR03 and SKR04 number mappings, parsed. Validation
 /// against the German chart is [`mapping::NumberMapping::validate_against`],
 /// run by the integration tests for the bundled pair.
@@ -316,6 +343,9 @@ mod tests {
             ("i18n/en.toml", I18N_EN_TOML),
             ("i18n/de.toml", I18N_DE_TOML),
             ("i18n/id.toml", I18N_ID_TOML),
+            ("i18n/nl.toml", I18N_NL_TOML),
+            ("nl-rgs-ez.toml", NL_RGS_EZ_TOML),
+            ("nl-rgs-bv.toml", NL_RGS_BV_TOML),
         ] {
             assert!(!text.trim().is_empty(), "{name} is empty");
         }
