@@ -24,7 +24,7 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 │  • Policy engine (tiers, limits, risk flags)        │
 │  • Approval service (passkeys)                      │
 │  • Rate limiter per agent key (Workers: Cloudflare   │
-│    Rate Limiting; native: only if configured)       │
+│    Rate Limiting; native: in-process, per process)  │
 │  • Hash-chained audit log (append-only)             │
 └──────┬──────────────────────┬──────────────────┬────┘
        │                      │                  │
@@ -60,7 +60,7 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 | Tampering | Hmac or request signing | Not yet wired (planned M2) |
 | Repudiation | Every command in audit with principal and timestamp | Verified existing (ledgers-audit) |
 | Elevation | Policy enforced server-side, never delegated to agent/MCP/CLI | Implemented (decide.rs `PolicyChange` deny; decide.rs check order 1–8) |
-| DoS | Rate limiter per agent key (rate_limiting.rs, read per request from `Deps`); limiter error or refusal returns 429 | Implemented on Workers (RATE_LIMITER binding). Native server: active only when a limiter is configured on the `Native` runtime (none by default, so agent keys are not throttled there yet) |
+| DoS | Rate limiter per agent key, checked before dispatch on every HTTP route and MCP tool call (rate_limiting.rs `admit`); a refusal or limiter failure returns 429 with `Retry-After` | Implemented on both runtimes. Workers: the RATE_LIMITER binding. Native: the in-process fixed window below, on by default (`LEDGERS_RATE_LIMIT_PER_MIN`, default 100 per key per minute) |
 | Disclosure | Document text never logged (only hash); approval preview is frozen JSON | Implemented |
 
 ### Approval cards & passkey step-up
@@ -78,6 +78,9 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 | Elevation | Agents cannot change policy (PolicyChange always denied); humans can | Implemented (decide.rs line 165–172) |
 | Resource exhaustion | Per-day limits enforced as guard statements (ledgers-db guard patterns) | Verified existing |
 | Weak authentication | Keys expiry and revocation; tier-based tiers (Read, Draft, PostWithinLimits); per-currency limits | Implemented |
+| Elevation | Agents cannot list, create or revoke agent keys (`keys.*` are human-only: 403, and no MCP tool); a person creates keys in the app, and the token is shown once | Implemented (ledgers-server agent_keys.rs, dispatch.rs `person_id`) |
+| Repudiation | Key creation and revocation are audited with the owner as actor and the public prefix (never the secret) | Implemented (ledgers-auth `AgentKeys`) |
+| Disclosure | Key tokens are never logged, never audited and never echoed in an error; the list shows the prefix only | Implemented (tests: `the_secret_never_reaches_the_logs_the_audit_trail_or_an_error`) |
 
 ### Storage & audit
 
@@ -105,6 +108,35 @@ This document covers the agent-safe core (M1) before bills, extraction, or payme
 - **Model mis-extraction**: the LLM may hallucinate fields; mitigation is exact decimal-string parsing and schema validation
 - **Insider**: owner has full approval authority and can read all data; no cryptographic boundary between persons and keys
 - **Passkey compromise**: if credential keys leak, high-risk approvals can be forged; recovery is to revoke keys and require a reset
+
+## Agent-key rate limiting
+
+Every HTTP route and every MCP tool call made with an agent key is admitted
+through the limiter before the command runs. Person sessions are never limited.
+
+- **Workers:** the `RATE_LIMITER` binding (`wrangler.toml`, 100 requests per
+  60 seconds). The binding reports no pause, so a refusal's `Retry-After` is the
+  binding's period, 60 seconds.
+- **Native (`ledgers serve`, `ledgers-server`):** an in-process fixed window per
+  key. `LEDGERS_RATE_LIMIT_PER_MIN` sets the allowance (default `100`, a positive
+  integer). The window starts at a key's first request and resets when it ends,
+  and `Retry-After` is the time left in it, rounded up to whole seconds.
+  **The count is per process.** Two processes behind one database each allow the
+  full amount, so a deployment that runs several native processes needs a shared
+  limiter (the Redis `RateLimiter` from the harness runtime) to hold the limit
+  across them.
+- **Limiter failure** denies the request with 429 and `Retry-After: 60`
+  (fail closed).
+
+## Agent key lifecycle
+
+People create, list and revoke agent keys (`keys.create`, `keys.list`,
+`keys.revoke`, the app's Settings → Agent keys). Each key has a name, a tier
+(`read`, `draft` or `post-within-limits`) and per-currency limits. The token is
+returned once, at creation; it is not stored, and only its public prefix
+(`lk_live_<id>`) is shown afterwards. Revocation is immediate: the next HTTP
+request or MCP tool call with that key is refused. `last_used_at` is written at
+most once a minute per key, so a busy key does not write on every request.
 
 ## How to add a corpus case
 

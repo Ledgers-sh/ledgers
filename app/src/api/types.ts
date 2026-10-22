@@ -160,3 +160,47 @@ export interface AccountBalanceByDimensionOutput {
 
 /** bills.match is not in the registry yet; the response is shown as returned. */
 export type BillsMatchOutput = Record<string, unknown>;
+
+/** One currency's limits on an agent key, as canonical major-unit strings ("1000.00"). */
+export interface AgentKeyLimit {
+  per_entry: string;
+  per_day: string;
+}
+
+/** An agent key as `keys.list` and `keys.create` return it. Never carries the secret. */
+export interface AgentKeyView {
+  id: string;
+  name: string;
+  /** The public prefix, `lk_live_<id>`. */
+  prefix: string | null;
+  tier: 'read' | 'draft' | 'post-within-limits' | string;
+  limits: Record<string, AgentKeyLimit>;
+  created_at: string;
+  created_by: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** GET /v1/keys (keys.list). */
+export interface KeysListOutput {
+  keys: AgentKeyView[];
+}
+
+/** POST /v1/keys (keys.create). */
+export interface KeysCreateInput {
+  name: string;
+  tier: string;
+  limits: Record<string, AgentKeyLimit>;
+}
+
+/** The creation answer: the key, and its full token, which is shown once. */
+export interface KeysCreateOutput {
+  key: AgentKeyView;
+  token: string;
+}
+
+/** POST /v1/keys/{id}/revoke (keys.revoke). */
+export interface KeysRevokeOutput {
+  key: AgentKeyView;
+}
+

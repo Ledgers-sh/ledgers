@@ -378,6 +378,38 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
 }
 .link-button:focus-visible, .explainer summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+/* Settings and agent keys */
+.subnav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 0 20px; }
+.subnav a { padding: 10px 12px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.subnav a[aria-current='page'] { color: var(--text); border-bottom-color: var(--agent); }
+.settings-section { display: flex; flex-direction: column; gap: 16px; }
+.settings-section h2 { margin: 0; font-size: 20px; }
+.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.section-head p { margin: 6px 0 0; max-width: 60ch; }
+.small { font-size: 13px; }
+.status { font-size: 14px; white-space: nowrap; }
+.status.active { color: var(--agent); }
+.status.revoked { color: var(--danger); }
+.usage h3, .usage h4 { margin: 0 0 6px; font-size: 15px; }
+.usage h4 { margin-top: 14px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.snippets { display: grid; gap: 12px; }
+.snippet { margin: 0; padding: 12px 14px; background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-all; color: var(--text-2); }
+dialog.key-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.tiers { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.tiers legend, .limits legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.tier-option { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; }
+.tier-option input { margin-top: 4px; }
+.limits { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.limit-row { display: grid; grid-template-columns: 90px 1fr 1fr auto; gap: 10px; align-items: end; }
+.problem-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.secret-row { display: flex; gap: 8px; align-items: stretch; }
+.secret-row .secret { flex: 1; min-width: 0; }
+.secret { font-size: 13px; }
+@media (max-width: 640px) {
+  .limit-row { grid-template-columns: 1fr 1fr; }
+  .limit-row > button { grid-column: 1 / -1; justify-self: start; }
+  .secret-row { flex-direction: column; }
+}
 /* Approvals inbox (issue #33). Human actions are gold; what an agent asked for is agent blue. */
 .nav a .nav-count { margin-left: auto; }
 .bottom-nav a { position: relative; }

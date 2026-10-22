@@ -266,6 +266,100 @@ impl ServerDispatch {
     }
 }
 
+impl ServerDispatch {
+    /// The person behind a human-only command. An agent key answers 403
+    /// (`human-only`), an unknown or revoked credential 401, and a session
+    /// goes through the same origin, role and expiry checks as every command.
+    async fn person_id(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+    ) -> Result<String, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let principal = match presented
+            .ok_or(CommandError::Unauthenticated)
+            .map_err(fail)?
+        {
+            Presented::Bearer(token) => KeyStore {
+                db: Arc::clone(&deps.db),
+                clock: Arc::clone(&deps.clock),
+                company_id: self.company_id.clone(),
+            }
+            .authenticate(&token)
+            .await
+            .map_err(fail)?,
+            Presented::Session(session) => {
+                let id = session.id.clone();
+                SessionAuthenticator {
+                    db: Arc::clone(&deps.db),
+                    clock: Arc::clone(&deps.clock),
+                    app_origins: self.app_origins.clone(),
+                    presented: session,
+                }
+                .authenticate(&id)
+                .await
+                .map_err(fail)?
+            }
+        };
+        match principal {
+            Principal::Person { person_id } => Ok(person_id),
+            Principal::Agent { .. } => Err(fail(CommandError::HumanOnly)),
+        }
+    }
+
+    async fn keys_list(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        self.person_id(deps, presented, request_id).await?;
+        let keys = crate::agent_keys::list(deps, &self.company_id)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(crate::agent_keys::KeysListOutput { keys })
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
+    }
+
+    async fn keys_create(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let person = self.person_id(deps, presented, request_id).await?;
+        let input: crate::agent_keys::KeysCreateInput = serde_json::from_value(input)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        let output = crate::agent_keys::create(deps, &self.company_id, &person, &input)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(output)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
+    }
+
+    async fn keys_revoke(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let fail = |err: CommandError| err.to_problem().instance(request_id);
+        let person = self.person_id(deps, presented, request_id).await?;
+        let input: crate::agent_keys::KeysRevokeInput = serde_json::from_value(input)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+        let output = crate::agent_keys::revoke(deps, &self.company_id, &person, &input.id)
+            .await
+            .map_err(fail)?;
+        serde_json::to_value(output)
+            .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))
+    }
+}
+
 #[async_trait]
 impl Dispatch for ServerDispatch {
     async fn dispatch(
@@ -335,6 +429,9 @@ impl Dispatch for ServerDispatch {
                 )
                 .await
             }
+            "keys.list" => self.keys_list(deps, presented, request_id).await,
+            "keys.create" => self.keys_create(deps, presented, request_id, input).await,
+            "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
             other => Err(
                 Problem::validation_failed(format!("unknown command {other:?}"))
                     .instance(request_id),
@@ -374,10 +471,10 @@ impl Authenticator for Authn {
 /// Authenticates a bearer credential as an agent key: the harness `ApiKeys`
 /// verifies the secret (no caching, so a revoked key fails at once), and the
 /// key's policy row in `agent_key` gives its tier and limits.
-struct KeyStore {
-    db: Arc<dyn Database>,
-    clock: Arc<dyn Clock>,
-    company_id: String,
+pub(crate) struct KeyStore {
+    pub(crate) db: Arc<dyn Database>,
+    pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) company_id: String,
 }
 
 #[async_trait]
@@ -405,7 +502,7 @@ impl Authenticator for KeyStore {
 
 /// The harness API-key store on the Ledgers table, with the OS entropy
 /// source.
-fn api_keys(db: &Arc<dyn Database>, clock: &Arc<dyn Clock>) -> ApiKeys {
+pub(crate) fn api_keys(db: &Arc<dyn Database>, clock: &Arc<dyn Clock>) -> ApiKeys {
     ApiKeys::new(
         Arc::clone(db),
         Arc::clone(clock),
@@ -426,7 +523,7 @@ impl cratefield_core::RandomBytes for OsRandom {
     }
 }
 
-fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
+pub(crate) fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
     key.limits
         .iter()
         .try_fold(Limits::new(), |limits, (code, limit)| {
@@ -443,7 +540,7 @@ fn principal_limits(key: &AgentKey) -> Result<Limits, CommandError> {
 }
 
 /// Loads one agent key's policy row for `company_id`.
-async fn load_key(
+pub(crate) async fn load_key(
     db: &dyn Database,
     company_id: &str,
     key_id: &str,
@@ -516,25 +613,29 @@ pub async fn issue_key(
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
 ) -> Result<String, String> {
-    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits).await
+    issue_key_as(deps, company_id, label, DEV_OWNER, tier, limits)
+        .await
+        .map(|(_, token)| token)
 }
 
 /// [`issue_key`] with the owner recorded on the key and its audit events.
-async fn issue_key_as(
+/// Returns the new key's id (the policy row's id) and its secret, shown once.
+pub(crate) async fn issue_key_as(
     deps: &Deps,
     company_id: &str,
     label: &str,
     owner: &str,
     tier: Tier,
     limits: BTreeMap<String, CurrencyLimit>,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let key_id = deps.id_gen.ulid();
     let policy = agent_key_policy_statement(deps, company_id, &key_id, label, owner, tier, limits)?;
     deps.db
         .execute(&policy)
         .await
         .map_err(|err| format!("store key policy: {err}"))?;
-    mint_key(deps, company_id, &key_id, owner).await
+    let token = mint_key(deps, company_id, &key_id, owner).await?;
+    Ok((key_id, token))
 }
 
 /// The insert of an agent key's policy row, with the key's id and the time the
@@ -577,7 +678,7 @@ fn agent_key_policy_statement(
 
 /// Mints the secret for an agent key whose policy row exists, and returns it.
 /// The secret is written as the `ApiKeys` row and returned once.
-async fn mint_key(
+pub(crate) async fn mint_key(
     deps: &Deps,
     company_id: &str,
     key_id: &str,
@@ -913,6 +1014,27 @@ pub fn registry() -> Registry {
             (
                 schema_of::<PeriodInput>(),
                 schema_of::<TrialBalanceOutput>(),
+            ),
+        ),
+        (
+            "keys.list",
+            (
+                schema_of::<crate::agent_keys::KeysListInput>(),
+                schema_of::<crate::agent_keys::KeysListOutput>(),
+            ),
+        ),
+        (
+            "keys.create",
+            (
+                schema_of::<crate::agent_keys::KeysCreateInput>(),
+                schema_of::<crate::agent_keys::KeysCreateOutput>(),
+            ),
+        ),
+        (
+            "keys.revoke",
+            (
+                schema_of::<crate::agent_keys::KeysRevokeInput>(),
+                schema_of::<crate::agent_keys::KeysRevokeOutput>(),
             ),
         ),
     ]);

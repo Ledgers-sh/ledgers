@@ -73,6 +73,11 @@ impl Module for McpModule {
         DISPATCH_PORTS
     }
 
+    fn optional(&self) -> &'static [cratefield_core::Port] {
+        // The agent-key limiter, when the runtime provides one.
+        &[cratefield_core::Port::RateLimiter]
+    }
+
     fn router(&self, ctx: ModuleContext) -> axum::Router {
         let state = self.state.clone();
         let deps = Arc::new(
@@ -259,6 +264,13 @@ impl mcp::ToolCaller for ServerToolCaller {
         input: Value,
         _dry_run: bool,
     ) -> mcp::ToolOutcome {
+        let presented = self.credential.clone().map(Presented::Bearer);
+        if let Err(limited) =
+            crate::rate_limiting::admit(self.dispatch.as_ref(), &self.deps, presented.as_ref())
+                .await
+        {
+            return mcp::ToolOutcome::Failed(limited.problem().to_string());
+        }
         match self
             .dispatch
             .dispatch(
@@ -266,7 +278,7 @@ impl mcp::ToolCaller for ServerToolCaller {
                 &descriptor.name,
                 input,
                 &self.request_id,
-                self.credential.clone().map(Presented::Bearer),
+                presented,
             )
             .await
         {
