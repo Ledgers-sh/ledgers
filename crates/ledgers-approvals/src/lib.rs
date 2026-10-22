@@ -16,6 +16,7 @@ pub mod approval;
 pub mod config;
 pub mod error;
 pub mod module;
+pub mod notify;
 pub mod rules;
 pub mod service;
 pub mod stepup;
@@ -24,25 +25,38 @@ pub use approval::{ApprovalRequest, Status};
 pub use config::ApprovalConfig;
 pub use error::ApprovalError;
 pub use module::ApprovalsModule;
+pub use notify::{ApprovalEvent, ApprovalNotice, Notifiers, notice_statement};
 pub use rules::{ApprovalRules, OwnerApprovesAll, StepUp};
 pub use service::Approvals;
 pub use stepup::{AssertionVerifier, CredentialKeys, Es256Verifier, PasskeyProof};
 
-/// The migrations for the approvals module: nonce and approval request tables.
-pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+/// The migrations for the approvals module: nonce, approval request, and notification target tables.
+pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "approvals",
         include_str!("../migrations/sqlite/0001_approvals.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "approval_notify",
+        include_str!("../migrations/sqlite/0002_approval_notify.sql"),
+    ),
+];
 
 /// The Postgres migrations for the approvals module.
-pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "approvals",
         include_str!("../migrations/postgres/0001_approvals.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "approval_notify",
+        include_str!("../migrations/postgres/0002_approval_notify.sql"),
+    ),
+];
 
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);

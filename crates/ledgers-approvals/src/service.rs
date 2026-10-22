@@ -3,6 +3,7 @@
 use crate::approval::{ApprovalRequest, Status};
 use crate::config::ApprovalConfig;
 use crate::error::ApprovalError;
+use crate::notify::{ApprovalEvent, notice_statement};
 use crate::rules::{ApprovalRules, StepUp};
 use crate::stepup::{AssertionVerifier, CredentialKeys, PasskeyProof};
 use cratefield_core::{Database, Statement};
@@ -146,8 +147,17 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             ],
         );
 
+        // Create notification notice and enqueue it in the outbox
+        let notice_stmt = notice_statement(
+            &approval_id,
+            ApprovalEvent::Created,
+            &request,
+            counterparty,
+            now,
+        )?;
+
         self.db
-            .batch_atomic(&[insert_stmt])
+            .batch_atomic(&[insert_stmt, notice_stmt])
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
 
@@ -457,6 +467,16 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
         );
         approval_statements.extend(transition_stmts);
 
+        // Add notification notice for the decided event
+        let notice_stmt = notice_statement(
+            approval_id,
+            ApprovalEvent::Decided,
+            &request,
+            None,
+            &ctx.now,
+        )?;
+        approval_statements.push(notice_stmt);
+
         // 7. Run executor.run_approved with the approval statements
         let approval = Approval {
             approval_id: approval_id.to_string(),
@@ -576,6 +596,16 @@ impl<'db, R: ApprovalRules, V: AssertionVerifier, K: CredentialKeys> Approvals<'
             &ctx.now,
         );
         rejection_statements.extend(transition_stmts);
+
+        // Add notification notice for the decided event
+        let notice_stmt = notice_statement(
+            approval_id,
+            ApprovalEvent::Decided,
+            &request,
+            None,
+            &ctx.now,
+        )?;
+        rejection_statements.push(notice_stmt);
 
         // 7. Create audit event for rejection
         let audit_ctx = AuditContext::new(

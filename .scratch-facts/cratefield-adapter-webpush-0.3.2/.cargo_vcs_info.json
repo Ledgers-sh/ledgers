@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "6cbca9b8157c528e69f9075fc32cab06c79a5b3e"
+  },
+  "path_in_vcs": "crates/adapter-webpush"
+}
