@@ -306,6 +306,7 @@ impl ServerDispatch {
                 .await
                 .map_err(fail)?
             }
+            Presented::Principal(principal) => principal,
         };
         match principal {
             Principal::Person { person_id } => Ok(person_id),
