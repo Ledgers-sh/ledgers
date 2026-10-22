@@ -26,12 +26,10 @@ test.describe('language picker', () => {
     await page.goto('/#/overview');
     await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: /^Language: English/ }).click();
-    const search = page.getByRole('combobox', { name: 'Search languages' });
-    await expect(search).toBeFocused();
-    await search.fill('deu');
-    await expect(page.getByRole('option', { name: 'Deutsch' })).toBeVisible();
-    await search.press('Enter');
+    await page.getByRole('combobox', { name: 'Language' }).click();
+    const list = page.getByRole('listbox');
+    await expect(list).toBeFocused();
+    await page.getByRole('option', { name: 'Deutsch' }).click();
 
     await expect(page.getByRole('heading', { name: 'Übersicht', exact: true })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
@@ -44,32 +42,33 @@ test.describe('language picker', () => {
   test('Arabic sets right-to-left, keeps amounts left-to-right, and Escape closes without choosing', async ({ page }) => {
     await signIn(page, 'dark', 'en');
     await page.goto('/#/overview');
-    await page.getByRole('button', { name: /^Language: English/ }).click();
-    await page.getByRole('combobox', { name: 'Search languages' }).press('ArrowDown');
-    await page.getByRole('combobox', { name: 'Search languages' }).press('Escape');
-    await expect(page.getByRole('combobox', { name: 'Search languages' })).toHaveCount(0);
+    const trigger = page.getByRole('combobox', { name: 'Language' });
+    await trigger.click();
+    await page.getByRole('listbox').press('ArrowDown');
+    await page.getByRole('listbox').press('Escape');
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(trigger).toBeFocused();
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
 
-    await page.getByRole('button', { name: /^Language: English/ }).click();
-    await page.getByRole('combobox', { name: 'Search languages' }).fill('ar');
+    await trigger.click();
     await page.getByRole('option', { name: 'العربية' }).click();
 
     await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
     await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
     await expect(page.getByRole('heading', { name: 'نظرة عامة', exact: true })).toBeVisible();
     // Amounts are isolated left-to-right inside the right-to-left page, with Western digits.
-    const amount = page.locator('.tile .num bdi').first();
+    const amount = page.locator('.kpi-value bdi').first();
     await expect(amount).toHaveAttribute('dir', 'ltr');
     await expect(amount).toHaveText(/^[0-9.,−]+$/);
   });
 
-  test('a language with no match says so', async ({ page }) => {
+  test('typing a letter jumps to a language, and Enter chooses it', async ({ page }) => {
     await signIn(page, 'dark', 'en');
     await page.goto('/#/overview');
-    await page.getByRole('button', { name: /^Language: English/ }).click();
-    await page.getByRole('combobox', { name: 'Search languages' }).fill('klingon');
-    await expect(page.getByText('No language matches “klingon”.')).toBeVisible();
-    await expect(page.getByRole('option')).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Language' }).click();
+    await page.getByRole('listbox').press('b');
+    await page.getByRole('listbox').press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'id');
   });
 });
 

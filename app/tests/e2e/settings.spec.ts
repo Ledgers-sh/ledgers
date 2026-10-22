@@ -17,6 +17,13 @@ const outDir = path.resolve(here, '../../screenshots');
 
 test.afterAll(stopMockApi);
 
+/** Chooses an option in a shared Select, by the visible label it is named by. */
+async function pick(page: Page, label: string, option: string) {
+  // The trigger is named by its label and then its current value ("Who Any").
+  await page.getByRole('combobox', { name: new RegExp(`^${label}\\b`) }).click();
+  await page.getByRole('option', { name: option, exact: true }).click();
+}
+
 /** Opens a Settings address and waits for its navigation (the words change with the locale). */
 async function open(page: Page, hash: string) {
   await page.goto(`/${hash}`);
@@ -175,14 +182,14 @@ test.describe('settings', () => {
     await signInPerson(page);
     await open(page, '#/settings/audit');
     await expect(page.getByRole('row')).toHaveCount(9);
-    await page.getByLabel('Who', { exact: true }).selectOption('agent');
-    await page.getByLabel('Outcome', { exact: true }).selectOption('needs-approval');
+    await pick(page, 'Who', 'Agent key');
+    await pick(page, 'Outcome', 'Needs approval');
     await page.getByRole('button', { name: 'Apply filters' }).click();
     await expect(page.getByRole('row')).toHaveCount(2);
     await expect(page.getByText('1200.00 exceeds per-entry limit')).toBeVisible();
 
-    await page.getByLabel('Who', { exact: true }).selectOption('');
-    await page.getByLabel('Outcome', { exact: true }).selectOption('');
+    await pick(page, 'Who', 'Any');
+    await pick(page, 'Outcome', 'Any');
     await page.getByLabel('Command', { exact: true }).fill('entries.post');
     await page.getByRole('button', { name: 'Apply filters' }).click();
     await expect(page.getByRole('row')).toHaveCount(5);

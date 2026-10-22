@@ -496,3 +496,251 @@ fn check_detects_a_broken_entry_balance() {
         "error message should name the broken invariant: {err}"
     );
 }
+
+/// Trend months from `reports.trends`, by period, as the response carries them.
+fn trend_months(f: &common::Fixture, from: &str, to: &str, dimension: Option<&str>) -> Value {
+    let mut path = format!("/v1/reports/trends?from={from}&to={to}");
+    if let Some(kind) = dimension {
+        path = format!("{path}&dimension={kind}");
+    }
+    let response = f.send(Method::GET, &path, &f.keys.full, None);
+    assert_eq!(response.status.as_u16(), 200, "{}", response.json());
+    json(&response)
+}
+
+#[test]
+fn the_trend_months_add_up_to_the_golden_year_and_the_year_end_balances() {
+    let f = fixture();
+    seed_once(&f);
+    let body = trend_months(&f, &format!("{YEAR}-01"), &format!("{YEAR}-12"), None);
+    let months = body["months"].as_array().expect("months");
+    assert_eq!(months.len(), 12);
+    assert_eq!(body["currency"], "EUR");
+
+    let (mut revenue, mut expenses) = (0_i64, 0_i64);
+    for month in months {
+        revenue += minor(&month["revenue"]);
+        expenses += minor(&month["expenses"]);
+        assert_eq!(
+            minor(&month["net_result"]),
+            minor(&month["revenue"]) - minor(&month["expenses"]),
+            "{month}"
+        );
+    }
+    assert_eq!(revenue, GOLDEN.fy_revenue);
+    assert_eq!(expenses, GOLDEN.fy_expenses);
+
+    let december = &months[11];
+    let golden_cash: i64 = GOLDEN
+        .year_end_balances
+        .iter()
+        .filter(|(account, _)| *account == "1010" || *account == "1020")
+        .map(|(_, balance)| balance)
+        .sum();
+    let golden_payables: i64 = -GOLDEN
+        .year_end_balances
+        .iter()
+        .filter(|(account, _)| *account == "2010")
+        .map(|(_, balance)| balance)
+        .sum::<i64>();
+    assert_eq!(minor(&december["cash"]), golden_cash);
+    assert_eq!(minor(&december["payables"]), golden_payables);
+    let golden_receivables: i64 = GOLDEN
+        .year_end_balances
+        .iter()
+        .filter(|(account, _)| *account == "1030")
+        .map(|(_, balance)| balance)
+        .sum();
+    assert_eq!(minor(&december["receivables"]), golden_receivables);
+}
+
+#[test]
+fn the_trend_months_match_the_monthly_profit_and_loss_and_the_book_at_month_end() {
+    let f = fixture();
+    seed_once(&f);
+    let body = trend_months(&f, &format!("{YEAR}-01"), &format!("{YEAR}-12"), None);
+    let book = halden::book(YEAR);
+    for (index, month) in body["months"]
+        .as_array()
+        .expect("months")
+        .iter()
+        .enumerate()
+    {
+        let period = format!("{YEAR}-{:02}", index + 1);
+        let pnl = f.send(
+            Method::GET,
+            &format!("/v1/reports/p-and-l?period={period}"),
+            &f.keys.full,
+            None,
+        );
+        let pnl = json(&pnl);
+        assert_eq!(month["period"], period.as_str());
+        assert_eq!(month["revenue"], pnl["revenue"], "{period}");
+        assert_eq!(month["expenses"], pnl["expenses"], "{period}");
+
+        let balances = book.balances_through(&periodend(&period));
+        let cash = balances.get("1010").unwrap_or(&0) + balances.get("1020").unwrap_or(&0);
+        let receivables = *balances.get("1030").unwrap_or(&0);
+        let payables = -balances.get("2010").unwrap_or(&0);
+        assert_eq!(minor(&month["cash"]), cash, "cash at {period}");
+        assert_eq!(
+            minor(&month["receivables"]),
+            receivables,
+            "receivables at {period}"
+        );
+        assert_eq!(minor(&month["payables"]), payables, "payables at {period}");
+    }
+}
+
+/// The last day of a `YYYY-MM` period, for the book's `balances_through`.
+fn periodend(period: &str) -> String {
+    let month: u32 = period[5..].parse().expect("month");
+    let last = match month {
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    format!("{period}-{last:02}")
+}
+
+#[test]
+fn the_top_expense_accounts_rank_the_golden_expenses_and_split_by_cost_centre() {
+    let f = fixture();
+    seed_once(&f);
+    let body = trend_months(
+        &f,
+        &format!("{YEAR}-01"),
+        &format!("{YEAR}-12"),
+        Some("cost_centre"),
+    );
+
+    let top = body["top_expense_accounts"].as_array().expect("top");
+    let mut golden: Vec<(&str, i64)> = GOLDEN
+        .year_end_balances
+        .iter()
+        .filter(|(account, balance)| account.starts_with('5') && *balance > 0)
+        .map(|(account, balance)| (*account, *balance))
+        .collect();
+    golden.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    let ranked: Vec<(&str, i64)> = top
+        .iter()
+        .map(|row| {
+            (
+                row["account"].as_str().expect("account"),
+                minor(&row["amount"]),
+            )
+        })
+        .collect();
+    assert_eq!(
+        ranked,
+        golden
+            .iter()
+            .take(ranked.len())
+            .copied()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(ranked.len(), golden.len().min(8));
+    assert_eq!(ranked[0], ("5020", 20_160_000));
+    let shares: i64 = top
+        .iter()
+        .map(|row| row["share_bps"].as_i64().expect("bps"))
+        .sum();
+    assert!(
+        shares <= 10_000 && shares > 9_000,
+        "shares sum to {shares} bps"
+    );
+    assert_eq!(
+        top[0]["share_bps"].as_i64(),
+        Some(ledgers_ledger::report::share_bps(
+            20_160_000,
+            GOLDEN.fy_expenses
+        ))
+    );
+
+    // Revenue and expenses per cost centre, from the book's tagged lines.
+    let mut expected: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    for entry in &book_entries() {
+        for line in entry {
+            for (kind, code) in &line.dimensions {
+                if *kind != "cost_centre" {
+                    continue;
+                }
+                let slot = expected.entry((*code).to_owned()).or_insert((0, 0));
+                let signed = line.side.sign() * line.minor;
+                if line.account.starts_with('4') {
+                    slot.0 -= signed;
+                } else if line.account.starts_with('5') {
+                    slot.1 += signed;
+                }
+            }
+        }
+    }
+    let actual: BTreeMap<String, (i64, i64)> = body["by_dimension"]
+        .as_array()
+        .expect("by_dimension")
+        .iter()
+        .map(|row| {
+            (
+                row["code"].as_str().expect("code").to_owned(),
+                (minor(&row["revenue"]), minor(&row["expenses"])),
+            )
+        })
+        .collect();
+    assert!(!expected.is_empty(), "the fixture tags cost centres");
+    assert_eq!(actual, expected);
+    assert_eq!(body["dimension"], "cost_centre");
+}
+
+/// The posted lines of every entry in the fixture, with reversals resolved.
+fn book_entries() -> Vec<Vec<ledgers_demo::DemoLine>> {
+    let book = halden::book(YEAR);
+    book.entries
+        .iter()
+        .filter_map(|entry| book.posted_lines(entry))
+        .collect()
+}
+
+#[test]
+fn trends_reject_a_reversed_range_an_unknown_dimension_and_an_overlong_range() {
+    let f = fixture();
+    seed_once(&f);
+    for path in [
+        format!("/v1/reports/trends?from={YEAR}-06&to={YEAR}-01"),
+        format!("/v1/reports/trends?from={YEAR}-01&to={YEAR}-12&dimension=colour"),
+        "/v1/reports/trends?from=2016-01&to=2026-12".to_owned(),
+        format!("/v1/reports/trends?from={YEAR}-13&to={YEAR}-12"),
+    ] {
+        let response = f.send(Method::GET, &path, &f.keys.full, None);
+        assert_eq!(response.status.as_u16(), 422, "{path}: {}", response.json());
+    }
+}
+
+#[test]
+fn the_trend_activity_counts_every_entry_by_who_posted_it() {
+    let f = fixture();
+    seed_once(&f);
+    let body = trend_months(&f, &format!("{YEAR}-01"), &format!("{YEAR}-12"), None);
+    let book = halden::book(YEAR);
+    let (mut agent, mut human) = (0_i64, 0_i64);
+    for entry in &book.entries {
+        match entry.poster {
+            ledgers_demo::Poster::Agent => agent += 1,
+            ledgers_demo::Poster::Person => human += 1,
+        }
+    }
+    let activity = body["activity"].as_array().expect("activity");
+    let counted_agent: i64 = activity
+        .iter()
+        .map(|month| month["agent"].as_i64().expect("agent"))
+        .sum();
+    let counted_human: i64 = activity
+        .iter()
+        .map(|month| month["human"].as_i64().expect("human"))
+        .sum();
+    assert_eq!(counted_agent, agent);
+    assert_eq!(counted_human, human);
+    assert!(
+        human > 0 && agent > 0,
+        "the fixture has both kinds of poster"
+    );
+}

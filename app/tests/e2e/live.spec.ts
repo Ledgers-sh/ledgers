@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { choose } from './select';
 
 // Runs against a real `ledgers-server` started with LEDGERS_DEV=1 on
 // 127.0.0.1:3000. The key is the dev key the server printed (LIVE_API_KEY);
@@ -23,10 +24,10 @@ test.describe('live dev server: connect, post, reverse', () => {
     await page.getByRole('link', { name: 'New entry' }).first().click();
     await expect(page.getByRole('heading', { name: 'New entry' })).toBeVisible();
     await page.getByLabel('Description').fill('Consulting invoice');
-    await page.getByLabel('Line 1 account').selectOption('5010');
+    await choose(page, 'Line 1 account', /5010/);
     await page.getByLabel('Line 1 amount').fill('850.00');
-    await page.getByLabel('Line 2 account').selectOption('4010');
-    await page.getByLabel('Line 2 side').selectOption('credit');
+    await choose(page, 'Line 2 account', /4010/);
+    await choose(page, 'Line 2 side', 'Credit');
     await page.getByLabel('Line 2 amount').fill('850.00');
     await expect(page.getByText('Balanced', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Post entry' }).click();

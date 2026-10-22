@@ -4,6 +4,7 @@ import { t, type MessageKey } from '../../i18n';
 import { useSession } from '../../session';
 import { auditCsv } from '../../lib/audit';
 import { describeError, Empty, Marker } from '../common';
+import { Select } from '../Select';
 import { formatWhen } from '../AgentKeys';
 import { FormProblem, LoadingLine, SettingsPanel, StateBadge } from './common';
 
@@ -147,14 +148,21 @@ export function AuditSettings() {
           setFilters({ ...draft, command: draft.command.trim() });
         }}
       >
-        <label class="field">
-          <span>{t('settings.filter_actor')}</span>
-          <select class="input" name="actor_kind" aria-label={t('settings.filter_actor')} value={draft.actor_kind} onChange={set('actor_kind')}>
-            <option value="">{t('settings.any')}</option>
-            <option value="person">{t('settings.actor_person')}</option>
-            <option value="agent">{t('settings.actor_agent')}</option>
-          </select>
-        </label>
+        <div class="field">
+          <span id="audit-actor-label">{t('settings.filter_actor')}</span>
+          <Select
+            id="audit-actor"
+            name="actor_kind"
+            labelledBy="audit-actor-label"
+            value={draft.actor_kind}
+            options={[
+              { value: '', label: t('settings.any') },
+              { value: 'person', label: t('settings.actor_person') },
+              { value: 'agent', label: t('settings.actor_agent') },
+            ]}
+            onChange={(value) => setDraft({ ...draft, actor_kind: value as Filters['actor_kind'] })}
+          />
+        </div>
         <label class="field">
           <span>{t('settings.filter_command')}</span>
           <input
@@ -168,16 +176,23 @@ export function AuditSettings() {
             onInput={set('command')}
           />
         </label>
-        <label class="field">
-          <span>{t('settings.filter_outcome')}</span>
-          <select class="input" name="outcome" aria-label={t('settings.filter_outcome')} value={draft.outcome} onChange={set('outcome')}>
-            <option value="">{t('settings.any')}</option>
-            <option value="allowed">{t('settings.outcome_allowed')}</option>
-            <option value="needs-approval">{t('settings.outcome_needs_approval')}</option>
-            <option value="denied">{t('settings.outcome_denied')}</option>
-            <option value="error">{t('settings.outcome_error')}</option>
-          </select>
-        </label>
+        <div class="field">
+          <span id="audit-outcome-label">{t('settings.filter_outcome')}</span>
+          <Select
+            id="audit-outcome"
+            name="outcome"
+            labelledBy="audit-outcome-label"
+            value={draft.outcome}
+            options={[
+              { value: '', label: t('settings.any') },
+              { value: 'allowed', label: t('settings.outcome_allowed') },
+              { value: 'needs-approval', label: t('settings.outcome_needs_approval') },
+              { value: 'denied', label: t('settings.outcome_denied') },
+              { value: 'error', label: t('settings.outcome_error') },
+            ]}
+            onChange={(value) => setDraft({ ...draft, outcome: value as Filters['outcome'] })}
+          />
+        </div>
         <label class="field">
           <span>{t('settings.filter_from')}</span>
           <input class="input mono" type="date" name="from" aria-label={t('settings.filter_from')} value={draft.from} onInput={set('from')} />

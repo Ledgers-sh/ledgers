@@ -1271,11 +1271,9 @@ impl Command for AuditList {
                 break;
             }
         }
-        let next_before_seq = if exhausted && events.len() < limit {
-            None
-        } else {
-            events.last().map(|event| event.seq)
-        };
+        // The cursor is the scan position, not the last match: a page that scanned
+        // its whole budget without a match still tells the caller where to go on.
+        let next_before_seq = if exhausted { None } else { Some(cursor) };
         Ok(Plan::with_output(AuditListOutput {
             events,
             next_before_seq,

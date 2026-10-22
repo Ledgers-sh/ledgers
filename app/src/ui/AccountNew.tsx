@@ -12,6 +12,7 @@ import { t, useLocale, type MessageKey } from '../i18n';
 import { ACCOUNT_TYPES, hasErrors, parentOptions, parseTags, validateDraft, type DraftErrors, type DraftInput } from '../lib/accounts';
 import { ErrorBanner, PageHead, Skeleton } from './common';
 import { labelOf } from './Accounts';
+import { Select } from './Select';
 
 type Field = keyof DraftInput;
 
@@ -153,60 +154,54 @@ export function AccountNew() {
           )}
         </label>
 
-        <label class="field">
-          <span>{t('accounts.form.type')}</span>
-          <select
+        <div class="field">
+          <span id="acct-type-label">{t('accounts.form.type')}</span>
+          <Select
             id="acct-type"
-            class="input"
+            label={t('accounts.form.type')}
+            labelledBy="acct-type-label"
             value={form.type}
-            aria-invalid={shown('type') ? 'true' : undefined}
-            aria-describedby={shown('type') ? 'acct-type-error' : undefined}
-            onChange={(event) => update('type', (event.target as HTMLSelectElement).value)}
+            placeholder={t('accounts.form.type')}
+            searchable={false}
+            invalid={shown('type') !== null && shown('type') !== undefined}
+            describedBy={shown('type') ? 'acct-type-error' : undefined}
             onBlur={() => touch('type')}
-          >
-            <option value="">{t('accounts.form.type')}</option>
-            {ACCOUNT_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {t(`accountType.${type}`)}
-              </option>
-            ))}
-          </select>
+            options={ACCOUNT_TYPES.map((type) => ({ value: type, label: t(`accountType.${type}`) }))}
+            onChange={(value) => update('type', value)}
+          />
           {shown('type') && (
             <span id="acct-type-error" class="field-error">
               {shown('type')}
             </span>
           )}
-        </label>
+        </div>
 
-        <label class="field">
-          <span>{t('accounts.form.parent')}</span>
-          <select
+        <div class="field">
+          <span id="acct-parent-label">{t('accounts.form.parent')}</span>
+          <Select
             id="acct-parent"
-            class="input"
+            label={t('accounts.form.parent')}
+            labelledBy="acct-parent-label"
             value={form.parent}
+            placeholder={t('accounts.form.parent_none')}
+            emptyLabel={t('accounts.form.parent_none')}
             disabled={form.type === ''}
-            aria-invalid={shown('parent') ? 'true' : undefined}
-            aria-describedby={shown('parent') ? 'acct-parent-error' : undefined}
-            onChange={(event) => update('parent', (event.target as HTMLSelectElement).value)}
+            invalid={shown('parent') !== null && shown('parent') !== undefined}
+            describedBy={shown('parent') ? 'acct-parent-error' : undefined}
             onBlur={() => touch('parent')}
-          >
-            <option value="">{t('accounts.form.parent_none')}</option>
-            {parents.map((account) => (
-              <option key={account.number} value={account.number}>
-                {account.number} {labelOf(account)}
-              </option>
-            ))}
-            {/* A parent picked for another class stays selectable, so its error can name it. */}
-            {form.parent !== '' && !parents.some((account) => account.number === form.parent) && (
-              <option value={form.parent}>{form.parent}</option>
-            )}
-          </select>
+            options={[
+              { value: '', label: t('accounts.form.parent_none') },
+              ...parents.map((account) => ({ value: account.number, label: labelOf(account), hint: account.number, group: t(`accountType.${account.account_type}` as MessageKey) })),
+              ...(form.parent !== '' && !parents.some((account) => account.number === form.parent) ? [{ value: form.parent, label: form.parent }] : []),
+            ]}
+            onChange={(value) => update('parent', value)}
+          />
           {shown('parent') && (
             <span id="acct-parent-error" class="field-error">
               {shown('parent')}
             </span>
           )}
-        </label>
+        </div>
 
         <label class="field">
           <span>{t('accounts.form.tags')}</span>
