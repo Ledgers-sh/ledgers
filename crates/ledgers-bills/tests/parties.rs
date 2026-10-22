@@ -5,7 +5,7 @@ use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_bills::BillsModule;
 use ledgers_bills::parties::*;
-use ledgers_commands::auth::{Authenticator, Credential, Limits, Principal, Tier};
+use ledgers_commands::auth::{Authenticator, Credential, Limits, Principal, Role, Tier};
 use ledgers_commands::*;
 use ledgers_db::DbModule;
 use sea_query::Value;
@@ -35,6 +35,7 @@ impl TestAuthenticator {
             OWNER_TOKEN.to_string(),
             Principal::Person {
                 person_id: OWNER_ID.to_string(),
+                role: Role::Owner,
             },
         );
         credentials.insert(
@@ -100,9 +101,12 @@ fn modules() -> Vec<Box<dyn cratefield_core::Module>> {
     vec![Box::new(DbModule), Box::new(BillsModule)]
 }
 
-fn context(request_id: &str) -> CommandContext {
+/// A second company on the same database, for the isolation test.
+const OTHER_COMPANY_ID: &str = "01OTHERCOMPANY000000000000B";
+
+fn context_in(company_id: &str, request_id: &str) -> CommandContext {
     CommandContext {
-        company_id: COMPANY_ID.to_string(),
+        company_id: company_id.to_string(),
         request_id: request_id.to_string(),
         event_id: format!("{request_id}-event"),
         now: NOW.to_string(),
@@ -117,12 +121,25 @@ async fn run<C: Command>(
     request_id: &str,
     input: &C::Input,
 ) -> Result<C::Output, CommandError> {
+    run_in(COMPANY_ID, db, cmd, token, request_id, input).await
+}
+
+/// Runs a command as `token` against `company_id`, the way the server scopes
+/// a request to the company it names.
+async fn run_in<C: Command>(
+    company_id: &str,
+    db: &dyn Database,
+    cmd: &C,
+    token: &str,
+    request_id: &str,
+    input: &C::Input,
+) -> Result<C::Output, CommandError> {
     let executor = Executor::new(db, TestAuthenticator::new(), DefaultPolicy);
     match executor
         .run(
             cmd,
             token.to_string(),
-            context(request_id),
+            context_in(company_id, request_id),
             input,
             Execute::Run,
         )
@@ -1133,6 +1150,128 @@ fn the_vendor_table_refuses_a_second_party_with_the_same_vat_id_even_when_it_is_
                 ))
                 .await;
             assert!(direct.is_err());
+        });
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_party_of_one_company_is_invisible_to_another() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            party(
+                &*kit.db,
+                "p-a-only",
+                "Acme GmbH",
+                Some(ACME_VAT),
+                Some("DE89370400440532013000"),
+            )
+            .await;
+            bill(&*kit.db, "bill-a", "p-a-only", "INV-A", false).await;
+
+            // Company B sees no parties and no bank counterparty of A.
+            let listed = run_in(
+                OTHER_COMPANY_ID,
+                &*kit.db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "iso-list",
+                &ListInput {
+                    limit: None,
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list in B");
+            assert_eq!(listed.total, 0);
+            assert!(listed.parties.is_empty());
+
+            // Writes aimed at A's party from B name no party.
+            let owner = PartiesSetBank::new(Some(OWNER_ID.to_string()));
+            let bank = run_in(
+                OTHER_COMPANY_ID,
+                &*kit.db,
+                &owner,
+                OWNER_TOKEN,
+                "iso-bank",
+                &bank_input("p-a-only", "GB82WEST12345698765432"),
+            )
+            .await;
+            assert!(
+                matches!(bank, Err(CommandError::InvalidInput(_))),
+                "set_bank across companies"
+            );
+            party(&*kit.db, "p-a-two", "Acme Holding", None, None).await;
+            let merge = run_in(
+                OTHER_COMPANY_ID,
+                &*kit.db,
+                &PartiesMerge::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "iso-merge",
+                &MergeInput {
+                    id: "p-a-only".to_string(),
+                    from: "p-a-two".to_string(),
+                },
+            )
+            .await;
+            assert!(
+                matches!(merge, Err(CommandError::InvalidInput(_))),
+                "merge across companies"
+            );
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT merged_into AS m FROM vendor WHERE id = 'p-a-two'",
+                    "m"
+                )
+                .await,
+                None
+            );
+            let check = run_in(
+                OTHER_COMPANY_ID,
+                &*kit.db,
+                &PartiesCheckVat::new(Some(FakeVies::valid())),
+                AGENT_TOKEN,
+                "iso-vies",
+                &check_vat_input("p-a-only", "DE", "136695976"),
+            )
+            .await;
+            assert!(
+                matches!(check, Err(CommandError::InvalidInput(_))),
+                "check_vat across companies"
+            );
+
+            // A's data is untouched by B's attempts.
+            assert_eq!(
+                text_of(
+                    &*kit.db,
+                    "SELECT iban AS i FROM vendor WHERE id = 'p-a-only'",
+                    "i"
+                )
+                .await
+                .as_deref(),
+                Some("DE89370400440532013000")
+            );
+            assert_eq!(
+                scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vies_check").await,
+                0
+            );
+
+            // And a bill of B cannot be matched to A's party by VAT ID.
+            let of_a = run_in(
+                COMPANY_ID,
+                &*kit.db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "iso-a",
+                &ListInput {
+                    limit: None,
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list in A");
+            assert_eq!(of_a.total, 2);
         });
     }
 }

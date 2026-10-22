@@ -563,7 +563,14 @@ impl ServerDispatch {
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        let person = self.person_id(deps, presented.clone(), request_id).await?;
+        let person = self
+            .person_id(
+                deps,
+                presented.clone(),
+                request_id,
+                Some("parties.set_bank"),
+            )
+            .await?;
         let cmd = PartiesSetBank::new(Some(person));
         self.execute(deps, &cmd, presented, request_id, input).await
     }
@@ -595,7 +602,9 @@ impl ServerDispatch {
         request_id: &str,
         input: Value,
     ) -> Result<Value, Problem> {
-        let person = self.person_id(deps, presented.clone(), request_id).await?;
+        let person = self
+            .person_id(deps, presented.clone(), request_id, Some("parties.merge"))
+            .await?;
         let cmd = PartiesMerge::new(Some(person));
         self.execute(deps, &cmd, presented, request_id, input).await
     }
@@ -631,6 +640,7 @@ impl Dispatch for ServerDispatch {
             app_url: self.app_url.clone(),
             document_key: self.document_key.clone(),
             model: self.model.clone(),
+            vies_enabled: self.vies_enabled,
         })
     }
 

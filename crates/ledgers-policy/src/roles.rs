@@ -86,6 +86,7 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "fiscal_years.list"
         | "numbering.list"
         | "tax_settings.get"
+        | "parties.list"
         | "test.read" => Class::Read,
         "company.update"
         | "units.create"
@@ -96,7 +97,9 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "tax_settings.update"
         | "approval_settings.get"
         | "approval_settings.update"
-        | "numbering.set_next" => Class::Settings,
+        | "numbering.set_next"
+        | "parties.set_bank"
+        | "parties.merge" => Class::Settings,
         "keys.create" | "keys.list" | "keys.revoke" | "policy.put_key" | "policy.revoke_key"
         | "policy.explain" => Class::Keys,
         "audit.list" => Class::Audit,
@@ -127,6 +130,9 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "bank.transactions.ignore"
         | "bank.rules.create"
         | "bank.rules.enable"
+        | "parties.create"
+        | "parties.update"
+        | "parties.check_vat"
         | "test.write"
         | "test.post" => Class::Post,
         "bill.pay" => Class::MoneyOut,
@@ -266,6 +272,12 @@ mod tests {
         ("periods.reopen", Class::Close),
         ("fiscal_years.create", Class::Close),
         ("fiscal_years.close", Class::Close),
+        ("parties.list", Class::Read),
+        ("parties.create", Class::Post),
+        ("parties.update", Class::Post),
+        ("parties.check_vat", Class::Post),
+        ("parties.set_bank", Class::Settings),
+        ("parties.merge", Class::Settings),
     ];
 
     /// The table, role by role: a role runs a command exactly when the matrix
@@ -324,6 +336,15 @@ mod tests {
             (Role::Auditor, "entries.post", false),
             (Role::Auditor, "approvals.decide", false),
             (Role::Auditor, "keys.list", false),
+            (Role::Owner, "parties.set_bank", true),
+            (Role::Admin, "parties.merge", true),
+            (Role::Accountant, "parties.create", true),
+            (Role::Accountant, "parties.check_vat", true),
+            (Role::Accountant, "parties.set_bank", false),
+            (Role::Accountant, "parties.merge", false),
+            (Role::Approver, "parties.list", true),
+            (Role::Approver, "parties.update", false),
+            (Role::Viewer, "parties.merge", false),
         ];
         for (role, command, allowed) in cases {
             assert_eq!(check(*role, command).is_ok(), *allowed, "{role} {command}");

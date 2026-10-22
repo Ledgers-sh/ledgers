@@ -283,6 +283,13 @@ async fn parties_match_by_iban(db: &dyn Database) {
         !by_iban.contains_key("GB82WEST12345698765432"),
         "a merged party is not a counterparty"
     );
+    let other = store::parties_by_iban(db, "01OTHERCOMPANY000000000000B")
+        .await
+        .expect("parties of another company");
+    assert!(
+        other.is_empty(),
+        "another company's parties are not this company's counterparties"
+    );
 }
 
 #[test]
