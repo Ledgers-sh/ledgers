@@ -14,6 +14,7 @@ pub mod openapi;
 pub mod people;
 pub mod rate_limiting;
 pub mod routes;
+pub mod timing;
 
 /// Cloudflare Workers entry point (wasm32 only)
 #[cfg(target_arch = "wasm32")]
@@ -155,6 +156,48 @@ pub fn harness(
     let builder = builder.module(ledgers_bills::BillsModule);
 
     builder.build()
+}
+
+/// A value built once per isolate and shared by every request after that.
+///
+/// The Worker entry point keeps the composed Ledgers harness in one of these,
+/// so a request never composes it again. `builds` counts how often the value
+/// was made (1 after any number of requests), which the tests check.
+pub struct Composed<T> {
+    cell: std::sync::OnceLock<T>,
+    builds: std::sync::atomic::AtomicUsize,
+}
+
+impl<T> Default for Composed<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> Composed<T> {
+    /// An empty cell; nothing is built until the first [`Composed::get_or_build`].
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            cell: std::sync::OnceLock::new(),
+            builds: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// The shared value, building it with `build` on the first call only.
+    pub fn get_or_build(&self, build: impl FnOnce() -> T) -> &T {
+        self.cell.get_or_init(|| {
+            self.builds
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            build()
+        })
+    }
+
+    /// How many times the value has been built: 0 or 1.
+    #[must_use]
+    pub fn builds(&self) -> usize {
+        self.builds.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// The origins the web app is served from, which the API allows for CORS and

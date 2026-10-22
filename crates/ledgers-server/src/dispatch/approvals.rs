@@ -353,6 +353,7 @@ impl ServerDispatch {
                 db: Arc::clone(&deps.db),
                 clock: Arc::clone(&deps.clock),
                 company_id: self.company_id.clone(),
+                preloaded: None,
             }),
             Presented::Session(session) => Authn::Session(SessionAuthenticator {
                 db: Arc::clone(&deps.db),

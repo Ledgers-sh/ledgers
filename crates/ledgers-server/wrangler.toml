@@ -76,6 +76,9 @@ LEDGERS_COMPANY_ID = "STAGING_COMPANY_ID"
 # The demo seed route (POST /admin/seed-demo, docs/deploy.md) also needs the
 # SEED_TOKEN secret. Staging only: never set this flag in production.
 LEDGERS_ALLOW_DEMO_SEED = "1"
+# Per-request Server-Timing header with the database counters (docs/deploy.md).
+# Staging only: never set this in production.
+LEDGERS_SERVER_TIMING = "1"
 DOCUMENTS_MAX_LARGE_BLOB_BYTES = "33554432"
 
 [[env.staging.d1_databases]]

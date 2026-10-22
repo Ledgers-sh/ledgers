@@ -6,6 +6,7 @@
 use crate::dispatch::{DISPATCH_PORTS, Deps};
 use crate::people::presented_from;
 use crate::rate_limiting::admit;
+use crate::timing::{self, CountingDb, DbTiming};
 use cratefield_core::axum::response::IntoResponse;
 use cratefield_core::axum::{
     self,
@@ -62,6 +63,16 @@ pub trait Dispatch: Send + Sync {
     /// Resolves the principal behind a bearer credential, for surfaces that
     /// need it before dispatching (the MCP tool list and scope).
     async fn principal(&self, deps: &Deps, credential: &str) -> Result<Principal, Problem>;
+
+    /// The agent key id a bearer credential verifies to: the rate-limit bucket
+    /// admission charges. Admission needs no more than this, so it reads no
+    /// policy row. `None` for a credential that does not verify.
+    async fn verified_key_id(&self, deps: &Deps, credential: &str) -> Option<String> {
+        match self.principal(deps, credential).await.ok()? {
+            Principal::Agent { key_id, .. } => Some(key_id),
+            Principal::Person { .. } => None,
+        }
+    }
 }
 
 /// A domain module from the registry.
@@ -84,13 +95,14 @@ impl DomainModule {
         }
     }
 
-    fn mount(&self, deps: &Arc<Deps>) -> axum::Router {
+    fn mount(&self, deps: &Arc<Deps>, timing: Option<&Arc<DbTiming>>) -> axum::Router {
         let mut router = axum::Router::new();
 
         for (method, path_pattern, command_name) in &self.routes {
             let dispatch = Arc::clone(&self.dispatch);
             let cmd = command_name.clone();
             let deps = Arc::clone(deps);
+            let timing = timing.cloned();
 
             match method.as_str() {
                 "POST" => {
@@ -104,6 +116,7 @@ impl DomainModule {
                                 let dispatch = Arc::clone(&dispatch);
                                 let deps = Arc::clone(&deps);
                                 let cmd = cmd.clone();
+                                let timing = timing.clone();
 
                                 async move {
                                     let request_id = scope.request_id.clone();
@@ -126,6 +139,7 @@ impl DomainModule {
                                         dispatch
                                             .dispatch(&deps, &cmd, input, &request_id, presented)
                                             .await,
+                                        timing.as_deref(),
                                     )
                                 }
                             },
@@ -143,6 +157,7 @@ impl DomainModule {
                                 let dispatch = Arc::clone(&dispatch);
                                 let deps = Arc::clone(&deps);
                                 let cmd = cmd.clone();
+                                let timing = timing.clone();
 
                                 async move {
                                     let request_id = scope.request_id.clone();
@@ -171,6 +186,7 @@ impl DomainModule {
                                                 presented,
                                             )
                                             .await,
+                                        timing.as_deref(),
                                     )
                                 }
                             },
@@ -186,12 +202,23 @@ impl DomainModule {
 }
 
 /// Maps a dispatch result to an HTTP response: 200 with the JSON body, or
-/// the problem document.
-fn respond(result: Result<Value, Problem>) -> axum::response::Response {
-    match result {
+/// the problem document. With request timing on, the response carries this
+/// request's database counters in `Server-Timing` (see [`timing`]).
+fn respond(result: Result<Value, Problem>, timing: Option<&DbTiming>) -> axum::response::Response {
+    let mut response = match result {
         Ok(body) => (axum::http::StatusCode::OK, Json(body)).into_response(),
         Err(problem) => problem.into_response(),
+    };
+    if let Some(timing) = timing {
+        // The value is ASCII built from our own counters, so it always parses.
+        if let Ok(value) = axum::http::HeaderValue::from_str(&timing.server_timing()) {
+            response.headers_mut().insert(
+                axum::http::header::HeaderName::from_static("server-timing"),
+                value,
+            );
+        }
     }
+    response
 }
 
 impl Module for DomainModule {
@@ -213,9 +240,16 @@ impl Module for DomainModule {
     }
 
     fn router(&self, ctx: ModuleContext) -> axum::Router {
-        let deps = Deps::from_ports(&ctx.ports)
+        let mut deps = Deps::from_ports(&ctx.ports)
             .expect("the dispatch ports (db, clock, id_gen) are declared in requires()");
-        self.mount(&Arc::new(deps))
+        // One counter set per router: the runtime builds the router per
+        // request, so the counters are per request too (see `timing`).
+        let timing = timing::enabled(ctx.config.as_ref()).then(|| {
+            let timing = Arc::new(DbTiming::default());
+            deps.db = Arc::new(CountingDb::new(Arc::clone(&deps.db), Arc::clone(&timing)));
+            timing
+        });
+        self.mount(&Arc::new(deps), timing.as_ref())
     }
 
     fn migrations(&self) -> Migrations {

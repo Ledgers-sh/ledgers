@@ -95,10 +95,24 @@ pub async fn enforce_agent_limit(
     limiter: Option<&Arc<dyn RateLimiter>>,
     principal: &Principal,
 ) -> Result<(), Limited> {
-    let (Principal::Agent { key_id, .. }, Some(limiter)) = (principal, limiter) else {
+    let Principal::Agent { key_id, .. } = principal else {
         return Ok(());
     };
-    // The key id, never the secret, names the bucket.
+    enforce_key_limit(limiter, key_id).await
+}
+
+/// Charges one request to the bucket of agent key `key_id`, when a limiter is
+/// configured. The key id, never the secret, names the bucket.
+///
+/// # Errors
+/// [`Limited`] when the key is over its limit, or the limiter fails.
+pub async fn enforce_key_limit(
+    limiter: Option<&Arc<dyn RateLimiter>>,
+    key_id: &str,
+) -> Result<(), Limited> {
+    let Some(limiter) = limiter else {
+        return Ok(());
+    };
     let rate_limit_key = format!("agent-key:{key_id}");
     match limiter.limit(&rate_limit_key).await {
         Ok(decision) if decision.ok => Ok(()),
@@ -123,9 +137,9 @@ pub async fn admit(
     presented: Option<&Presented>,
 ) -> Result<(), Limited> {
     if let Some(Presented::Bearer(token)) = presented
-        && let Ok(principal) = dispatch.principal(deps, token).await
+        && let Some(key_id) = dispatch.verified_key_id(deps, token).await
     {
-        enforce_agent_limit(deps.rate_limiter.as_ref(), &principal).await?;
+        enforce_key_limit(deps.rate_limiter.as_ref(), &key_id).await?;
     }
     Ok(())
 }
