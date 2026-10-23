@@ -139,6 +139,7 @@ fn context(company_id: &str, request: &str, now: &str) -> CommandContext {
         request_id: request.to_owned(),
         event_id: format!("{request}-{company_id}"),
         now: now.to_owned(),
+        is_person: true, // Internal orchestration, treat as person
     }
 }
 

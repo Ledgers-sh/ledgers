@@ -30,6 +30,8 @@ pub struct BillRow {
     pub vat_minor: Option<i64>,
     /// Gross total.
     pub gross_minor: Option<i64>,
+    /// Amount paid so far.
+    pub paid_minor: i64,
     /// The lines.
     pub lines: Vec<BillLine>,
     /// Confidence per extracted field.
@@ -60,7 +62,7 @@ pub struct BillRow {
 
 /// The columns a bill read selects, with the vendor joined.
 pub const BILL_SELECT: &str = "SELECT b.id, b.document_id, b.vendor_id, b.invoice_number, b.invoice_date, \
-     b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.lines_json, b.confidence_json, b.checks_json, \
+     b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.paid_minor, b.lines_json, b.confidence_json, b.checks_json, \
      b.instruction_flags, b.iban_changed, b.source, b.reader, b.unit_code, b.posted_entry_id, b.discarded_at, b.created_by, \
      b.created_at, b.updated_at, v.name AS vendor_name, v.vat_id AS vendor_vat_id, v.iban AS vendor_iban, \
      v.needs_review AS vendor_needs_review FROM bill b JOIN vendor v ON v.id = b.vendor_id";
@@ -95,6 +97,7 @@ fn from_row(row: &Row) -> Result<BillRow, DbError> {
         net_minor: row.get::<i64>("net_minor"),
         vat_minor: row.get::<i64>("vat_minor"),
         gross_minor: row.get::<i64>("gross_minor"),
+        paid_minor: row.get::<i64>("paid_minor").unwrap_or(0),
         lines: json_column(row, "lines_json")?,
         confidence: json_column(row, "confidence_json")?,
         checks: json_column(row, "checks_json")?,

@@ -404,6 +404,7 @@ impl ServerDispatch {
             request_id: request_id.to_owned(),
             event_id: deps.id_gen.ulid(),
             now: super::rfc3339_utc(now_at),
+            is_person: true, // Approvals are always from person (owner)
         }
     }
 

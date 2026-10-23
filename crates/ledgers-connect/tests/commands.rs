@@ -61,6 +61,7 @@ fn context(company: &str, request: &str) -> CommandContext {
         request_id: request.to_owned(),
         event_id: format!("{request}-event"),
         now: NOW.to_owned(),
+        is_person: false,
     }
 }
 

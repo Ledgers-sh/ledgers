@@ -295,6 +295,7 @@ fn row_of(
         net_minor: input.net_minor,
         vat_minor: input.vat_minor,
         gross_minor: input.gross_minor,
+        paid_minor: 0,
         lines,
         confidence,
         checks,
@@ -342,7 +343,14 @@ fn view_of(row: BillRow, journal_preview: Vec<PreviewLine>) -> BillView {
         &row.lines,
     );
     let posted = row.posted_entry_id.is_some();
-    let status = derive_status(posted, row.discarded_at.is_some(), &row.checks, &flags);
+    let status = derive_status(
+        posted,
+        row.discarded_at.is_some(),
+        &row.checks,
+        &flags,
+        row.paid_minor,
+        row.gross_minor,
+    );
     BillView {
         id: row.id,
         status,
@@ -355,6 +363,7 @@ fn view_of(row: BillRow, journal_preview: Vec<PreviewLine>) -> BillView {
         net_minor: row.net_minor,
         vat_minor: row.vat_minor,
         gross_minor: row.gross_minor,
+        paid_minor: row.paid_minor,
         lines: row.lines,
         confidence: row.confidence,
         checks: row.checks,
@@ -1282,6 +1291,285 @@ async fn bill_unit(
             }
             Ok(Some(unit.code))
         }
+    }
+}
+
+/// Input of `bills.propose-entry`: the bill id.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ProposeEntryInput {
+    /// The bill id (from the path).
+    pub id: String,
+}
+
+/// The lines a bill would post as, with VAT and AP on specific accounts.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ProposeEntryOutput {
+    /// The balanced lines, in the same format as a preview.
+    pub lines: Vec<PreviewLine>,
+}
+
+/// `bills.propose-entry`: preview the balanced lines a bill posts as.
+pub struct BillsProposeEntry;
+
+#[async_trait::async_trait]
+impl Command for BillsProposeEntry {
+    const NAME: &'static str = "bills.propose-entry";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+    const TARGET: Option<&'static str> = Some("id");
+
+    type Input = ProposeEntryInput;
+    type Output = ProposeEntryOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let row = store::bill_by_id(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(not_found)?;
+        let chart = load_chart(db, &ctx.company_id).await?;
+        let lines = preview_of(&row, &chart);
+        Ok(Plan::with_output(ProposeEntryOutput { lines }))
+    }
+}
+
+/// Builds guard statements for a payment: account validation only.
+/// Preview already checks bill posted, amount limits, and person-only conditions.
+/// Returns `(statements, guard_keys_to_release)`.
+fn vec_guard_statements(
+    row: &BillRow,
+    input: &RecordPaymentInput,
+    ctx: &CommandContext,
+) -> (Vec<Statement>, Vec<String>) {
+    let mut statements = Vec::new();
+    let mut guard_keys = Vec::new();
+
+    // Guard: account must exist and be postable with bank tag
+    // An account is postable if it's a leaf (has no children) and not archived
+    // This is a guard because the account could be deleted/archived between preview and plan
+    let key = format!("bill-bank-{}", row.id);
+    guard_keys.push(key.clone());
+    statements.push(Statement::with_values(
+        "INSERT INTO ledger_guard (guard_key, ok) SELECT ?, CASE WHEN EXISTS (SELECT 1 FROM account a WHERE a.company_id = ? AND a.number = ? AND a.archived = 0 AND (a.tags LIKE '%bank%' OR a.tags LIKE '% bank %' OR a.tags = 'bank') AND NOT EXISTS (SELECT 1 FROM account b WHERE b.company_id = a.company_id AND b.parent_number = a.number LIMIT 1)) THEN 1 ELSE NULL END"
+            .to_owned(),
+        vec![
+            Value::from(key),
+            Value::from(ctx.company_id.as_str()),
+            Value::from(input.from_account.as_str()),
+        ],
+    ));
+
+    (statements, guard_keys)
+}
+
+/// Builds a payment entry from a bill and payment input.
+async fn payment_entry_for(
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &RecordPaymentInput,
+    row: &BillRow,
+) -> Result<PostEntryInput, CommandError> {
+    let chart = load_chart(db, &ctx.company_id).await?;
+    let payable = chart.payable.clone().ok_or_else(|| {
+        CommandError::InvalidInput("the chart has no payable account (tag ap)".into())
+    })?;
+    let journal_id = ledgers_ledger::journal::find_journal(db, &ctx.company_id, "GN")
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+        .map(|journal| journal.id)
+        .ok_or_else(|| CommandError::InvalidInput("no general journal GN exists".into()))?;
+    let fiscal_year = input
+        .date
+        .get(..4)
+        .and_then(|y| y.parse().ok())
+        .ok_or_else(|| CommandError::InvalidInput("invalid payment date".into()))?;
+
+    let entry = SerializableEntryDraft {
+        journal_id: journal_id.clone(),
+        document_date: input.date.clone(),
+        posting_date: input.date.clone(),
+        tax_point_date: None,
+        base_currency: row.currency.clone(),
+        description: format!("Payment for bill {}", row.id),
+        source_documents: vec![row.document_id.clone()],
+        external_id: Some(format!("payment-{}-{}", row.id, ctx.event_id)),
+        source_app: Some("ledgers-bills".to_owned()),
+        reverses: None,
+        lines: vec![
+            SerializableLine {
+                account_number: payable,
+                side: "debit".to_owned(),
+                base: SerializableAmount {
+                    minor: input.amount.to_string(),
+                    currency: row.currency.clone(),
+                },
+                fx: None,
+                tax_code: None,
+                dimensions: BTreeMap::new(),
+                memo: input.reference.clone(),
+            },
+            SerializableLine {
+                account_number: input.from_account.clone(),
+                side: "credit".to_owned(),
+                base: SerializableAmount {
+                    minor: input.amount.to_string(),
+                    currency: row.currency.clone(),
+                },
+                fx: None,
+                tax_code: None,
+                dimensions: BTreeMap::new(),
+                memo: input.reference.clone(),
+            },
+        ],
+    };
+
+    Ok(PostEntryInput {
+        journal_id,
+        fiscal_year,
+        entry,
+    })
+}
+
+/// Input of `bills.record-payment`: the bill id and payment details.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecordPaymentInput {
+    /// The bill id (from the path).
+    pub id: String,
+    /// The amount paid, in minor units.
+    pub amount: i64,
+    /// The payment date, `YYYY-MM-DD`.
+    pub date: String,
+    /// The bank account to credit, postable and tagged "bank".
+    pub from_account: String,
+    /// Optional reference text for the payment.
+    #[serde(default)]
+    pub reference: Option<String>,
+}
+
+/// Output of `bills.record-payment`: the updated bill.
+pub type RecordPaymentOutput = GetOutput;
+
+/// `bills.record-payment`: records a payment against a posted bill.
+pub struct BillsRecordPayment;
+
+#[async_trait::async_trait]
+impl Command for BillsRecordPayment {
+    const NAME: &'static str = "bills.record-payment";
+    const TIER: Tier = Tier::PostWithinLimits;
+    const TARGET: Option<&'static str> = Some("id");
+
+    type Input = RecordPaymentInput;
+    type Output = RecordPaymentOutput;
+
+    async fn preview(
+        &self,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        let row = store::bill_by_id(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(not_found)?;
+
+        // Upfront friendly checks
+        if row.posted_entry_id.is_none() {
+            return Err(CommandError::InvalidInput("the bill is not posted".into()));
+        }
+        if let Some(gross) = row.gross_minor
+            && row.paid_minor + input.amount > gross
+        {
+            return Err(CommandError::Domain(
+                Problem::new(&cratefield_core::ProblemDef {
+                    slug: "bill-overpay",
+                    status: cratefield_core::axum::http::StatusCode::BAD_REQUEST,
+                    title: "Payment exceeds bill amount",
+                    description: "The payment amount would exceed the gross bill total.",
+                })
+                .with_detail(format!("already paid {}, total {}", row.paid_minor, gross)),
+            ));
+        }
+        if !ctx.is_person && (row.iban_changed || row.vendor.needs_review) {
+            return Err(CommandError::Domain(
+                Problem::new(&cratefield_core::ProblemDef {
+                    slug: "bill-person",
+                    status: cratefield_core::axum::http::StatusCode::FORBIDDEN,
+                    title: "Person only: unconfirmed vendor or changed IBAN",
+                    description: "An agent cannot pay a bill with an unconfirmed vendor or flagged vendor-iban-changed.",
+                })
+                .with_detail(if row.vendor.needs_review {
+                    "the vendor is unconfirmed".to_owned()
+                } else {
+                    "the vendor IBAN differs from the one known to the system".to_owned()
+                }),
+            ));
+        }
+
+        // Preview the payment entry
+        let entry_input = payment_entry_for(db, ctx, input, &row).await?;
+        PostEntry.preview(db, ctx, &entry_input).await
+    }
+
+    async fn plan(
+        &self,
+        token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let row = store::bill_by_id(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(not_found)?;
+
+        // Build guard statements at write time
+        let (mut guard_stmts, guard_keys) = vec_guard_statements(&row, input, ctx);
+
+        // Build and post the payment entry
+        let entry_input = payment_entry_for(db, ctx, input, &row).await?;
+        let posted: Plan<PostEntryOutput> = PostEntry.plan(token, db, ctx, &entry_input).await?;
+
+        // Combine all statements: guards before mutation, then mutation, then release
+        let mut final_statements = Vec::new();
+        final_statements.append(&mut guard_stmts);
+        final_statements.extend(posted.statements);
+        final_statements.push(Statement::with_values(
+            "UPDATE bill SET paid_minor = paid_minor + ?, updated_at = ? WHERE company_id = ? AND id = ?"
+                .to_owned(),
+            vec![
+                Value::from(input.amount),
+                Value::from(ctx.now.as_str()),
+                Value::from(ctx.company_id.as_str()),
+                Value::from(row.id.as_str()),
+            ],
+        ));
+        // Release guard statements
+        for key in guard_keys {
+            final_statements.push(Statement::with_values(
+                "DELETE FROM ledger_guard WHERE guard_key = ?".to_owned(),
+                vec![Value::from(key)],
+            ));
+        }
+
+        let mut updated_row = row.clone();
+        updated_row.paid_minor += input.amount;
+        let bill = view_of(updated_row, Vec::new());
+
+        let mut out = Plan::with_output(RecordPaymentOutput { bill });
+        out.statements = final_statements;
+        out.objects = vec![row.id];
+        Ok(out)
     }
 }
 

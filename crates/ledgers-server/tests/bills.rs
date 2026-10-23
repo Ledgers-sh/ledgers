@@ -736,3 +736,373 @@ fn a_person_picks_the_party_a_bill_is_for_on_create_and_on_update() {
         String::from_utf8_lossy(refused.body().as_ref())
     );
 }
+
+/// Helper: creates a ready bill, posts it, and returns the bill id and status.
+fn create_and_post_bill(fx: &Fixture, invoice_num: &str) -> (String, StatusCode) {
+    let (_, upload) = upload_pdf(fx, &fx.keys.draft, &invoice(invoice_num, "1.190,00"));
+    let bill_id = extract(fx, &fx.keys.full, &doc_id_of(&upload)).body["bill"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_owned();
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/update"),
+        &fx.keys.draft,
+        Some(&complete_fields(invoice_num).to_string()),
+    );
+    call(
+        fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+    let posted = call(
+        fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/post"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+    (bill_id, posted.status)
+}
+
+#[test]
+fn propose_entry_on_a_ready_bill_balances_and_shows_vat_and_ap() {
+    let fx = person_fixture();
+    let (bill_id, status) = create_and_post_bill(&fx, "RE-2026-0800");
+    assert_eq!(status, StatusCode::OK);
+
+    let proposal = call(
+        &fx,
+        Method::GET,
+        &format!("/v1/bills/{bill_id}/propose-entry"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        None,
+    );
+    assert_eq!(proposal.status, StatusCode::OK, "{}", proposal.text);
+    let lines = &proposal.json()["lines"];
+    let debit: i64 = lines
+        .as_array()
+        .expect("lines")
+        .iter()
+        .filter(|l| l["side"] == "debit")
+        .map(|l| l["minor"].as_i64().unwrap_or(0))
+        .sum();
+    let credit: i64 = lines
+        .as_array()
+        .expect("lines")
+        .iter()
+        .filter(|l| l["side"] == "credit")
+        .map(|l| l["minor"].as_i64().unwrap_or(0))
+        .sum();
+    assert_eq!(debit, credit, "the entry balances");
+    assert!(
+        lines
+            .as_array()
+            .expect("lines")
+            .iter()
+            .any(|l| l["account"] == "1050" && l["minor"] == 19_000),
+        "input VAT on 1050"
+    );
+    assert!(
+        lines
+            .as_array()
+            .expect("lines")
+            .iter()
+            .any(|l| l["account"] == "2010" && l["side"] == "credit"),
+        "payable on 2010"
+    );
+}
+
+#[test]
+fn record_payment_partial_then_full_marks_paid_and_refuses_overpayment() {
+    let fx = person_fixture();
+    let (bill_id, status) = create_and_post_bill(&fx, "RE-2026-0801");
+    assert_eq!(status, StatusCode::OK);
+
+    // Partial payment (50% of 119_000)
+    let partial = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/record-payment"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "amount": 59_500,
+            "date": "2026-10-24",
+            "from_account": "1020"
+        })),
+    );
+    assert_eq!(partial.status, StatusCode::OK, "{}", partial.text);
+    assert_eq!(partial.json()["bill"]["status"], "partially-paid");
+
+    // Pay the rest
+    let rest = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/record-payment"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "amount": 59_500,
+            "date": "2026-10-24",
+            "from_account": "1020"
+        })),
+    );
+    assert_eq!(rest.status, StatusCode::OK, "{}", rest.text);
+    assert_eq!(rest.json()["bill"]["status"], "paid");
+
+    // Try to overpay
+    let overpay = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/record-payment"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "amount": 1,
+            "date": "2026-10-24",
+            "from_account": "1020"
+        })),
+    );
+    assert_eq!(overpay.status, StatusCode::BAD_REQUEST);
+    assert_eq!(overpay.json()["slug"], "bill-overpay");
+}
+
+#[test]
+fn agent_cannot_pay_a_bill_with_iban_changed_but_person_can() {
+    let fx = person_fixture();
+    // Create first bill to establish vendor IBAN
+    let (_first_id, _) = create_and_post_bill(&fx, "RE-2026-0802");
+
+    // Create second bill with changed IBAN
+    let (_, upload) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-0803", "1.190,00"));
+    let second_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    let mut fields = complete_fields("RE-2026-0803");
+    fields["vendor_iban"] = json!("DE02100100109307118603");
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{second_id}/update"),
+        &fx.keys.draft,
+        Some(&fields.to_string()),
+    );
+    call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{second_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+    let posted = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{second_id}/post"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+    assert_eq!(posted.status, StatusCode::OK);
+
+    // Agent cannot pay
+    let agent_pay = fx.send(
+        Method::POST,
+        &format!("/v1/bills/{second_id}/record-payment"),
+        &fx.keys.full,
+        Some(
+            &json!({
+                "amount": 59_500,
+                "date": "2026-10-24",
+                "from_account": "1020"
+            })
+            .to_string(),
+        ),
+    );
+    assert_eq!(agent_pay.status, StatusCode::FORBIDDEN);
+    assert_eq!(agent_pay.json()["slug"], "bill-person");
+
+    // Person can pay
+    let person_pay = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{second_id}/record-payment"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "amount": 119_000,
+            "date": "2026-10-24",
+            "from_account": "1020"
+        })),
+    );
+    assert_eq!(person_pay.status, StatusCode::OK);
+}
+
+#[test]
+fn an_agent_can_pay_a_bill_within_limits_and_person_pays_directly() {
+    let fx = person_fixture();
+    // Create and post a bill.
+    let (bill_id, _) = create_and_post_bill(&fx, "RE-2026-0900");
+
+    // Agent makes a payment within limits: should succeed.
+    let agent_pay = fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/record-payment"),
+        &fx.keys.full,
+        Some(
+            &json!({
+                "amount": 59_500,
+                "date": "2026-10-24",
+                "from_account": "1020"
+            })
+            .to_string(),
+        ),
+    );
+    assert_eq!(agent_pay.status, StatusCode::OK);
+
+    // Person can pay the remaining amount.
+    let person_pay = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/record-payment"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "amount": 59_500,
+            "date": "2026-10-24",
+            "from_account": "1020"
+        })),
+    );
+    assert_eq!(person_pay.status, StatusCode::OK);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vendor_history_excludes_bank_equity_and_ap_control_accounts() {
+    let fx = person_fixture();
+
+    // Build vendor history with different account types:
+    // 1. Bank account (1200)
+    // 2. Equity account (3000)
+    // 3. AP control account (2010)
+    // 4. Legitimate expense account (5060)
+
+    let mut bank_bill_fields = complete_fields("RE-2026-1001");
+    bank_bill_fields["lines"][0]["expense_account"] = json!("1200");
+    let (_, upload1) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-1001", "1.190,00"));
+    let bill1_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload1)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill1_id}/update"),
+        &fx.keys.draft,
+        Some(&bank_bill_fields.to_string()),
+    );
+    call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill1_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+
+    let mut equity_bill_fields = complete_fields("RE-2026-1002");
+    equity_bill_fields["lines"][0]["expense_account"] = json!("3000");
+    let (_, upload2) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-1002", "1.190,00"));
+    let bill2_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload2)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill2_id}/update"),
+        &fx.keys.draft,
+        Some(&equity_bill_fields.to_string()),
+    );
+    call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill2_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+
+    let mut ap_bill_fields = complete_fields("RE-2026-1003");
+    ap_bill_fields["lines"][0]["expense_account"] = json!("2010");
+    let (_, upload3) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-1003", "1.190,00"));
+    let bill3_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload3)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill3_id}/update"),
+        &fx.keys.draft,
+        Some(&ap_bill_fields.to_string()),
+    );
+    call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill3_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+
+    // Legitimate expense account.
+    let (_, upload4) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-1004", "1.190,00"));
+    let bill4_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload4)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill4_id}/update"),
+        &fx.keys.draft,
+        Some(&complete_fields("RE-2026-1004").to_string()),
+    );
+    call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bills/{bill4_id}/confirm"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({})),
+    );
+
+    // Create a new bill from the same vendor with no account specified.
+    let mut new_bill = complete_fields("RE-2026-1005");
+    new_bill["lines"][0]["expense_account"] = Value::Null;
+    let (_, upload_new) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-1005", "1.190,00"));
+    let new_bill_id = extract(&fx, &fx.keys.full, &doc_id_of(&upload_new)).body["bill"]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    let updated = fx.send(
+        Method::POST,
+        &format!("/v1/bills/{new_bill_id}/update"),
+        &fx.keys.draft,
+        Some(&new_bill.to_string()),
+    );
+
+    let bill = &updated.json()["bill"];
+    // Should suggest the legitimate expense account, not the bank/equity/AP accounts.
+    assert_eq!(
+        bill["lines"][0]["expense_account"], "5060",
+        "should suggest the legitimate expense account from history"
+    );
+    assert_eq!(
+        bill["lines"][0]["suggested_from"], bill4_id,
+        "the suggestion should name the bill it came from"
+    );
+}

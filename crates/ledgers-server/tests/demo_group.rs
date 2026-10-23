@@ -43,6 +43,7 @@ fn assert_reconciled(fx: &common::Fixture) {
             request_id: "recon".to_owned(),
             event_id: "recon-event".to_owned(),
             now: "2026-10-23T10:00:00Z".to_owned(),
+            is_person: false,
         },
         &ReconciliationInput {
             id: demo_group::GROUP_ID.to_owned(),

@@ -44,6 +44,8 @@ pub struct CommandContext {
     pub event_id: String,
     /// ISO 8601 UTC timestamp (now).
     pub now: String,
+    /// True if the authenticated principal is a person (session), false if an agent key.
+    pub is_person: bool,
 }
 
 /// The Command trait: define the name, input/output, tier, and the

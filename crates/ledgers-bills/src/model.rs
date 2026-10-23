@@ -29,6 +29,10 @@ pub enum Status {
     Posted,
     /// A person discarded the draft; it can no longer post.
     Discarded,
+    /// The bill is posted but not fully paid.
+    PartiallyPaid,
+    /// The bill is posted and fully paid.
+    Paid,
 }
 
 /// One bill line as entered or extracted, with its expense account.
@@ -231,6 +235,8 @@ pub struct BillView {
     pub vat_minor: Option<i64>,
     /// Gross total, minor units.
     pub gross_minor: Option<i64>,
+    /// Amount paid so far, minor units (0 if not posted).
+    pub paid_minor: i64,
     /// The lines.
     pub lines: Vec<BillLine>,
     /// Confidence per extracted field, 0 to 100 (empty for manual bills).
@@ -264,9 +270,16 @@ pub fn derive_status(
     discarded: bool,
     checks: &[CheckView],
     flags: &[String],
+    paid_minor: i64,
+    gross_minor: Option<i64>,
 ) -> Status {
     if posted {
-        Status::Posted
+        // Determine payment status based on paid amount.
+        match gross_minor {
+            Some(gross) if paid_minor >= gross => Status::Paid,
+            Some(_) if paid_minor > 0 => Status::PartiallyPaid,
+            _ => Status::Posted,
+        }
     } else if discarded {
         Status::Discarded
     } else if checks.iter().all(|c| c.ok) && flags.is_empty() {
@@ -359,21 +372,39 @@ mod tests {
             ..ok_check()
         };
         assert_eq!(
-            derive_status(false, false, &[ok_check()], &[]),
+            derive_status(false, false, &[ok_check()], &[], 0, None),
             Status::Ready
         );
         assert_eq!(
-            derive_status(false, false, &[bad], &[]),
+            derive_status(false, false, &[bad], &[], 0, None),
             Status::NeedsReview
         );
         assert_eq!(
-            derive_status(false, false, &[ok_check()], &[FLAG_VENDOR_NEW.into()]),
+            derive_status(
+                false,
+                false,
+                &[ok_check()],
+                &[FLAG_VENDOR_NEW.into()],
+                0,
+                None
+            ),
             Status::NeedsReview
         );
-        assert_eq!(derive_status(true, false, &[], &[]), Status::Posted);
         assert_eq!(
-            derive_status(false, true, &[ok_check()], &[]),
+            derive_status(true, false, &[], &[], 0, None),
+            Status::Posted
+        );
+        assert_eq!(
+            derive_status(false, true, &[ok_check()], &[], 0, None),
             Status::Discarded
+        );
+        assert_eq!(
+            derive_status(true, false, &[], &[], 100, Some(100)),
+            Status::Paid
+        );
+        assert_eq!(
+            derive_status(true, false, &[], &[], 50, Some(100)),
+            Status::PartiallyPaid
         );
     }
 
