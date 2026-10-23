@@ -279,3 +279,47 @@ fn the_steps_reconcile_like_the_one_go_seed() {
     run_all_steps(&deps, &timing);
     assert_reconciled(&fx);
 }
+
+/// Counts the operating company's accounts with `number` in the books.
+fn accounts_numbered(fx: &common::Fixture, company: &str, number: &str) -> i64 {
+    let rows = pollster::block_on(fx.deps.db.query(&cratefield_core::Statement::with_values(
+        "SELECT COUNT(*) AS n FROM account WHERE company_id = ? AND number = ?".to_owned(),
+        vec![
+            sea_query::Value::from(company),
+            sea_query::Value::from(number),
+        ],
+    )))
+    .expect("count accounts");
+    rows.rows[0].get::<i64>("n").expect("the count")
+}
+
+#[test]
+fn the_setup_adds_every_group_account_a_chart_lacks_in_one_step() {
+    let fx = fixture();
+    load_operating_book(&fx);
+    // An operating chart that lacks two of the licence's accounts, as a chart
+    // loaded before they existed does.
+    pollster::block_on(fx.deps.db.execute(&cratefield_core::Statement::with_values(
+        "DELETE FROM account WHERE company_id = ? AND number IN (?, ?)".to_owned(),
+        vec![
+            sea_query::Value::from(FZ_COMPANY),
+            sea_query::Value::from("5120"),
+            sea_query::Value::from("2060"),
+        ],
+    )))
+    .expect("remove two accounts");
+    assert_eq!(accounts_numbered(&fx, FZ_COMPANY, "5120"), 0);
+
+    let (deps, _timing) = counted(&fx);
+    pollster::block_on(demo_group::seed_step(
+        &deps,
+        common::COMPANY,
+        FZ_COMPANY,
+        IP_COMPANY,
+        2026,
+        0,
+    ))
+    .expect("step 0 adds both accounts, one event each");
+    assert_eq!(accounts_numbered(&fx, FZ_COMPANY, "5120"), 1);
+    assert_eq!(accounts_numbered(&fx, FZ_COMPANY, "2060"), 1);
+}

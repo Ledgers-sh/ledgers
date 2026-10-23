@@ -530,8 +530,10 @@ pub async fn settle_period(
     let year = fiscal_year(period)?;
     let period_end = crate::model::period_end(period)
         .ok_or_else(|| CommandError::InvalidInput(format!("{period:?} is not a YYYY-MM period")))?;
-    let suffix = call_id.to_owned();
-
+    // The settlement's external ids carry the posting attempt, which is fixed
+    // once the period has posted, so a retry names the same entries. A
+    // per-call id here let a retry post a settled side a second time.
+    let suffix = licensor_doc.attempt.max(licensee_doc.attempt).to_string();
     let licensor_input = accrual::entry_for(
         Side::Licensor,
         Step::Settle,
@@ -562,31 +564,42 @@ pub async fn settle_period(
             suffix: &suffix,
         },
     )?;
-    dry_run(db, &licensor_row.company_id, call_id, now, &licensor_input).await?;
-    dry_run(db, &licensee_row.company_id, call_id, now, &licensee_input).await?;
 
+    // A side an earlier call already posted is adopted, not posted again.
     let licensor_ext =
         accrual::external_id(agreement_id, period, Side::Licensor, Step::Settle, &suffix);
-    let licensor_entry = sides
-        .post(&licensor_row.company_id, &licensor_input)
-        .await
-        .map_err(|message| {
-            CommandError::InvalidInput(format!("the licensor side did not settle: {message}"))
-        })?;
-    let licensee_entry = match sides.post(&licensee_row.company_id, &licensee_input).await {
-        Ok(entry) => entry,
-        Err(message) => {
-            let reversal = sides
-                .reverse(&licensor_row.company_id, &licensor_ext, &period_end)
-                .await;
-            let detail = match reversal {
-                Ok(()) => "the licensor side was reversed".to_owned(),
-                Err(reason) => format!("reversing the licensor side also failed: {reason}"),
-            };
-            return Err(CommandError::InvalidInput(format!(
-                "the licensee side did not settle: {message}; {detail}"
-            )));
-        }
+    let licensee_ext =
+        accrual::external_id(agreement_id, period, Side::Licensee, Step::Settle, &suffix);
+    let licensor_prior = live_entry(db, &licensor_row.company_id, &licensor_ext).await?;
+    let licensee_prior = live_entry(db, &licensee_row.company_id, &licensee_ext).await?;
+    if licensor_prior.is_none() {
+        dry_run(db, &licensor_row.company_id, call_id, now, &licensor_input).await?;
+    }
+    if licensee_prior.is_none() {
+        dry_run(db, &licensee_row.company_id, call_id, now, &licensee_input).await?;
+    }
+
+    // A failing side does not reverse the other. The entry that landed stays
+    // and the period stays posted; the next call adopts it and posts the rest.
+    let licensor_entry = match licensor_prior {
+        Some(entry) => entry,
+        None => sides
+            .post(&licensor_row.company_id, &licensor_input)
+            .await
+            .map_err(|message| {
+                CommandError::InvalidInput(format!("the licensor side did not settle: {message}"))
+            })?,
+    };
+    let licensee_entry = match licensee_prior {
+        Some(entry) => entry,
+        None => sides
+            .post(&licensee_row.company_id, &licensee_input)
+            .await
+            .map_err(|message| {
+                CommandError::InvalidInput(format!(
+                    "the licensee side did not settle: {message}; the licensor side stays settled and the next call settles the licensee side"
+                ))
+            })?,
     };
 
     let statements = update_docs(
@@ -606,4 +619,27 @@ pub async fn settle_period(
         licensor_doc,
         licensee_doc,
     ))
+}
+
+/// The id of the entry with `external_id` on `company_id` when it is in the
+/// books. An entry that was reversed cannot be adopted: the settlement would
+/// have to start under a new id, which only an operator should decide.
+async fn live_entry(
+    db: &dyn Database,
+    company_id: &str,
+    external_id: &str,
+) -> Result<Option<String>, CommandError> {
+    let Some(entry) = ledgers_ledger::query::entry_by_external_id(db, company_id, external_id)
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+    else {
+        return Ok(None);
+    };
+    if entry.reversed_by.is_empty() {
+        Ok(Some(entry.id))
+    } else {
+        Err(CommandError::InvalidInput(format!(
+            "settlement entry {external_id} was reversed; the period cannot settle under it"
+        )))
+    }
 }
