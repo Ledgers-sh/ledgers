@@ -226,6 +226,42 @@ pub struct CountryPack {
     pub tax_codes: Vec<PackTaxCode>,
     /// The return layouts the pack can draft.
     pub returns: Vec<ReturnLayout>,
+    /// Withholding tax on payments abroad (advisory; see [`Withholding`]).
+    pub withholding: Vec<Withholding>,
+    /// Advisory notes with their sources (never tax advice; see [`CountryNote`]).
+    pub notes: Vec<CountryNote>,
+}
+
+/// A withholding tax rate on a kind of payment a resident makes to a
+/// non-resident. Used by intercompany agreements (ledgers-group) as the
+/// default rate, which a treaty override can replace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Withholding {
+    /// The payment kind: `royalty` is the only kind the packs carry today.
+    pub kind: String,
+    /// The statutory rate in basis points (`1000` = 10%). `None` when the
+    /// rate is not verified: the pack then records the question, not a rate.
+    pub rate_bp: Option<i64>,
+    /// The official source the rate was read from.
+    pub source: String,
+    /// True when the rate was checked against the official source.
+    pub verified: bool,
+    /// Who the rate applies to and what it does not cover.
+    pub note: String,
+}
+
+/// An advisory note for a country: a regime or incentive the company may
+/// check. It is information with a source, not tax advice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CountryNote {
+    /// A short topic name, for example `innovatiebox`.
+    pub topic: String,
+    /// The note text.
+    pub text: String,
+    /// The official source.
+    pub source: String,
+    /// True when the note was checked against the official source.
+    pub verified: bool,
 }
 
 #[derive(Deserialize)]
@@ -259,6 +295,30 @@ struct RawPack {
     tax_codes: Vec<RawTaxCode>,
     #[serde(default)]
     returns: Vec<RawReturn>,
+    #[serde(default)]
+    withholding: Vec<RawWithholding>,
+    #[serde(default)]
+    notes: Vec<RawNote>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWithholding {
+    kind: String,
+    /// A percentage text (`"10"`); absent while the rate is unverified.
+    percent: Option<String>,
+    source: String,
+    verified: bool,
+    note: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawNote {
+    topic: String,
+    text: String,
+    source: String,
+    verified: bool,
 }
 
 fn calendar_year() -> u8 {
@@ -537,6 +597,22 @@ impl CountryPack {
             )));
         }
 
+        let withholding = raw
+            .withholding
+            .iter()
+            .map(|w| parse_withholding(&raw.id, w))
+            .collect::<Result<Vec<_>, _>>()?;
+        let notes = raw
+            .notes
+            .into_iter()
+            .map(|n| CountryNote {
+                topic: n.topic,
+                text: n.text,
+                source: n.source,
+                verified: n.verified,
+            })
+            .collect();
+
         Ok(CountryPack {
             id: raw.id,
             iso: raw.iso,
@@ -563,6 +639,8 @@ impl CountryPack {
             rates,
             tax_codes,
             returns,
+            withholding,
+            notes,
         })
     }
 
@@ -681,6 +759,61 @@ const BUNDLED: &[(&str, &str)] = &[
 ///
 /// # Errors
 /// The first pack file that fails [`CountryPack::parse`].
+/// A withholding entry: a percentage becomes basis points. A verified entry
+/// must carry a rate or say why it has none in its note.
+fn parse_withholding(pack: &str, raw: &RawWithholding) -> Result<Withholding, TaxError> {
+    if raw.kind.is_empty() || raw.source.is_empty() {
+        return Err(invalid(format!(
+            "pack {pack}: a withholding entry needs a kind and a source"
+        )));
+    }
+    let rate_bp = match &raw.percent {
+        None => None,
+        Some(percent) => Some(percent_to_bp(percent).ok_or_else(|| {
+            invalid(format!(
+                "pack {pack}: withholding rate {percent:?} is not a percentage"
+            ))
+        })?),
+    };
+    if raw.verified && rate_bp.is_none() && raw.note.is_empty() {
+        return Err(invalid(format!(
+            "pack {pack}: an unrated withholding entry needs a note"
+        )));
+    }
+    Ok(Withholding {
+        kind: raw.kind.clone(),
+        rate_bp,
+        source: raw.source.clone(),
+        verified: raw.verified,
+        note: raw.note.clone(),
+    })
+}
+
+/// A percentage text with at most two decimals (`"10"`, `"9.5"`) as basis
+/// points (`1000`, `950`); `None` for anything else.
+#[must_use]
+pub fn percent_to_bp(percent: &str) -> Option<i64> {
+    let (whole, frac) = percent.split_once('.').unwrap_or((percent, ""));
+    if whole.is_empty() && frac.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !frac.bytes().all(|b| b.is_ascii_digit())
+        || frac.len() > 2
+    {
+        return None;
+    }
+    let whole: i64 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().ok()?
+    };
+    let frac_bp: i64 = format!("{frac:0<2}").parse().ok()?;
+    whole.checked_mul(100)?.checked_add(frac_bp)
+}
+
+/// Every bundled pack, parsed and validated.
+///
+/// # Errors
+/// The first pack file that fails [`CountryPack::parse`].
 pub fn bundled_packs() -> Result<Vec<CountryPack>, TaxError> {
     BUNDLED
         .iter()
@@ -728,4 +861,72 @@ pub fn pack_by_id(id: &str) -> Result<CountryPack, TaxError> {
         .into_iter()
         .find(|pack| pack.id == id)
         .ok_or_else(|| invalid(format!("no bundled pack {id:?}")))
+}
+
+#[cfg(test)]
+mod withholding_tests {
+    use super::*;
+
+    #[test]
+    fn a_percentage_becomes_basis_points_exactly() {
+        assert_eq!(percent_to_bp("10"), Some(1000));
+        assert_eq!(percent_to_bp("20"), Some(2000));
+        assert_eq!(percent_to_bp("9.5"), Some(950));
+        assert_eq!(percent_to_bp("0.25"), Some(25));
+        assert_eq!(
+            percent_to_bp("1.234"),
+            None,
+            "more than two decimals is refused"
+        );
+        assert_eq!(percent_to_bp("ten"), None);
+        assert_eq!(percent_to_bp(""), None);
+    }
+
+    #[test]
+    fn the_bundled_packs_carry_their_sourced_withholding_and_notes() {
+        let sg = pack_by_id("sg").expect("sg");
+        let royalty = sg
+            .withholding
+            .iter()
+            .find(|w| w.kind == "royalty")
+            .expect("sg royalty");
+        assert_eq!(royalty.rate_bp, Some(1000));
+        assert!(royalty.verified && royalty.source.contains("iras.gov.sg"));
+
+        let id = pack_by_id("id").expect("id");
+        let royalty = id
+            .withholding
+            .iter()
+            .find(|w| w.kind == "royalty")
+            .expect("id royalty");
+        assert_eq!(royalty.rate_bp, Some(2000));
+        assert!(royalty.verified && royalty.source.contains("pajak.go.id"));
+
+        let nl = pack_by_id("nl").expect("nl");
+        assert!(nl.withholding.is_empty());
+        let note = nl
+            .notes
+            .iter()
+            .find(|n| n.topic == "innovatiebox")
+            .expect("note");
+        assert!(note.verified && note.text.contains("9%"));
+    }
+
+    #[test]
+    fn an_unrated_withholding_entry_needs_its_reason() {
+        let raw = RawWithholding {
+            kind: "royalty".into(),
+            percent: None,
+            source: "example".into(),
+            verified: true,
+            note: String::new(),
+        };
+        assert!(parse_withholding("xx", &raw).is_err());
+        let with_note = RawWithholding {
+            note: "rate not verified".into(),
+            ..raw
+        };
+        let parsed = parse_withholding("xx", &with_note).expect("parses with a note");
+        assert_eq!(parsed.rate_bp, None);
+    }
 }

@@ -599,6 +599,1112 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/agreements": {
+      "post": {
+        "operationId": "agreements_create",
+        "description": "Execute command: agreements.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AgreementsCreateInput",
+                "description": "Input of `agreements.create`. The server fills in `id` and `created_by`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id; the server fills it in when empty.",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "group_id": {
+                    "description": "The group both companies belong to.",
+                    "type": "string"
+                  },
+                  "licensor_company_id": {
+                    "description": "The company that owns the rights and receives the income.",
+                    "type": "string"
+                  },
+                  "licensee_company_id": {
+                    "description": "The company that pays and books the expense.",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "description": "The kind of agreement.",
+                    "$ref": "#/components/schemas/Kind"
+                  },
+                  "basis": {
+                    "description": "How the period amount is worked out.",
+                    "$ref": "#/components/schemas/Basis"
+                  },
+                  "rate_bp": {
+                    "description": "The rate in basis points, for the percentage bases.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "fixed_minor": {
+                    "description": "The fixed monthly amount in minor units, for the fixed basis.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "currency": {
+                    "description": "The currency: the base currency of both companies.",
+                    "type": "string"
+                  },
+                  "treaty_override_bp": {
+                    "description": "A treaty rate in basis points that replaces the country pack's rate.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "notes": {
+                    "description": "Transfer pricing and reference notes.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "licensor": {
+                    "description": "The licensor's accounts.",
+                    "$ref": "#/components/schemas/AccountsInput"
+                  },
+                  "licensee": {
+                    "description": "The licensee's accounts.",
+                    "$ref": "#/components/schemas/AccountsInput"
+                  },
+                  "created_by": {
+                    "description": "Who creates it; the server fills it in.",
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "group_id",
+                  "licensor_company_id",
+                  "licensee_company_id",
+                  "kind",
+                  "basis",
+                  "currency",
+                  "licensor",
+                  "licensee"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AgreementsCreateOutput",
+                  "description": "Output of `agreements.create`: both sides, as their companies hold them.",
+                  "type": "object",
+                  "properties": {
+                    "licensor": {
+                      "description": "The licensor's row.",
+                      "$ref": "#/components/schemas/AgreementView"
+                    },
+                    "licensee": {
+                      "description": "The licensee's row.",
+                      "$ref": "#/components/schemas/AgreementView"
+                    }
+                  },
+                  "required": [
+                    "licensor",
+                    "licensee"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers agreements create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "agreements_list",
+        "description": "Execute command: agreements.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AgreementsListOutput",
+                  "description": "Output of `agreements.list`: the company's own side of each agreement.",
+                  "type": "object",
+                  "properties": {
+                    "agreements": {
+                      "description": "The agreements.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgreementView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "agreements"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers agreements list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/agreements\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}": {
+      "get": {
+        "operationId": "agreements_get",
+        "description": "Execute command: agreements.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AgreementsGetOutput",
+                  "description": "Output of `agreements.get`: the company's side and its period documents.",
+                  "type": "object",
+                  "properties": {
+                    "agreement": {
+                      "description": "The company's side of the agreement.",
+                      "$ref": "#/components/schemas/AgreementView"
+                    },
+                    "periods": {
+                      "description": "The company's documents, one per period.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeriodDocView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "agreement",
+                    "periods"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers agreements get",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/agreements/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}/post-period": {
+      "post": {
+        "operationId": "agreements_post_period",
+        "description": "Execute command: agreements.post_period",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "PeriodsInput",
+                "description": "Input of `agreements.post_period` and `agreements.settle_period`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id, from the path.",
+                    "type": "string"
+                  },
+                  "periods": {
+                    "description": "The periods, each `YYYY-MM`, posted or settled in order.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "periods"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PeriodsOutput",
+                  "description": "Output of `agreements.post_period` and `agreements.settle_period`: the\ndocuments of each period, licensor first.",
+                  "type": "object",
+                  "properties": {
+                    "agreement_id": {
+                      "description": "The agreement.",
+                      "type": "string"
+                    },
+                    "periods": {
+                      "description": "One entry per period, in the order given.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeriodPair"
+                      }
+                    }
+                  },
+                  "required": [
+                    "agreement_id",
+                    "periods"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.post_period",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers agreements post-period",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements/{id}/post-period\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}/run-period": {
+      "post": {
+        "operationId": "agreements_run_period",
+        "description": "Execute command: agreements.run_period",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RunPeriodInput",
+                "description": "Input of `agreements.run_period`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id, from the path.",
+                    "type": "string"
+                  },
+                  "periods": {
+                    "description": "The periods to draft, each `YYYY-MM`.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "periods"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RunPeriodOutput",
+                  "description": "Output of `agreements.run_period`: the documents of each period, both sides.",
+                  "type": "object",
+                  "properties": {
+                    "agreement_id": {
+                      "description": "The agreement.",
+                      "type": "string"
+                    },
+                    "periods": {
+                      "description": "The documents per period, licensor first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeriodPair"
+                      }
+                    }
+                  },
+                  "required": [
+                    "agreement_id",
+                    "periods"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.run_period",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers agreements run-period",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements/{id}/run-period\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}/settle-period": {
+      "post": {
+        "operationId": "agreements_settle_period",
+        "description": "Execute command: agreements.settle_period",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "PeriodsInput",
+                "description": "Input of `agreements.post_period` and `agreements.settle_period`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id, from the path.",
+                    "type": "string"
+                  },
+                  "periods": {
+                    "description": "The periods, each `YYYY-MM`, posted or settled in order.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "periods"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PeriodsOutput",
+                  "description": "Output of `agreements.post_period` and `agreements.settle_period`: the\ndocuments of each period, licensor first.",
+                  "type": "object",
+                  "properties": {
+                    "agreement_id": {
+                      "description": "The agreement.",
+                      "type": "string"
+                    },
+                    "periods": {
+                      "description": "One entry per period, in the order given.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PeriodPair"
+                      }
+                    }
+                  },
+                  "required": [
+                    "agreement_id",
+                    "periods"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.settle_period",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers agreements settle-period",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements/{id}/settle-period\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}/terminate": {
+      "post": {
+        "operationId": "agreements_terminate",
+        "description": "Execute command: agreements.terminate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AgreementIdInput",
+                "description": "Input of `agreements.get` and `agreements.terminate`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id, from the path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AgreementView",
+                  "description": "One row of an agreement, as one side sees it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The agreement id.",
+                      "type": "string"
+                    },
+                    "group_id": {
+                      "description": "The group the agreement belongs to.",
+                      "type": "string"
+                    },
+                    "side": {
+                      "description": "This company's side.",
+                      "$ref": "#/components/schemas/Side"
+                    },
+                    "counterparty_id": {
+                      "description": "The other company, when the person may see it; `None` otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "counterparty_hidden": {
+                      "description": "True when the other company exists but the person may not see it.",
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "description": "The kind.",
+                      "$ref": "#/components/schemas/Kind"
+                    },
+                    "basis": {
+                      "description": "The basis.",
+                      "$ref": "#/components/schemas/Basis"
+                    },
+                    "rate_bp": {
+                      "description": "The rate in basis points, for the two percentage bases.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "fixed_minor": {
+                      "description": "The fixed monthly amount in minor units, for the fixed basis.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "currency": {
+                      "description": "The currency, the base currency of both companies.",
+                      "type": "string"
+                    },
+                    "wht_bp": {
+                      "description": "The withholding rate applied to each period, in basis points.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "wht_basis": {
+                      "description": "Why that rate applies.",
+                      "$ref": "#/components/schemas/WhtBasis"
+                    },
+                    "treaty_override_bp": {
+                      "description": "The treaty rate the person entered, if any.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "accounts": {
+                      "description": "This side's accounts.",
+                      "$ref": "#/components/schemas/Accounts"
+                    },
+                    "notes": {
+                      "description": "Free text: the transfer pricing note and the agreement reference.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "terminated_at": {
+                      "description": "When the agreement stopped producing periods.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_by": {
+                      "description": "Who created it.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "group_id",
+                    "side",
+                    "counterparty_hidden",
+                    "kind",
+                    "basis",
+                    "currency",
+                    "wht_bp",
+                    "wht_basis",
+                    "accounts",
+                    "created_by",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.terminate",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers agreements terminate",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements/{id}/terminate\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/agreements/{id}/update": {
+      "post": {
+        "operationId": "agreements_update",
+        "description": "Execute command: agreements.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "agreements"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AgreementsUpdateInput",
+                "description": "Input of `agreements.update`: the terms and accounts, replacing the old.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The agreement id, from the path.",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "description": "The kind.",
+                    "$ref": "#/components/schemas/Kind"
+                  },
+                  "basis": {
+                    "description": "The basis.",
+                    "$ref": "#/components/schemas/Basis"
+                  },
+                  "rate_bp": {
+                    "description": "The rate in basis points, for the percentage bases.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "fixed_minor": {
+                    "description": "The fixed monthly amount, for the fixed basis.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "currency": {
+                    "description": "The currency.",
+                    "type": "string"
+                  },
+                  "treaty_override_bp": {
+                    "description": "The treaty rate in basis points, if any.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64"
+                  },
+                  "notes": {
+                    "description": "The notes.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "licensor": {
+                    "description": "The licensor's accounts.",
+                    "$ref": "#/components/schemas/AccountsInput"
+                  },
+                  "licensee": {
+                    "description": "The licensee's accounts.",
+                    "$ref": "#/components/schemas/AccountsInput"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "basis",
+                  "currency",
+                  "licensor",
+                  "licensee"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AgreementView",
+                  "description": "One row of an agreement, as one side sees it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The agreement id.",
+                      "type": "string"
+                    },
+                    "group_id": {
+                      "description": "The group the agreement belongs to.",
+                      "type": "string"
+                    },
+                    "side": {
+                      "description": "This company's side.",
+                      "$ref": "#/components/schemas/Side"
+                    },
+                    "counterparty_id": {
+                      "description": "The other company, when the person may see it; `None` otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "counterparty_hidden": {
+                      "description": "True when the other company exists but the person may not see it.",
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "description": "The kind.",
+                      "$ref": "#/components/schemas/Kind"
+                    },
+                    "basis": {
+                      "description": "The basis.",
+                      "$ref": "#/components/schemas/Basis"
+                    },
+                    "rate_bp": {
+                      "description": "The rate in basis points, for the two percentage bases.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "fixed_minor": {
+                      "description": "The fixed monthly amount in minor units, for the fixed basis.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "currency": {
+                      "description": "The currency, the base currency of both companies.",
+                      "type": "string"
+                    },
+                    "wht_bp": {
+                      "description": "The withholding rate applied to each period, in basis points.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "wht_basis": {
+                      "description": "Why that rate applies.",
+                      "$ref": "#/components/schemas/WhtBasis"
+                    },
+                    "treaty_override_bp": {
+                      "description": "The treaty rate the person entered, if any.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64"
+                    },
+                    "accounts": {
+                      "description": "This side's accounts.",
+                      "$ref": "#/components/schemas/Accounts"
+                    },
+                    "notes": {
+                      "description": "Free text: the transfer pricing note and the agreement reference.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "terminated_at": {
+                      "description": "When the agreement stopped producing periods.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_by": {
+                      "description": "Who created it.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "group_id",
+                    "side",
+                    "counterparty_hidden",
+                    "kind",
+                    "basis",
+                    "currency",
+                    "wht_bp",
+                    "wht_basis",
+                    "accounts",
+                    "created_by",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "agreements.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers agreements update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/agreements/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/allocation-rules": {
       "get": {
         "operationId": "allocation_rules_list",
@@ -6613,6 +7719,365 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/groups": {
+      "post": {
+        "operationId": "groups_create",
+        "description": "Execute command: groups.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "groups"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "GroupsCreateInput",
+                "description": "Input of `groups.create`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The group id; the server fills it in when empty.",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "name": {
+                    "description": "The group name.",
+                    "type": "string"
+                  },
+                  "members": {
+                    "description": "The members: at least two companies.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/MemberInput"
+                    }
+                  },
+                  "created_by": {
+                    "description": "Who creates it; the server fills it in.",
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "name",
+                  "members"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GroupView",
+                  "description": "One group as a read returns it. Members the person may not see are left out.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The group id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The group name.",
+                      "type": "string"
+                    },
+                    "members": {
+                      "description": "The members the person may see.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemberView"
+                      }
+                    },
+                    "has_hidden_members": {
+                      "description": "True when some member is not shown to the person.",
+                      "type": "boolean"
+                    },
+                    "created_by": {
+                      "description": "Who created it.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "members",
+                    "has_hidden_members",
+                    "created_by",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "groups.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers groups create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/groups\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "groups_list",
+        "description": "Execute command: groups.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "groups"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GroupsListOutput",
+                  "description": "Output of `groups.list`.",
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "description": "The groups the company belongs to.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GroupView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "groups"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "groups.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers groups list",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/groups\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/groups/{id}/update": {
+      "post": {
+        "operationId": "groups_update",
+        "description": "Execute command: groups.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "groups"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "GroupsUpdateInput",
+                "description": "Input of `groups.update`: a new name and, when given, the whole member list.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The group id, from the path.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "members": {
+                    "description": "The new member list, replacing the old one; at least two companies.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/MemberInput"
+                    }
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GroupView",
+                  "description": "One group as a read returns it. Members the person may not see are left out.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The group id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The group name.",
+                      "type": "string"
+                    },
+                    "members": {
+                      "description": "The members the person may see.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemberView"
+                      }
+                    },
+                    "has_hidden_members": {
+                      "description": "True when some member is not shown to the person.",
+                      "type": "boolean"
+                    },
+                    "created_by": {
+                      "description": "Who created it.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "members",
+                    "has_hidden_members",
+                    "created_by",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "groups.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers groups update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/groups/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/keys": {
       "post": {
         "operationId": "keys_create",
@@ -7764,6 +9229,184 @@
         "x-ledgers-cli": "ledgers reports costs-by-unit",
         "x-ledgers-mcp": "reports_costs_by_unit",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/costs-by-unit\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/groups/{id}/view": {
+      "get": {
+        "operationId": "reports_group_view",
+        "description": "Execute command: reports.group_view",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "groups"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GroupViewOutput",
+                  "description": "Output of `reports.group_view`.",
+                  "type": "object",
+                  "properties": {
+                    "group_id": {
+                      "description": "The group.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The group name.",
+                      "type": "string"
+                    },
+                    "period": {
+                      "description": "The period of the P&L.",
+                      "type": "string"
+                    },
+                    "as_of": {
+                      "description": "The balance sheet date.",
+                      "type": "string"
+                    },
+                    "members": {
+                      "description": "The members the person may see, side by side.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemberFigures"
+                      }
+                    },
+                    "consolidated": {
+                      "description": "Consolidation is not in the core; it is a Ledgers Cloud feature.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "group_id",
+                    "name",
+                    "period",
+                    "as_of",
+                    "members",
+                    "consolidated"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.group_view",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports group-view",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/groups/{id}/view\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/groups/{id}/reconciliation": {
+      "get": {
+        "operationId": "reports_intercompany_reconciliation",
+        "description": "Execute command: reports.intercompany_reconciliation",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "groups"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ReconciliationOutput",
+                  "description": "Output of `reports.intercompany_reconciliation`.",
+                  "type": "object",
+                  "properties": {
+                    "group_id": {
+                      "description": "The group.",
+                      "type": "string"
+                    },
+                    "pairs": {
+                      "description": "One entry per agreement whose both companies the person may see.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PairView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "group_id",
+                    "pairs"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.intercompany_reconciliation",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports intercompany-reconciliation",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/groups/{id}/reconciliation\" -H \"Authorization: Bearer $LEDGERS_KEY\"",
+        "x-ledgers-human-only": true
       }
     },
     "/v1/reports/p-and-l": {
@@ -9059,6 +10702,414 @@
           "description",
           "minor",
           "currency"
+        ]
+      },
+      "Kind": {
+        "description": "The kind of intercompany agreement.",
+        "oneOf": [
+          {
+            "description": "A licence to use intellectual property.",
+            "type": "string",
+            "const": "licence"
+          },
+          {
+            "description": "A royalty for intellectual property.",
+            "type": "string",
+            "const": "royalty"
+          },
+          {
+            "description": "A management fee.",
+            "type": "string",
+            "const": "management_fee"
+          },
+          {
+            "description": "A loan.",
+            "type": "string",
+            "const": "loan"
+          }
+        ]
+      },
+      "Basis": {
+        "description": "How a period's amount is worked out.",
+        "oneOf": [
+          {
+            "description": "A rate in basis points of the licensee's revenue for the period.",
+            "type": "string",
+            "const": "pct_of_revenue_bp"
+          },
+          {
+            "description": "A fixed amount each month.",
+            "type": "string",
+            "const": "fixed_monthly"
+          },
+          {
+            "description": "A mark-up in basis points on the licensor's expenses for the period.",
+            "type": "string",
+            "const": "cost_plus_bp"
+          }
+        ]
+      },
+      "AccountsInput": {
+        "description": "The accounts one side names in a create or update call.",
+        "type": "object",
+        "properties": {
+          "royalty_account": {
+            "description": "The royalty account number.",
+            "type": "string"
+          },
+          "ic_account": {
+            "description": "The intercompany account number.",
+            "type": "string"
+          },
+          "wht_account": {
+            "description": "The withholding account number, when the agreement has withholding.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bank_account": {
+            "description": "The bank account number.",
+            "type": "string"
+          },
+          "unit": {
+            "description": "The business unit the royalty line carries. Required when the company\nhas business units.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "royalty_account",
+          "ic_account",
+          "bank_account"
+        ]
+      },
+      "AgreementView": {
+        "description": "One row of an agreement, as one side sees it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The agreement id.",
+            "type": "string"
+          },
+          "group_id": {
+            "description": "The group the agreement belongs to.",
+            "type": "string"
+          },
+          "side": {
+            "description": "This company's side.",
+            "$ref": "#/components/schemas/Side"
+          },
+          "counterparty_id": {
+            "description": "The other company, when the person may see it; `None` otherwise.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counterparty_hidden": {
+            "description": "True when the other company exists but the person may not see it.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "The kind.",
+            "$ref": "#/components/schemas/Kind"
+          },
+          "basis": {
+            "description": "The basis.",
+            "$ref": "#/components/schemas/Basis"
+          },
+          "rate_bp": {
+            "description": "The rate in basis points, for the two percentage bases.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "fixed_minor": {
+            "description": "The fixed monthly amount in minor units, for the fixed basis.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "description": "The currency, the base currency of both companies.",
+            "type": "string"
+          },
+          "wht_bp": {
+            "description": "The withholding rate applied to each period, in basis points.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "wht_basis": {
+            "description": "Why that rate applies.",
+            "$ref": "#/components/schemas/WhtBasis"
+          },
+          "treaty_override_bp": {
+            "description": "The treaty rate the person entered, if any.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "accounts": {
+            "description": "This side's accounts.",
+            "$ref": "#/components/schemas/Accounts"
+          },
+          "notes": {
+            "description": "Free text: the transfer pricing note and the agreement reference.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terminated_at": {
+            "description": "When the agreement stopped producing periods.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by": {
+            "description": "Who created it.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When last changed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "group_id",
+          "side",
+          "counterparty_hidden",
+          "kind",
+          "basis",
+          "currency",
+          "wht_bp",
+          "wht_basis",
+          "accounts",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "Side": {
+        "description": "Which party a row belongs to.",
+        "oneOf": [
+          {
+            "description": "The party that owns the rights and receives the income.",
+            "type": "string",
+            "const": "licensor"
+          },
+          {
+            "description": "The party that pays and books the expense.",
+            "type": "string",
+            "const": "licensee"
+          }
+        ]
+      },
+      "WhtBasis": {
+        "description": "Why a withholding rate is what it is.",
+        "oneOf": [
+          {
+            "description": "The payer's country pack gives the rate.",
+            "type": "string",
+            "const": "pack"
+          },
+          {
+            "description": "A treaty rate the person entered replaces the pack rate.",
+            "type": "string",
+            "const": "treaty_override"
+          },
+          {
+            "description": "The payee is resident in the payer's country: no withholding.",
+            "type": "string",
+            "const": "resident"
+          },
+          {
+            "description": "The pack has no verified rate for this payment: none is applied.",
+            "type": "string",
+            "const": "no_rate_on_file"
+          },
+          {
+            "description": "The kind of agreement carries no withholding.",
+            "type": "string",
+            "const": "not_applicable"
+          }
+        ]
+      },
+      "Accounts": {
+        "description": "The accounts one side posts to, by number.",
+        "type": "object",
+        "properties": {
+          "royalty": {
+            "description": "The royalty account: an expense for the licensee, income for the licensor.",
+            "type": "string"
+          },
+          "ic": {
+            "description": "The intercompany account: a payable for the licensee, a receivable for the licensor.",
+            "type": "string"
+          },
+          "wht": {
+            "description": "The withholding account: a payable for the licensee, a receivable for the licensor.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bank": {
+            "description": "The bank account the settlement moves money through.",
+            "type": "string"
+          },
+          "unit": {
+            "description": "The business unit the royalty line carries, required when the company\nhas business units (its P&L lines must name one).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "royalty",
+          "ic",
+          "bank"
+        ]
+      },
+      "PeriodDocView": {
+        "description": "One period of an agreement for one side.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The intercompany id, shared by both sides.",
+            "type": "string"
+          },
+          "side": {
+            "description": "The side.",
+            "$ref": "#/components/schemas/Side"
+          },
+          "period": {
+            "description": "The period, `YYYY-MM`.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The status.",
+            "$ref": "#/components/schemas/DocStatus"
+          },
+          "currency": {
+            "description": "The currency.",
+            "type": "string"
+          },
+          "basis_minor": {
+            "description": "The amount the basis produced, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "gross_minor": {
+            "description": "The royalty amount before withholding.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "wht_minor": {
+            "description": "The withholding tax.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "net_minor": {
+            "description": "Gross less withholding: what the licensee owes and pays.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "accrual_entry_id": {
+            "description": "The licensor's or licensee's accrual entry, once posted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settle_entry_id": {
+            "description": "The settlement entry, once settled.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error": {
+            "description": "Why the last post attempt failed, when it did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "side",
+          "period",
+          "status",
+          "currency",
+          "basis_minor",
+          "gross_minor",
+          "wht_minor",
+          "net_minor"
+        ]
+      },
+      "DocStatus": {
+        "description": "Where a period's document stands.",
+        "oneOf": [
+          {
+            "description": "Drafted, not posted.",
+            "type": "string",
+            "const": "draft"
+          },
+          {
+            "description": "The accrual is posted.",
+            "type": "string",
+            "const": "posted"
+          },
+          {
+            "description": "The accrual and the settlement are posted.",
+            "type": "string",
+            "const": "settled"
+          },
+          {
+            "description": "A post attempt was reversed; the next post starts again.",
+            "type": "string",
+            "const": "failed"
+          }
+        ]
+      },
+      "PeriodPair": {
+        "description": "One period's two documents.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The period, `YYYY-MM`.",
+            "type": "string"
+          },
+          "docs": {
+            "description": "The licensor's and the licensee's documents.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PeriodDocView"
+            }
+          }
+        },
+        "required": [
+          "period",
+          "docs"
         ]
       },
       "ConnectionAllocation": {
@@ -11122,6 +13173,125 @@
           "state"
         ]
       },
+      "MemberInput": {
+        "description": "One member as a create or update call names it.",
+        "type": "object",
+        "properties": {
+          "company_id": {
+            "description": "The member company.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What the member is in the group.",
+            "$ref": "#/components/schemas/GroupKind"
+          },
+          "ownership_bp": {
+            "description": "The ownership the group holds in the member, in basis points (`10000` = 100%).",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "company_id",
+          "kind",
+          "ownership_bp"
+        ]
+      },
+      "GroupKind": {
+        "description": "What a group member is in the group.",
+        "oneOf": [
+          {
+            "description": "A holding company.",
+            "type": "string",
+            "const": "holding"
+          },
+          {
+            "description": "The company that owns the intellectual property.",
+            "type": "string",
+            "const": "ip_holding"
+          },
+          {
+            "description": "A company that trades and pays for the IP.",
+            "type": "string",
+            "const": "operating"
+          }
+        ]
+      },
+      "MemberView": {
+        "description": "One member as a read returns it.",
+        "type": "object",
+        "properties": {
+          "company_id": {
+            "description": "The member company.",
+            "type": "string"
+          },
+          "company_name": {
+            "description": "The company's name.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What the member is in the group.",
+            "$ref": "#/components/schemas/GroupKind"
+          },
+          "ownership_bp": {
+            "description": "The ownership in basis points.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "company_id",
+          "company_name",
+          "kind",
+          "ownership_bp"
+        ]
+      },
+      "GroupView": {
+        "description": "One group as a read returns it. Members the person may not see are left out.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The group id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The group name.",
+            "type": "string"
+          },
+          "members": {
+            "description": "The members the person may see.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberView"
+            }
+          },
+          "has_hidden_members": {
+            "description": "True when some member is not shown to the person.",
+            "type": "boolean"
+          },
+          "created_by": {
+            "description": "Who created it.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When last changed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "members",
+          "has_hidden_members",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ]
+      },
       "LimitAmounts": {
         "description": "One currency's limits, as canonical decimal strings in major units\n(`\"1000.00\"` for EUR is 100000 minor units).",
         "type": "object",
@@ -11431,6 +13601,225 @@
           "connection_id",
           "currency",
           "amount_minor"
+        ]
+      },
+      "MemberFigures": {
+        "description": "One member's P&L and balance sheet in the group view.",
+        "type": "object",
+        "properties": {
+          "company": {
+            "description": "The company.",
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "description": "What the member is in the group.",
+            "$ref": "#/components/schemas/GroupKind"
+          },
+          "ownership_bp": {
+            "description": "The ownership in basis points.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "description": "The company's base currency.",
+            "type": "string"
+          },
+          "revenue_minor": {
+            "description": "Revenue for the period, minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "expenses_minor": {
+            "description": "Expenses for the period, minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "net_income_minor": {
+            "description": "Net income for the period, minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "assets_minor": {
+            "description": "Total assets at the as-of date.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "liabilities_minor": {
+            "description": "Total liabilities at the as-of date.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "equity_minor": {
+            "description": "Total equity at the as-of date, including the year's result.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "balanced": {
+            "description": "Whether the sheet balances.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "company",
+          "kind",
+          "ownership_bp",
+          "currency",
+          "revenue_minor",
+          "expenses_minor",
+          "net_income_minor",
+          "assets_minor",
+          "liabilities_minor",
+          "equity_minor",
+          "balanced"
+        ]
+      },
+      "CompanyRef": {
+        "description": "One company, as a report names it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The company id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The company's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PairView": {
+        "description": "One agreement, reconciled between its two companies.\n\nThe balances are the books' own: `receivable` is the licensor's receivable\nplus its withholding receivable, `payable` the licensee's payable plus its\nwithholding payable. Both are zero after a period settles, so a difference\nis a disagreement between the books.",
+        "type": "object",
+        "properties": {
+          "agreement_id": {
+            "description": "The agreement id.",
+            "type": "string"
+          },
+          "group_id": {
+            "description": "The group.",
+            "type": "string"
+          },
+          "licensor": {
+            "description": "The licensor.",
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "licensee": {
+            "description": "The licensee.",
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "currency": {
+            "description": "The agreement currency.",
+            "type": "string"
+          },
+          "receivable_minor": {
+            "description": "The licensor's receivable and withholding receivable, minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "payable_minor": {
+            "description": "The licensee's payable and withholding payable, minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "balance_difference_minor": {
+            "description": "Receivable less payable: zero when the books agree.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "income_minor": {
+            "description": "The licensor's royalty income.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "expense_minor": {
+            "description": "The licensee's royalty expense.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "income_difference_minor": {
+            "description": "Income less expense: zero when the books agree.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "description": "`balanced` when both differences are zero, `difference` otherwise.",
+            "type": "string"
+          },
+          "open_periods": {
+            "description": "Periods that are posted but not yet settled.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "periods": {
+            "description": "Every period, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PeriodStatus"
+            }
+          }
+        },
+        "required": [
+          "agreement_id",
+          "group_id",
+          "licensor",
+          "licensee",
+          "currency",
+          "receivable_minor",
+          "payable_minor",
+          "balance_difference_minor",
+          "income_minor",
+          "expense_minor",
+          "income_difference_minor",
+          "status",
+          "open_periods",
+          "periods"
+        ]
+      },
+      "PeriodStatus": {
+        "description": "One period's documents, as the reconciliation lists them.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The period, `YYYY-MM`.",
+            "type": "string"
+          },
+          "licensor_status": {
+            "description": "The licensor's status.",
+            "$ref": "#/components/schemas/DocStatus"
+          },
+          "licensee_status": {
+            "description": "The licensee's status.",
+            "$ref": "#/components/schemas/DocStatus"
+          },
+          "gross_minor": {
+            "description": "The gross royalty.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "wht_minor": {
+            "description": "The withholding.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "net_minor": {
+            "description": "The net the licensee owes.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "licensor_status",
+          "licensee_status",
+          "gross_minor",
+          "wht_minor",
+          "net_minor"
         ]
       },
       "TrendMonthView": {

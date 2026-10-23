@@ -8,6 +8,7 @@
 use crate::Composed;
 use crate::compose;
 use crate::demo::{self, SeedGate};
+use crate::demo_group;
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
 use crate::members;
 use crate::people::{allowed_origin, credentialed_cors_headers};
@@ -230,6 +231,11 @@ async fn bootstrap_route(
 /// `external_id`: a second run posts nothing. The gate is checked first, so a
 /// refused request reads and writes nothing. The response and the log carry
 /// counts only.
+///
+/// `?demo=factory-zero` loads the operating book only. The Factory Zero group
+/// demo runs as `?demo=factory-zero-group&step=<n>`, one bounded step per
+/// request (see [`seed_group_step_route`]): a single request cannot finish it
+/// within a Worker's time budget.
 async fn seed_demo_route(
     req: Request,
     env: &Env,
@@ -258,16 +264,30 @@ async fn seed_demo_route(
     // `?demo=halden` (the default) loads Halden Works into LEDGERS_COMPANY_ID;
     // `?demo=factory-zero` loads the Factory Zero book into its own company,
     // LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID, which is created on first use.
-    let demo_name = req
+    let query: Vec<(String, String)> = req
         .url()?
         .query_pairs()
-        .find(|(key, _)| key == "demo")
-        .map(|(_, value)| value.into_owned())
-        .unwrap_or_else(|| "halden".to_owned());
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    let param = |name: &str| {
+        query
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    };
+    let demo_name = param("demo").unwrap_or_else(|| "halden".to_owned());
+    if demo_name == "factory-zero-group" {
+        return seed_group_step_route(env, runtime, param("step").as_deref()).await;
+    }
     let (company_var, factory_zero) = match demo_name.as_str() {
         "halden" => ("LEDGERS_COMPANY_ID", false),
         "factory-zero" => ("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID", true),
-        _ => return Response::error("demo must be halden or factory-zero", 400),
+        _ => {
+            return Response::error(
+                "demo must be halden, factory-zero or factory-zero-group",
+                400,
+            );
+        }
     };
     let company_id = env
         .var(company_var)
@@ -277,9 +297,10 @@ async fn seed_demo_route(
         return Response::error(format!("{company_var} is not set"), 500);
     }
     let ports = runtime.ports(env, Arc::new(NoopDefer));
-    let Some(deps) = Deps::from_ports(&ports) else {
+    let Some(mut deps) = Deps::from_ports(&ports) else {
         return Response::error("Storage is not bound", 503);
     };
+    let db_timing = count_db_calls(&mut deps);
 
     let year = deps.clock.now().year();
     let result = if factory_zero {
@@ -290,23 +311,39 @@ async fn seed_demo_route(
             .var("LEDGERS_COMPANY_ID")
             .map(|value| value.to_string())
             .unwrap_or_default();
-        match demo::seed_company_book(&deps, &company_id, &book).await {
+        let seeded = match demo::seed_company_book(&deps, &company_id, &book).await {
             Ok(report) => {
                 // The demo connections (recorded fixtures, no tokens) for the
                 // Costs by venture view, after the book they allocate.
-                crate::dispatch::ServerDispatch::new(company_id.clone())
+                let connections = crate::dispatch::ServerDispatch::new(company_id.clone())
                     .seed_demo_connections(&deps, year)
-                    .await?;
-                demo::grant_bootstrap_owner(&deps, &home, &company_id)
-                    .await
-                    .map(|()| report)
+                    .await;
+                match connections {
+                    Ok(_) => demo::grant_bootstrap_owner(&deps, &home, &company_id)
+                        .await
+                        .map(|()| report),
+                    Err(err) => Err(err),
+                }
             }
             Err(err) => Err(err),
+        };
+        if env
+            .var("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID")
+            .is_ok_and(|ip| !ip.to_string().is_empty())
+        {
+            console_log!("group demo: run ?demo=factory-zero-group&step=0 through step 23");
         }
+        seeded
     } else {
         let book = ledgers_demo::halden::book(year);
         demo::seed_internal(&deps, &company_id, &book).await
     };
+    let snap = db_timing.snapshot();
+    console_log!(
+        "seed db: {} round trips, {} statements",
+        snap.calls,
+        snap.statements
+    );
     let mut response = match result {
         Ok(report) => {
             console_log!(
@@ -331,6 +368,106 @@ async fn seed_demo_route(
     };
     response.headers_mut().set("cache-control", "no-store")?;
     Ok(response)
+}
+
+/// `POST /admin/seed-demo?demo=factory-zero-group&step=<n>` (the gate and the
+/// operating book must already be there). Runs step `n` of the Factory Zero
+/// group demo (`demo_group::seed_step`) and answers
+/// `{"step", "done", "next", "posted", "settled", "open_period", "db_calls"}`.
+/// Call steps 0 to 23 in order, one request each, until `done` is true; each
+/// step is idempotent, so a repeated or interrupted call is safe. `db_calls`
+/// is the number of database round trips the step made.
+async fn seed_group_step_route(
+    env: &Env,
+    runtime: &Cloudflare,
+    step: Option<&str>,
+) -> worker::Result<Response> {
+    let step = match demo_group::parse_step(step) {
+        Ok(step) => step,
+        Err(message) => return Response::error(message, 400),
+    };
+    let home = env
+        .var("LEDGERS_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let ops = env
+        .var("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let ip = env
+        .var("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    for (name, value) in [
+        ("LEDGERS_COMPANY_ID", &home),
+        ("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID", &ops),
+        ("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID", &ip),
+    ] {
+        if value.is_empty() {
+            return Response::error(format!("{name} is not set"), 500);
+        }
+    }
+    let ports = runtime.ports(env, Arc::new(NoopDefer));
+    let Some(mut deps) = Deps::from_ports(&ports) else {
+        return Response::error("Storage is not bound", 503);
+    };
+    let db_timing = count_db_calls(&mut deps);
+
+    match demo_group::operating_book_present(&deps, &ops).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Response::error(
+                "The operating company has no book yet; run demo=factory-zero first",
+                409,
+            );
+        }
+        Err(err) => {
+            console_error!("group demo: {}", err);
+            return Response::error("Demo seeding failed; see the Worker logs", 500);
+        }
+    }
+
+    let year = deps.clock.now().year();
+    let outcome = demo_group::seed_step(&deps, &home, &ops, &ip, year, step).await;
+    let snap = db_timing.snapshot();
+    let mut response = match outcome {
+        Ok(group) => {
+            console_log!(
+                "group demo step {}: posted {}, settled {}, done {}, round trips {}",
+                group.step,
+                group.posted,
+                group.settled,
+                group.done,
+                snap.calls
+            );
+            Response::from_json(&json!({
+                "step": group.step,
+                "done": group.done,
+                "next": group.next,
+                "posted": group.posted,
+                "settled": group.settled,
+                "open_period": group.open_period,
+                "db_calls": snap.calls,
+            }))?
+        }
+        Err(err) => {
+            // The error names a period, not an entry; it is safe to log.
+            console_error!("group demo step {} failed: {}", step, err);
+            Response::error("Demo seeding failed; see the Worker logs", 500)?
+        }
+    };
+    response.headers_mut().set("cache-control", "no-store")?;
+    Ok(response)
+}
+
+/// Counts the database round trips the request makes through `deps`.
+fn count_db_calls(deps: &mut Deps) -> Arc<timing::DbTiming> {
+    let db_timing = Arc::new(timing::DbTiming::default());
+    deps.db = Arc::new(timing::CountingDb::new(
+        Arc::clone(&deps.db),
+        Arc::clone(&db_timing),
+    ));
+    db_timing
 }
 
 /// Cloudflare Workers configuration

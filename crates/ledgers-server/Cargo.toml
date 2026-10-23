@@ -29,6 +29,7 @@ ledgers-documents = { workspace = true }
 ledgers-bank = { workspace = true }
 ledgers-bills = { workspace = true }
 ledgers-connect = { workspace = true }
+ledgers-group = { workspace = true }
 ledgers-extract = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }

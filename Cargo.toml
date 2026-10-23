@@ -134,6 +134,8 @@ hex = "0.4"
 # FinTS 3.0 PIN/TAN bank feed (issue #57, ledgers-fints crate):
 fints-rs = "=0.2.0"
 
+# Company groups and intercompany agreements (issue #128).
+ledgers-group = { path = "crates/ledgers-group" }
 # Dev dependencies for ledgers-commands (issue #10):
 insta = { version = "1", features = ["json"] }
 trybuild = "1"

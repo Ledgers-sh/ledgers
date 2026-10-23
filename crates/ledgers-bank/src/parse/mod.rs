@@ -49,7 +49,16 @@ pub(crate) fn iban_like(text: &str) -> bool {
 /// The formats the import can recognise from the bytes.
 #[must_use]
 pub fn detect(bytes: &[u8]) -> Option<Format> {
-    let head = std::str::from_utf8(&bytes[..bytes.len().min(4096)]).ok()?;
+    let window = &bytes[..bytes.len().min(4096)];
+    let head = match std::str::from_utf8(window) {
+        Ok(head) => head,
+        // The window may end inside a multibyte character: sniff the whole
+        // characters before it. Bytes that are not UTF-8 are not a statement.
+        Err(err) if err.error_len().is_none() => {
+            std::str::from_utf8(&window[..err.valid_up_to()]).ok()?
+        }
+        Err(_) => return None,
+    };
     let trimmed = head.trim_start_matches('\u{feff}').trim_start();
     if trimmed.starts_with('<')
         && (trimmed.contains("camt.053") || trimmed.contains("BkToCstmrStmt"))
@@ -77,6 +86,8 @@ pub fn parse(
 ) -> Result<Vec<ParsedStatement>, ParseError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| ParseError::Malformed("the file is not UTF-8 text".to_owned()))?;
+    // A byte-order mark is not part of the content, so it never reaches a reader.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match format {
         Format::Camt053 => camt053::parse(text),
         Format::Mt940 => mt940::parse(text),

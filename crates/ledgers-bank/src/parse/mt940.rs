@@ -113,11 +113,26 @@ fn split_fields(body: &str) -> Vec<Field> {
 fn field_tag_end(line: &str) -> Option<usize> {
     let rest = line.strip_prefix(':')?;
     let end = rest.find(':')?;
-    let tag = &rest[..end];
+    let tag = rest.get(..end)?;
+    // `get` refuses a split inside a multibyte character: such a tag is not a tag.
     let valid = (2..=3).contains(&tag.len())
-        && tag[..2].chars().all(|c| c.is_ascii_digit())
-        && tag[2..].chars().all(|c| c.is_ascii_uppercase());
+        && tag
+            .get(..2)
+            .is_some_and(|digits| digits.chars().all(|c| c.is_ascii_digit()))
+        && tag
+            .get(2..)
+            .is_some_and(|letters| letters.chars().all(|c| c.is_ascii_uppercase()));
     valid.then_some(end + 1)
+}
+
+/// `text[range]`, or a malformed-field error when the range does not fall on
+/// character boundaries or runs past the end. Untrusted text never panics.
+fn cut<'a, I>(text: &'a str, range: I, field: &str) -> Result<&'a str, ParseError>
+where
+    I: std::slice::SliceIndex<str, Output = str>,
+{
+    text.get(range)
+        .ok_or_else(|| ParseError::Malformed(format!("{field} is cut short or malformed")))
 }
 
 fn require<'a>(current: &'a mut Option<Builder>, tag: &str) -> Result<&'a mut Builder, ParseError> {
@@ -151,25 +166,24 @@ struct RawBalance {
 
 fn raw_balance(value: &str, which: &str) -> Result<RawBalance, ParseError> {
     let flat = value.replace('\n', "");
-    let (sign, rest) = match flat.as_bytes().first() {
-        Some(b'C') => (1i64, &flat[1..]),
-        Some(b'D') => (-1i64, &flat[1..]),
-        _ => {
-            return Err(ParseError::Malformed(format!(
-                ":{which}: balance has no C or D mark"
-            )));
-        }
-    };
-    if rest.len() < 9 || !rest.is_char_boundary(6) || !rest.is_char_boundary(9) {
+    let (sign, rest) = if let Some(rest) = flat.strip_prefix('C') {
+        (1i64, rest)
+    } else if let Some(rest) = flat.strip_prefix('D') {
+        (-1i64, rest)
+    } else {
         return Err(ParseError::Malformed(format!(
-            ":{which}: balance is too short"
+            ":{which}: balance has no C or D mark"
         )));
-    }
+    };
+    let too_short = || ParseError::Malformed(format!(":{which}: balance is too short"));
+    let date = rest.get(..6).ok_or_else(too_short)?;
+    let currency = rest.get(6..9).ok_or_else(too_short)?;
+    let amount = rest.get(9..).ok_or_else(too_short)?;
     Ok(RawBalance {
-        date: yymmdd(&rest[..6])?,
+        date: yymmdd(date)?,
         sign,
-        currency: rest[6..9].to_owned(),
-        amount: rest[9..].to_owned(),
+        currency: currency.to_owned(),
+        amount: amount.to_owned(),
     })
 }
 
@@ -194,16 +208,16 @@ fn raw_line(value: &str) -> Result<RawLine, ParseError> {
             ":61: line has no value date".to_owned(),
         ));
     }
-    let value_date = yymmdd(&first[..6])?;
+    let value_date = yymmdd(cut(first, ..6, ":61:")?)?;
     let mut pos = 6;
     let entry_mmdd = match bytes.get(pos..pos + 4) {
         Some(four) if four.iter().all(u8::is_ascii_digit) => {
             pos += 4;
-            Some(first[pos - 4..pos].to_owned())
+            Some(cut(first, 6..pos, ":61:")?.to_owned())
         }
         _ => None,
     };
-    let rest = &first[pos..];
+    let rest = cut(first, pos.., ":61:")?;
     let (sign, mark_len) = if rest.starts_with("RC") {
         (-1i64, 2)
     } else if rest.starts_with("RD") {
@@ -219,24 +233,23 @@ fn raw_line(value: &str) -> Result<RawLine, ParseError> {
     };
     pos += mark_len;
     // An optional funds-code letter sits between the mark and the amount.
-    if first[pos..]
+    if cut(first, pos.., ":61:")?
         .chars()
         .next()
         .is_some_and(|c| c.is_ascii_uppercase())
     {
         pos += 1;
     }
-    let amount_len = first[pos..]
+    let amount_len = cut(first, pos.., ":61:")?
         .find(|c: char| !(c.is_ascii_digit() || c == ','))
         .unwrap_or(first.len() - pos);
-    let amount = first[pos..pos + amount_len].to_owned();
+    let amount = cut(first, pos..pos + amount_len, ":61:")?.to_owned();
     pos += amount_len;
-    if !first[pos..].starts_with('N') || first.len() < pos + 4 {
-        return Err(ParseError::Malformed(
-            ":61: line has no transaction type".to_owned(),
-        ));
-    }
-    let references = &first[pos + 4..];
+    // The transaction type is `N` plus three characters; the references follow.
+    let references = cut(first, pos.., ":61:")?
+        .strip_prefix('N')
+        .and_then(|tail| tail.get(3..))
+        .ok_or_else(|| ParseError::Malformed(":61: line has no transaction type".to_owned()))?;
     let (customer, bank) = match references.split_once("//") {
         Some((customer, bank)) => (customer.trim(), Some(bank.trim())),
         None => (references.trim(), None),
@@ -304,11 +317,12 @@ fn subfields(value: &str) -> Option<BTreeMap<u8, String>> {
     }
     let mut fields = BTreeMap::new();
     for segment in flat.split('?').skip(1) {
-        if let Some(key) = segment
-            .get(..2)
-            .and_then(|digits| digits.parse::<u8>().ok())
-        {
-            fields.insert(key, segment[2..].to_owned());
+        // `split_at_checked` yields nothing when the key would split a character.
+        let Some((digits, text)) = segment.split_at_checked(2) else {
+            continue;
+        };
+        if let Ok(key) = digits.parse::<u8>() {
+            fields.insert(key, text.to_owned());
         }
     }
     Some(fields)
