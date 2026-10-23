@@ -79,6 +79,7 @@ where
         request_id: format!("demo-group-{}", deps.id_gen.ulid()),
         event_id: deps.id_gen.ulid(),
         now: dispatch::rfc3339_utc(deps.clock.now()),
+        is_person: false, // Demo internal agent
     };
     let executor = Executor::new(
         deps.db.as_ref(),

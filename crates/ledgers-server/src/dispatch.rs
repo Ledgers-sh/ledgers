@@ -36,7 +36,8 @@ use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
 use ledgers_bank::party_balances::PartiesBalances;
 use ledgers_bills::commands::{
-    BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
+    BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsProposeEntry,
+    BillsRecordPayment, BillsUpdate,
 };
 use ledgers_bills::parties::{
     HttpVies, PartiesCheckVat, PartiesCreate, PartiesGet, PartiesList, PartiesMerge,
@@ -281,11 +282,13 @@ impl ServerDispatch {
         })?;
 
         let now_at = deps.clock.now();
+        let is_person = matches!(presented, Presented::Session(_));
         let ctx = CommandContext {
             company_id: self.company_id.clone(),
             request_id: request_id.to_owned(),
             event_id: deps.id_gen.ulid(),
             now: rfc3339_utc(now_at),
+            is_person,
         };
         let now = ctx.now.clone();
         // Reads never touch protected accounts (their previews are empty), so
@@ -939,6 +942,14 @@ impl Dispatch for ServerDispatch {
             }
             "bills.post" => {
                 self.execute(deps, &BillsPost, presented, request_id, input)
+                    .await
+            }
+            "bills.propose-entry" => {
+                self.execute(deps, &BillsProposeEntry, presented, request_id, input)
+                    .await
+            }
+            "bills.record-payment" => {
+                self.execute(deps, &BillsRecordPayment, presented, request_id, input)
                     .await
             }
             "bills.confirm" => self.bills_confirm(deps, presented, request_id, input).await,
@@ -2305,6 +2316,20 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::commands::PostInput>(),
                 schema_of::<ledgers_bills::commands::PostOutput>(),
+            ),
+        ),
+        (
+            "bills.propose-entry",
+            (
+                schema_of::<ledgers_bills::commands::ProposeEntryInput>(),
+                schema_of::<ledgers_bills::commands::ProposeEntryOutput>(),
+            ),
+        ),
+        (
+            "bills.record-payment",
+            (
+                schema_of::<ledgers_bills::commands::RecordPaymentInput>(),
+                schema_of::<ledgers_bills::commands::RecordPaymentOutput>(),
             ),
         ),
         (

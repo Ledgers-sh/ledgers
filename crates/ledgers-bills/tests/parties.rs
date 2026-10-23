@@ -110,6 +110,7 @@ fn context_in(company_id: &str, request_id: &str) -> CommandContext {
         request_id: request_id.to_string(),
         event_id: format!("{request_id}-event"),
         now: NOW.to_string(),
+        is_person: false,
     }
 }
 

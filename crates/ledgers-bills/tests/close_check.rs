@@ -3,7 +3,7 @@
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
 use ledgers_bills::BillsModule;
-use ledgers_bills::close::FlaggedExtractionCloseCheck;
+use ledgers_bills::close::{FlaggedExtractionCloseCheck, UnpostedBillsCloseCheck};
 use ledgers_db::DbModule;
 use ledgers_ledger::close::{CloseCheck, CloseCheckContext};
 use ledgers_ledger::error::AccountsError;
@@ -299,6 +299,157 @@ fn flagged_extraction_close_check_blockers() {
             };
             let other = check.blockers(other_ctx).await.expect("other");
             assert_eq!(other.len(), 0);
+        });
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn unposted_bills_close_check_blockers() {
+    for kit in TestHarness::all_dialects(|| vec![Box::new(DbModule), Box::new(BillsModule)]) {
+        pollster::block_on(async {
+            // Create vendors
+            exec(
+                &*kit.db,
+                "INSERT INTO vendor (id, company_id, name, source, needs_review, created_at, updated_at) \
+                 VALUES (?, ?, ?, 'manual', 0, ?, ?)",
+                vec![
+                    Value::from("v1"),
+                    Value::from(COMPANY),
+                    Value::from("Confirmed Vendor"),
+                    Value::from(NOW),
+                    Value::from(NOW),
+                ],
+            )
+            .await;
+
+            exec(
+                &*kit.db,
+                "INSERT INTO vendor (id, company_id, name, source, needs_review, created_at, updated_at) \
+                 VALUES (?, ?, ?, 'manual', 1, ?, ?)",
+                vec![
+                    Value::from("v-unconfirmed"),
+                    Value::from(COMPANY),
+                    Value::from("Unconfirmed Vendor"),
+                    Value::from(NOW),
+                    Value::from(NOW),
+                ],
+            )
+            .await;
+
+            // Unposted bill in period - should block (uses v1)
+            seed_bill(
+                &*kit.db,
+                &BillData {
+                    id: "bill-unposted-in-period".into(),
+                    invoice_date: Some("2026-03-15".into()),
+                    checks_json: "[]".into(),
+                    confidence_json: "{}".into(),
+                    instruction_flags: "[]".into(),
+                    posted_entry_id: None,
+                    discarded_at: None,
+                },
+            )
+            .await;
+
+            // Posted bill in period - should NOT block (uses v1)
+            seed_bill(
+                &*kit.db,
+                &BillData {
+                    id: "bill-posted-in-period".into(),
+                    invoice_date: Some("2026-03-16".into()),
+                    checks_json: "[]".into(),
+                    confidence_json: "{}".into(),
+                    instruction_flags: "[]".into(),
+                    posted_entry_id: Some("entry-1".into()),
+                    discarded_at: None,
+                },
+            )
+            .await;
+
+            // Unposted bill outside period - should NOT block (uses v1)
+            seed_bill(
+                &*kit.db,
+                &BillData {
+                    id: "bill-unposted-outside-period".into(),
+                    invoice_date: Some("2026-02-15".into()),
+                    checks_json: "[]".into(),
+                    confidence_json: "{}".into(),
+                    instruction_flags: "[]".into(),
+                    posted_entry_id: None,
+                    discarded_at: None,
+                },
+            )
+            .await;
+
+            // Discarded bill in period - should NOT block (uses v1)
+            seed_bill(
+                &*kit.db,
+                &BillData {
+                    id: "bill-discarded".into(),
+                    invoice_date: Some("2026-03-17".into()),
+                    checks_json: "[]".into(),
+                    confidence_json: "{}".into(),
+                    instruction_flags: "[]".into(),
+                    posted_entry_id: None,
+                    discarded_at: Some("2026-03-17T10:00:00Z".into()),
+                },
+            )
+            .await;
+
+            // Unconfirmed vendor bill in period - should block
+            exec(
+                &*kit.db,
+                "INSERT INTO bill (id, company_id, document_id, vendor_id, invoice_number, invoice_date, \
+                 currency, lines_json, confidence_json, checks_json, instruction_flags, iban_changed, \
+                 source, posted_entry_id, discarded_at, created_by, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, 'EUR', '[]', '{}', '[]', '[]', 0, 'manual', NULL, NULL, 'test', ?, ?)",
+                vec![
+                    Value::from("bill-unconfirmed-vendor"),
+                    Value::from(COMPANY),
+                    Value::from("doc-bill-unconfirmed-vendor"),
+                    Value::from("v-unconfirmed"),
+                    Value::from("inv-bill-unconfirmed-vendor"),
+                    Value::from("2026-03-18"),
+                    Value::from(NOW),
+                    Value::from(NOW),
+                ],
+            )
+            .await;
+
+            let check = UnpostedBillsCloseCheck;
+            let journal = TestJournal;
+
+            // Test period 2026-03: expect 2 blockers (unposted-in-period + unconfirmed-vendor)
+            let ctx = CloseCheckContext {
+                db: &*kit.db,
+                journal: &journal,
+                company_id: COMPANY,
+                period: "2026-03",
+                starts_on: "2026-03-01",
+                ends_on: "2026-03-31",
+            };
+
+            let blockers = check.blockers(ctx).await.expect("blockers query");
+            assert_eq!(blockers.len(), 1, "Expected one blocker type");
+            assert_eq!(blockers[0].check_id, "bills.unposted");
+            assert_eq!(blockers[0].kind, "unposted-bills");
+            assert_eq!(
+                blockers[0].count, 2,
+                "Expected 2 unposted bills (unposted-in-period + unconfirmed-vendor)"
+            );
+
+            // Empty period: no blockers
+            let empty_ctx = CloseCheckContext {
+                db: &*kit.db,
+                journal: &journal,
+                company_id: COMPANY,
+                period: "2026-01",
+                starts_on: "2026-01-01",
+                ends_on: "2026-01-31",
+            };
+            let empty = check.blockers(empty_ctx).await.expect("empty");
+            assert_eq!(empty.len(), 0);
         });
     }
 }

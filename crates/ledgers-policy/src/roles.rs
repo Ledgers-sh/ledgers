@@ -99,6 +99,7 @@ const READ_COMMANDS: &[&str] = &[
     "documents.anchors",
     "bills.get",
     "bills.list",
+    "bills.propose-entry",
     "fiscal_years.list",
     "numbering.list",
     "tax_settings.get",
@@ -185,7 +186,7 @@ fn books_class(command: &str) -> Option<Class> {
         | "agreements.post_period"
         | "test.write"
         | "test.post" => Class::Post,
-        "bill.pay" | "agreements.settle_period" => Class::MoneyOut,
+        "bill.pay" | "bills.record-payment" | "agreements.settle_period" => Class::MoneyOut,
         "periods.close"
         | "periods.reopen"
         | "fiscal_years.create"

@@ -346,6 +346,7 @@ async fn agent_request(
         request_id: "req1".to_string(),
         event_id: "evt1".to_string(),
         now: NOW.to_string(),
+        is_person: false,
     };
 
     let result = executor
@@ -454,6 +455,7 @@ fn happy_path_approval_flow() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             approvals
@@ -547,6 +549,7 @@ fn approve_after_bill_changed_is_superseded() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             let result = approvals
@@ -631,6 +634,7 @@ fn agent_cannot_approve() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             let result = approvals
@@ -714,6 +718,7 @@ fn reject_is_audited() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             approvals
@@ -793,6 +798,7 @@ fn nonce_is_single_use() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             approvals
@@ -913,6 +919,7 @@ fn assertion_for_a_is_rejected_for_b() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             let result = approvals
@@ -1034,6 +1041,7 @@ fn expired_request_cannot_be_approved() {
                 request_id: "req2".to_string(),
                 event_id: "evt2".to_string(),
                 now: now_120s.to_string(),
+                is_person: false,
             };
 
             let result = approvals
@@ -1192,6 +1200,7 @@ fn superseded_assertion_cannot_approve_twin() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             let result = approvals
@@ -1325,6 +1334,7 @@ fn high_risk_without_passkey_is_refused() {
                 request_id: "req1".to_string(),
                 event_id: "evt1".to_string(),
                 now: NOW.to_string(),
+                is_person: false,
             };
 
             // Try to approve without passkey proof (proof=None)
@@ -1369,6 +1379,7 @@ fn inbox_ctx(now: &str, event: &str) -> CommandContext {
         request_id: "req-inbox".to_string(),
         event_id: event.to_string(),
         now: now.to_string(),
+        is_person: false,
     }
 }
 

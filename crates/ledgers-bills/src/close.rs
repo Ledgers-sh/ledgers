@@ -114,3 +114,55 @@ impl CloseCheck for FlaggedExtractionCloseCheck {
         })
     }
 }
+
+/// The close check for unposted bills or bills with unmatched/unconfirmed vendors.
+pub struct UnpostedBillsCloseCheck;
+
+impl CloseCheck for UnpostedBillsCloseCheck {
+    fn id(&self) -> &'static str {
+        "bills.unposted"
+    }
+
+    fn blockers<'a>(
+        &'a self,
+        ctx: CloseCheckContext<'a>,
+    ) -> BoxFuture<'a, Result<Vec<Blocker>, AccountsError>> {
+        Box::pin(async move {
+            // Query bills in the period that are either:
+            // 1. Not posted and not discarded (invoice_date is in the period, or falls back to created_at)
+            // 2. Have unmatched vendor (vendor_id is NULL) or unconfirmed vendor (vendor needs_review = 1)
+            let stmt = Statement::with_values(
+                "SELECT COUNT(*) as unposted_count FROM bill b \
+                 LEFT JOIN vendor v ON v.id = b.vendor_id \
+                 WHERE b.company_id = ? \
+                   AND COALESCE(b.invoice_date, substr(b.created_at, 1, 10)) >= ? \
+                   AND COALESCE(b.invoice_date, substr(b.created_at, 1, 10)) <= ? \
+                   AND b.discarded_at IS NULL \
+                   AND (b.posted_entry_id IS NULL OR b.vendor_id IS NULL OR COALESCE(v.needs_review, 0) = 1)"
+                    .to_string(),
+                vec![
+                    Value::from(ctx.company_id),
+                    Value::from(ctx.starts_on),
+                    Value::from(ctx.ends_on),
+                ],
+            );
+
+            let rows = ctx.db.query(&stmt).await?;
+            let unposted_count = rows
+                .first()
+                .and_then(|row| row.get::<i64>("unposted_count"))
+                .unwrap_or(0);
+
+            if unposted_count == 0 {
+                return Ok(Vec::new());
+            }
+
+            Ok(vec![Blocker {
+                check_id: self.id().to_owned(),
+                kind: "unposted-bills".to_owned(),
+                count: unposted_count,
+                link: format!("/companies/{}/bills?status=needs-review", ctx.company_id),
+            }])
+        })
+    }
+}

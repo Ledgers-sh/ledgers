@@ -510,6 +510,20 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers bills post",
         ),
         entry(
+            "bills.propose-entry",
+            "read",
+            "GET",
+            "/v1/bills/{id}/propose-entry",
+            "ledgers bills proposed-entry",
+        ),
+        entry(
+            "bills.record-payment",
+            "post-within-limits",
+            "POST",
+            "/v1/bills/{id}/record-payment",
+            "ledgers bills record-payment",
+        ),
+        entry(
             "reports.trial_balance",
             "read",
             "GET",

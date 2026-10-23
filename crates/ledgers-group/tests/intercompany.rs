@@ -93,6 +93,7 @@ fn ctx(company: &str, request: &str) -> CommandContext {
         request_id: request.to_owned(),
         event_id: format!("{request}-event-{}", EVENTS.fetch_add(1, Ordering::SeqCst)),
         now: NOW.to_owned(),
+        is_person: false,
     }
 }
 

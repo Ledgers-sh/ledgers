@@ -602,6 +602,7 @@ where
         request_id: request_id(deps),
         event_id: deps.id_gen.ulid(),
         now: dispatch::rfc3339_utc(deps.clock.now()),
+        is_person: false, // Demo internal agent
     };
     let executor = Executor::new(deps.db.as_ref(), auth, policy);
     executor

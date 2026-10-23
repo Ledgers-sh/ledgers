@@ -42,6 +42,16 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "parties",
         include_str!("../migrations/sqlite/0004_parties.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "bill_paid",
+        include_str!("../migrations/sqlite/0005_bill_paid.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0006",
+        "bill_iban_confirmed",
+        include_str!("../migrations/sqlite/0006_bill_iban_confirmed.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite.
@@ -65,6 +75,16 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0004",
         "parties",
         include_str!("../migrations/postgres/0004_parties.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "bill_paid",
+        include_str!("../migrations/postgres/0005_bill_paid.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0006",
+        "bill_iban_confirmed",
+        include_str!("../migrations/postgres/0006_bill_iban_confirmed.sql"),
     ),
 ];
 
