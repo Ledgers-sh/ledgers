@@ -291,9 +291,16 @@ async fn seed_demo_route(
             .map(|value| value.to_string())
             .unwrap_or_default();
         match demo::seed_company_book(&deps, &company_id, &book).await {
-            Ok(report) => demo::grant_bootstrap_owner(&deps, &home, &company_id)
-                .await
-                .map(|()| report),
+            Ok(report) => {
+                // The demo connections (recorded fixtures, no tokens) for the
+                // Costs by venture view, after the book they allocate.
+                crate::dispatch::ServerDispatch::new(company_id.clone())
+                    .seed_demo_connections(&deps, year)
+                    .await?;
+                demo::grant_bootstrap_owner(&deps, &home, &company_id)
+                    .await
+                    .map(|()| report)
+            }
             Err(err) => Err(err),
         }
     } else {

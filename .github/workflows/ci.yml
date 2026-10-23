@@ -82,8 +82,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: >-
           cargo test --locked
-          -p ledgers-storage -p ledgers-ledger -p ledgers-db -p ledgers-audit -p ledgers-approvals -p ledgers-bank -p ledgers-bills
-          --features ledgers-storage/postgres,ledgers-ledger/postgres,ledgers-db/postgres,ledgers-audit/postgres,ledgers-approvals/postgres,ledgers-bank/postgres,ledgers-bills/postgres
+          -p ledgers-storage -p ledgers-ledger -p ledgers-db -p ledgers-audit -p ledgers-approvals -p ledgers-bank -p ledgers-bills -p ledgers-connect
+          --features ledgers-storage/postgres,ledgers-ledger/postgres,ledgers-db/postgres,ledgers-audit/postgres,ledgers-approvals/postgres,ledgers-bank/postgres,ledgers-bills/postgres,ledgers-connect/postgres
 
   wasm32:
     runs-on: ubuntu-latest

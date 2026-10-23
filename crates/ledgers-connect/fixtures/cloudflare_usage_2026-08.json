@@ -1,0 +1,19 @@
+{
+  "data": {
+    "viewer": {
+      "accounts": [
+        {
+          "workersInvocationsAdaptive": [
+            { "dimensions": { "scriptName": "ledgers-web" }, "sum": { "requests": 700000 } },
+            { "dimensions": { "scriptName": "ledgers-api" }, "sum": { "requests": 200000 } },
+            { "dimensions": { "scriptName": "fz-dashboard" }, "sum": { "requests": 100000 } }
+          ],
+          "d1AnalyticsAdaptiveGroups": [
+            { "dimensions": { "databaseId": "00000000-d1-ledgers" }, "sum": { "readQueries": 4000, "writeQueries": 1000 } }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": null
+}

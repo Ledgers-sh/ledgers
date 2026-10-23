@@ -10,6 +10,7 @@ import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
 import { handlePeople, resetPeople } from './mockPeople';
 import { handleUnits, resetUnits } from './mockUnits';
+import { handleConnect, resetConnect } from './mockConnect';
 import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,8 @@ export interface MockOptions {
   extraEntries?: number;
   /** Seeds three business units (SQZ, LDG, FZ) so the unit switcher, the comparison and the units screens show. */
   units?: boolean;
+  /** Seeds the Factory Zero demo connections, their runs, rules and monthly costs. */
+  connect?: boolean;
   /** The companies the person belongs to: none, one (the switcher hides), or two (it shows). */
   companies?: 'none' | 'one' | 'many';
   /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
@@ -985,6 +988,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   resetSettings();
   resetPeople();
   resetUnits(options.units ?? false);
+  resetConnect(options.connect ?? false);
   resetCompanies(options.companies ?? 'none');
   nextNumber = state.entries.length + 1;
   if (!server) {
@@ -1081,6 +1085,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           const empty = peopleReply.body === undefined;
           res.writeHead(peopleReply.status, empty ? { ...headers } : { ...headers, 'Content-Type': peopleReply.problem ? 'application/problem+json' : 'application/json' });
           res.end(empty ? undefined : JSON.stringify(peopleReply.body));
+          return;
+        }
+        // Connected sources (issue #142): connections, runs, allocation rules and costs.
+        const connectReply = handleConnect(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, req.headers.authorization === `Bearer ${API_KEY}`);
+        if (connectReply) {
+          res.writeHead(connectReply.status, { ...headers, 'Content-Type': connectReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(connectReply.body));
           return;
         }
         // Business units (the writes are a person's; an agent key gets 403 on them).

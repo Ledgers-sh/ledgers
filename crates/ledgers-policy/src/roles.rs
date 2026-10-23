@@ -88,6 +88,10 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "numbering.list"
         | "tax_settings.get"
         | "parties.list"
+        | "connections.list"
+        | "connections.runs"
+        | "allocation_rules.list"
+        | "reports.costs_by_unit"
         | "test.read" => Class::Read,
         "company.update"
         | "units.create"
@@ -100,7 +104,12 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "approval_settings.update"
         | "numbering.set_next"
         | "parties.set_bank"
-        | "parties.merge" => Class::Settings,
+        | "parties.merge"
+        | "connections.create"
+        | "connections.update"
+        | "connections.delete"
+        | "connections.sync_now"
+        | "allocation_rules.set" => Class::Settings,
         "keys.create" | "keys.list" | "keys.revoke" | "policy.put_key" | "policy.revoke_key"
         | "policy.explain" => Class::Keys,
         "audit.list" => Class::Audit,
@@ -242,6 +251,15 @@ mod tests {
         ("fiscal_years.list", Class::Read),
         ("numbering.list", Class::Read),
         ("tax_settings.get", Class::Read),
+        ("connections.list", Class::Read),
+        ("connections.runs", Class::Read),
+        ("allocation_rules.list", Class::Read),
+        ("reports.costs_by_unit", Class::Read),
+        ("connections.create", Class::Settings),
+        ("connections.update", Class::Settings),
+        ("connections.delete", Class::Settings),
+        ("connections.sync_now", Class::Settings),
+        ("allocation_rules.set", Class::Settings),
         ("company.update", Class::Settings),
         ("tax_settings.update", Class::Settings),
         ("approval_settings.get", Class::Settings),
@@ -377,5 +395,48 @@ mod tests {
             .expect("auditor listed");
         assert!(auditor.contains(&Class::Audit));
         assert!(!auditor.contains(&Class::Post));
+    }
+}
+
+#[cfg(test)]
+mod connections_roles {
+    use super::*;
+
+    /// Connections and their credentials are an owner and admin matter: an
+    /// accountant who can post may read the costs but not connect a vendor.
+    #[test]
+    fn only_owners_and_admins_connect_sources_and_read_is_open_to_the_books() {
+        for name in [
+            "connections.create",
+            "connections.update",
+            "connections.delete",
+            "connections.sync_now",
+            "allocation_rules.set",
+        ] {
+            assert!(check(Role::Owner, name).is_ok(), "owner may {name}");
+            assert!(check(Role::Admin, name).is_ok(), "admin may {name}");
+            assert!(
+                check(Role::Accountant, name).is_err(),
+                "accountant may not {name}"
+            );
+            assert!(check(Role::Viewer, name).is_err(), "viewer may not {name}");
+        }
+        for name in [
+            "connections.list",
+            "connections.runs",
+            "allocation_rules.list",
+            "reports.costs_by_unit",
+        ] {
+            assert!(check(Role::Viewer, name).is_ok(), "viewer may read {name}");
+            assert!(
+                check(Role::Accountant, name).is_ok(),
+                "accountant may read {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unclassified_connections_name_is_refused_for_everyone() {
+        assert!(class_of("connections.anything_new").is_none());
     }
 }

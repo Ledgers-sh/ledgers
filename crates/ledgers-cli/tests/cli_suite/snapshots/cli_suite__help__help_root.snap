@@ -12,12 +12,14 @@ Commands:
   mcp                Serve MCP over stdio, relaying to the server with your agent key
   demo               Demo company operations
   accounts           Commands under `ledgers accounts`
+  allocation-rules   Commands under `ledgers allocation-rules`
   approval-settings  Commands under `ledgers approval-settings`
   approvals          Commands under `ledgers approvals`
   audit              Commands under `ledgers audit`
   bank               Commands under `ledgers bank`
   bills              Commands under `ledgers bills`
   company            Commands under `ledgers company`
+  connections        Commands under `ledgers connections`
   documents          Commands under `ledgers documents`
   entries            Commands under `ledgers entries`
   fiscal-years       Commands under `ledgers fiscal-years`

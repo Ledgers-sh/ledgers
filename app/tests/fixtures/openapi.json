@@ -599,6 +599,212 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/allocation-rules": {
+      "get": {
+        "operationId": "allocation_rules_list",
+        "description": "Execute command: allocation_rules.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "allocation-rules"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AllocationListOutput",
+                  "description": "The output of `allocation_rules.list`.",
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "description": "Each connection's allocation.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectionAllocation"
+                      }
+                    },
+                    "units": {
+                      "description": "The active units.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnitChoice"
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections",
+                    "units"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "allocation_rules.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers allocation-rules list",
+        "x-ledgers-mcp": "allocation_rules_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/allocation-rules\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/allocation-rules/{connection_id}": {
+      "post": {
+        "operationId": "allocation_rules_set",
+        "description": "Execute command: allocation_rules.set",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "allocation-rules"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AllocationSetInput",
+                "description": "The input of `allocation_rules.set`: the rules replace the old set, and the\nunposted drafts of the connection are re-split under them.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  },
+                  "rules": {
+                    "description": "The new rules, in order.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/AllocationRule"
+                    }
+                  },
+                  "default_unit": {
+                    "description": "A new default unit, when given.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "connection_id",
+                  "rules"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AllocationSetOutput",
+                  "description": "The output of `allocation_rules.set`.",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "The rules now in force.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AllocationRule"
+                      }
+                    },
+                    "resplit": {
+                      "description": "Drafts re-split under them.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0
+                    },
+                    "kept_frozen": {
+                      "description": "Posted or discarded bills whose split stays as it was.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "rules",
+                    "resplit",
+                    "kept_frozen"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "allocation_rules.set",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers allocation-rules set",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/allocation-rules/{connection_id}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/approval-settings": {
       "get": {
         "operationId": "approval_settings_get",
@@ -4259,6 +4465,798 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/connections": {
+      "post": {
+        "operationId": "connections_create",
+        "description": "Execute command: connections.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "CreateInput",
+                "description": "The input of `connections.create`. `sealed_credential` is filled by the\nserver from the token it received; a client that sends it is overwritten.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection id (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "connector": {
+                    "description": "The connector id: `cloudflare`, `anthropic` or `planetscale`.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The name the company gives it.",
+                    "type": "string"
+                  },
+                  "config": {
+                    "description": "The non-secret settings for the connector."
+                  },
+                  "default_unit": {
+                    "description": "The unit that receives unmapped resources.",
+                    "type": "string"
+                  },
+                  "sealed_credential": {
+                    "description": "The sealed token (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "created_by": {
+                    "description": "Who created it (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "demo": {
+                    "description": "Demo connections hold no token: they sync from recorded fixtures. Only\nthe demo seeder sets it (server-filled, false for every client).",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "token": {
+                    "description": "The token, as the client sends it. The server seals it and removes this\nfield before the command runs, so it is never in the executor's input.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "connector",
+                  "name",
+                  "config",
+                  "default_unit"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ConnectionView",
+                  "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "connector": {
+                      "description": "The connector id.",
+                      "type": "string"
+                    },
+                    "connector_name": {
+                      "description": "The connector's name.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name the company gave it.",
+                      "type": "string"
+                    },
+                    "config": {
+                      "description": "The non-secret settings."
+                    },
+                    "default_unit": {
+                      "description": "The unit that receives unmapped resources.",
+                      "type": "string"
+                    },
+                    "is_demo": {
+                      "description": "Whether it is demo data (recorded fixtures, no tokens).",
+                      "type": "boolean"
+                    },
+                    "has_credential": {
+                      "description": "Whether a token is held (the token itself is never shown).",
+                      "type": "boolean"
+                    },
+                    "last_sync_at": {
+                      "description": "The last successful sync, RFC 3339.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "connector",
+                    "connector_name",
+                    "name",
+                    "config",
+                    "default_unit",
+                    "is_demo",
+                    "has_credential",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "connections_list",
+        "description": "Execute command: connections.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ListOutput",
+                  "description": "The output of `connections.list`.",
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "description": "The company's connections.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectionView"
+                      }
+                    },
+                    "connectors": {
+                      "description": "The connectors Ledgers ships.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectorView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections",
+                    "connectors"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers connections list",
+        "x-ledgers-mcp": "connections_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/connections\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/connections/{id}/delete": {
+      "post": {
+        "operationId": "connections_delete",
+        "description": "Execute command: connections.delete",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "DeleteInput",
+                "description": "The input of `connections.delete`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "DeleteOutput",
+                  "description": "The output of `connections.delete`.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "disconnected": {
+                      "description": "Always true when the plan runs.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "disconnected"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.delete",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections delete",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{id}/delete\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/connections/{connection_id}/runs": {
+      "get": {
+        "operationId": "connections_runs",
+        "description": "Execute command: connections.runs",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RunsOutput",
+                  "description": "The output of `connections.runs`.",
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "description": "The runs, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "runs"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.runs",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers connections runs",
+        "x-ledgers-mcp": "connections_runs",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/connections/{connection_id}/runs\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/connections/{connection_id}/sync": {
+      "post": {
+        "operationId": "connections_sync_now",
+        "description": "Execute command: connections.sync_now",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SyncInput",
+                "description": "The input of `connections.sync_now`. The server fills `run_id`, `created_by`\nand exactly one of `fetched` (the vendor's answer) or `fetch_error`.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection to sync.",
+                    "type": "string"
+                  },
+                  "since": {
+                    "description": "The first day of the window, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "The last day of the window, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "fetched": {
+                    "description": "What the vendor returned (server-filled).",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/SyncOutput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "fetch_error": {
+                    "description": "Why the vendor could not be read (server-filled).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "created_by": {
+                    "description": "Who ran the sync (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "connection_id",
+                  "since",
+                  "until"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RunView",
+                  "description": "One sync run, as the history shows it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The run id.",
+                      "type": "string"
+                    },
+                    "window_since": {
+                      "description": "The window start.",
+                      "type": "string"
+                    },
+                    "window_until": {
+                      "description": "The window end.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`succeeded` or `failed`.",
+                      "type": "string"
+                    },
+                    "invoices_found": {
+                      "description": "Invoices the vendor returned in the window.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "bills_created": {
+                      "description": "Draft bills this run created.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "usage_rows": {
+                      "description": "Usage rows this run stored.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "error_message": {
+                      "description": "The failure, when it failed.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "notes": {
+                      "description": "The notes the run recorded.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "finished_at": {
+                      "description": "When the run finished.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "window_since",
+                    "window_until",
+                    "status",
+                    "invoices_found",
+                    "bills_created",
+                    "usage_rows",
+                    "notes",
+                    "finished_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.sync_now",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections sync",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{connection_id}/sync\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/connections/{id}/update": {
+      "post": {
+        "operationId": "connections_update",
+        "description": "Execute command: connections.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UpdateInput",
+                "description": "The input of `connections.update`. Every field is optional; a sealed\ncredential is written only when the server fills it (a token was sent).",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "config": {
+                    "description": "A new config (replaces the old one)."
+                  },
+                  "default_unit": {
+                    "description": "A new default unit.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "sealed_credential": {
+                    "description": "A new sealed token (server-filled).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "token": {
+                    "description": "A new token, as the client sends it: sealed and removed by the server\nbefore the command runs, the same as on create.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ConnectionView",
+                  "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "connector": {
+                      "description": "The connector id.",
+                      "type": "string"
+                    },
+                    "connector_name": {
+                      "description": "The connector's name.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name the company gave it.",
+                      "type": "string"
+                    },
+                    "config": {
+                      "description": "The non-secret settings."
+                    },
+                    "default_unit": {
+                      "description": "The unit that receives unmapped resources.",
+                      "type": "string"
+                    },
+                    "is_demo": {
+                      "description": "Whether it is demo data (recorded fixtures, no tokens).",
+                      "type": "boolean"
+                    },
+                    "has_credential": {
+                      "description": "Whether a token is held (the token itself is never shown).",
+                      "type": "boolean"
+                    },
+                    "last_sync_at": {
+                      "description": "The last successful sync, RFC 3339.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "connector",
+                    "connector_name",
+                    "name",
+                    "config",
+                    "default_unit",
+                    "is_demo",
+                    "has_credential",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/documents/{id}/anchors": {
       "get": {
         "operationId": "documents_anchors",
@@ -6695,6 +7693,79 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/reports/costs-by-unit": {
+      "get": {
+        "operationId": "reports_costs_by_unit",
+        "description": "Execute command: reports.costs_by_unit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CostsOutput",
+                  "description": "The output of `reports.costs_by_unit`.",
+                  "type": "object",
+                  "properties": {
+                    "lines": {
+                      "description": "The lines, by month, unit and source.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CostLine"
+                      }
+                    }
+                  },
+                  "required": [
+                    "lines"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.costs_by_unit",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports costs-by-unit",
+        "x-ledgers-mcp": "reports_costs_by_unit",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/costs-by-unit\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/reports/p-and-l": {
       "get": {
         "operationId": "reports_profit_and_loss",
@@ -7990,6 +9061,119 @@
           "currency"
         ]
       },
+      "ConnectionAllocation": {
+        "description": "One connection's rules, default and queue.",
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The connection name.",
+            "type": "string"
+          },
+          "default_unit": {
+            "description": "The default unit.",
+            "type": "string"
+          },
+          "rules": {
+            "description": "The rules in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllocationRule"
+            }
+          },
+          "unmapped": {
+            "description": "Resources waiting for a mapping.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnmappedResource"
+            }
+          }
+        },
+        "required": [
+          "connection_id",
+          "name",
+          "default_unit",
+          "rules",
+          "unmapped"
+        ]
+      },
+      "AllocationRule": {
+        "description": "One rule: a resource id pattern and the unit it books to.",
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "description": "An exact resource id, or a prefix followed by `*`.",
+            "type": "string"
+          },
+          "unit_code": {
+            "description": "The business unit code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern",
+          "unit_code"
+        ]
+      },
+      "UnmappedResource": {
+        "description": "A resource with usage and no rule: the needs-mapping queue.",
+        "type": "object",
+        "properties": {
+          "resource_kind": {
+            "description": "The resource kind.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "The vendor's resource id.",
+            "type": "string"
+          },
+          "resource_name": {
+            "description": "The name it was given.",
+            "type": "string"
+          },
+          "periods": {
+            "description": "The periods it had usage in.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggested_unit": {
+            "description": "The unit whose name or code it resembles, as a suggestion only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "resource_kind",
+          "resource_id",
+          "resource_name",
+          "periods"
+        ]
+      },
+      "UnitChoice": {
+        "description": "A business unit the mapping can name.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The unit code.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The unit name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ]
+      },
       "AuditEventView": {
         "description": "One audit event as the Settings read returns it.",
         "type": "object",
@@ -8920,6 +10104,13 @@
               "null"
             ],
             "default": null
+          },
+          "unit_code": {
+            "description": "The business unit this line books to, when it differs from the bill's\nunit (a connected source splits one invoice across units; issue #142).\nAbsent means the bill's unit applies.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -8962,6 +10153,13 @@
             "description": "The amount, minor units of the bill currency.",
             "type": "integer",
             "format": "int64"
+          },
+          "unit": {
+            "description": "The unit an expense line books to, when the line names one (a split\nconnected invoice); `None` means the bill's unit applies.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -9150,6 +10348,320 @@
             "default": ""
           }
         }
+      },
+      "ConnectionView": {
+        "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "connector": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "connector_name": {
+            "description": "The connector's name.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the company gave it.",
+            "type": "string"
+          },
+          "config": {
+            "description": "The non-secret settings."
+          },
+          "default_unit": {
+            "description": "The unit that receives unmapped resources.",
+            "type": "string"
+          },
+          "is_demo": {
+            "description": "Whether it is demo data (recorded fixtures, no tokens).",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "description": "Whether a token is held (the token itself is never shown).",
+            "type": "boolean"
+          },
+          "last_sync_at": {
+            "description": "The last successful sync, RFC 3339.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When last changed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connector",
+          "connector_name",
+          "name",
+          "config",
+          "default_unit",
+          "is_demo",
+          "has_credential",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "ConnectorView": {
+        "description": "One connector, as the app's gallery shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name shown.",
+            "type": "string"
+          },
+          "credential_fields": {
+            "description": "The credential fields a connection needs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialField"
+            }
+          },
+          "hosts": {
+            "description": "The hosts it may call.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "config_keys": {
+            "description": "The config keys it reads, besides the common ones.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "credential_fields",
+          "hosts",
+          "config_keys"
+        ]
+      },
+      "CredentialField": {
+        "description": "One credential field a connection needs.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The field name in the API (`token`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The label the app shows.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ]
+      },
+      "RunView": {
+        "description": "One sync run, as the history shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The run id.",
+            "type": "string"
+          },
+          "window_since": {
+            "description": "The window start.",
+            "type": "string"
+          },
+          "window_until": {
+            "description": "The window end.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`succeeded` or `failed`.",
+            "type": "string"
+          },
+          "invoices_found": {
+            "description": "Invoices the vendor returned in the window.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "bills_created": {
+            "description": "Draft bills this run created.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "usage_rows": {
+            "description": "Usage rows this run stored.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "error_message": {
+            "description": "The failure, when it failed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "description": "The notes the run recorded.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "finished_at": {
+            "description": "When the run finished.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "window_since",
+          "window_until",
+          "status",
+          "invoices_found",
+          "bills_created",
+          "usage_rows",
+          "notes",
+          "finished_at"
+        ]
+      },
+      "SyncOutput": {
+        "description": "What one sync produced.",
+        "type": "object",
+        "properties": {
+          "invoices": {
+            "description": "The invoices found in the sync window.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRecord"
+            }
+          },
+          "usage": {
+            "description": "The usage lines the allocation reads.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageRecord"
+            }
+          },
+          "notes": {
+            "description": "Things the sync could not read, as plain sentences for the run log.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "invoices",
+          "usage",
+          "notes"
+        ]
+      },
+      "InvoiceRecord": {
+        "description": "One vendor invoice (or billing line that stands for one) as a bill.",
+        "type": "object",
+        "properties": {
+          "external_id": {
+            "description": "The vendor's stable id for this invoice. Re-syncing the same id is a no-op.",
+            "type": "string"
+          },
+          "vendor_name": {
+            "description": "The vendor name as the vendor printed it (becomes the party name).",
+            "type": "string"
+          },
+          "invoice_number": {
+            "description": "The invoice number, when the vendor gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issued_on": {
+            "description": "The issue date, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "period": {
+            "description": "The billing period the invoice covers, `YYYY-MM`. Allocation uses it.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency code the amount is in (ISO 4217, upper case).",
+            "type": "string"
+          },
+          "total_minor": {
+            "description": "The gross total in minor units of `currency`.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "description": "A one-line description, sanitised.",
+            "type": "string"
+          },
+          "hosted_url": {
+            "description": "A link the vendor gives for the invoice. Never fetched by Ledgers.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "external_id",
+          "vendor_name",
+          "issued_on",
+          "period",
+          "currency",
+          "total_minor",
+          "description"
+        ]
+      },
+      "UsageRecord": {
+        "description": "Usage of one resource in one billing period (the allocation key).",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The billing period, `YYYY-MM`.",
+            "type": "string"
+          },
+          "resource_kind": {
+            "description": "What kind of resource: `worker`, `d1-database`, `api-key`, `organization`.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "The vendor's id for the resource (the mapping key).",
+            "type": "string"
+          },
+          "resource_name": {
+            "description": "A human name for the resource (suggestions match on it).",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "The weight the resource carries: requests, queries or tokens.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "resource_kind",
+          "resource_id",
+          "resource_name",
+          "quantity"
+        ]
       },
       "Anchor": {
         "description": "A semantic field location within a document.",
@@ -9880,6 +11392,45 @@
         "required": [
           "dimension_value",
           "balance"
+        ]
+      },
+      "CostLine": {
+        "description": "One cost line: a unit, a source and a month.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "`YYYY-MM`.",
+            "type": "string"
+          },
+          "unit_code": {
+            "description": "The business unit.",
+            "type": "string"
+          },
+          "connector": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "connection_id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency.",
+            "type": "string"
+          },
+          "amount_minor": {
+            "description": "The amount in minor units.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "unit_code",
+          "connector",
+          "connection_id",
+          "currency",
+          "amount_minor"
         ]
       },
       "TrendMonthView": {

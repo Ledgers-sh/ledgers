@@ -1,0 +1,1304 @@
+{
+ "_note": "DEMO DATA for the Factory Zero book: invented figures shaped like the vendors' recorded answers. No token is involved. The year is re-dated when served.",
+ "period_year": 2026,
+ "cloudflare": {
+  "billing": [
+   {
+    "id": "cf-demo-2026-01",
+    "action": "charge",
+    "amount": 96.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-01 (demo)",
+    "occurred_at": "2026-01-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-01",
+    "external_invoice_id": "DEMO-CF-2026-01",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-02",
+    "action": "charge",
+    "amount": 100.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-02 (demo)",
+    "occurred_at": "2026-02-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-02",
+    "external_invoice_id": "DEMO-CF-2026-02",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-03",
+    "action": "charge",
+    "amount": 105.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-03 (demo)",
+    "occurred_at": "2026-03-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-03",
+    "external_invoice_id": "DEMO-CF-2026-03",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-04",
+    "action": "charge",
+    "amount": 109.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-04 (demo)",
+    "occurred_at": "2026-04-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-04",
+    "external_invoice_id": "DEMO-CF-2026-04",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-05",
+    "action": "charge",
+    "amount": 114.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-05 (demo)",
+    "occurred_at": "2026-05-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-05",
+    "external_invoice_id": "DEMO-CF-2026-05",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-06",
+    "action": "charge",
+    "amount": 118.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-06 (demo)",
+    "occurred_at": "2026-06-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-06",
+    "external_invoice_id": "DEMO-CF-2026-06",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-07",
+    "action": "charge",
+    "amount": 123.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-07 (demo)",
+    "occurred_at": "2026-07-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-07",
+    "external_invoice_id": "DEMO-CF-2026-07",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-08",
+    "action": "charge",
+    "amount": 127.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-08 (demo)",
+    "occurred_at": "2026-08-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-08",
+    "external_invoice_id": "DEMO-CF-2026-08",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-09",
+    "action": "charge",
+    "amount": 132.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-09 (demo)",
+    "occurred_at": "2026-09-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-09",
+    "external_invoice_id": "DEMO-CF-2026-09",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-10",
+    "action": "charge",
+    "amount": 136.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-10 (demo)",
+    "occurred_at": "2026-10-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-10",
+    "external_invoice_id": "DEMO-CF-2026-10",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-11",
+    "action": "charge",
+    "amount": 141.0,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-11 (demo)",
+    "occurred_at": "2026-11-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-11",
+    "external_invoice_id": "DEMO-CF-2026-11",
+    "status": "paid",
+    "type": "charge"
+   },
+   {
+    "id": "cf-demo-2026-12",
+    "action": "charge",
+    "amount": 145.5,
+    "currency": "SGD",
+    "description": "Workers Paid, R2 and DNS, 2026-12 (demo)",
+    "occurred_at": "2026-12-01T00:00:00Z",
+    "invoice_id": "cf-demo-inv-2026-12",
+    "external_invoice_id": "DEMO-CF-2026-12",
+    "status": "paid",
+    "type": "charge"
+   }
+  ],
+  "usage": {
+   "2026-01": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 416772
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 196847
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 159585
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 69804
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 87215
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 58670
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 114285
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 41381
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 20555
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 64736
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 9663
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 3800,
+      "writes": 900
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1500,
+      "writes": 300
+     }
+    ]
+   },
+   "2026-02": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 437827
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 182828
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 161110
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 68256
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 91866
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 56306
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 137534
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 47544
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 24806
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 71977
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 8814
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 4028,
+      "writes": 954
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1590,
+      "writes": 318
+     }
+    ]
+   },
+   "2026-03": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 425631
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 231609
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 161450
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 77477
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 106787
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 58420
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 141380
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 54260
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 26321
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 68739
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 9612
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 4256,
+      "writes": 1008
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1680,
+      "writes": 336
+     }
+    ]
+   },
+   "2026-04": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 469192
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 203159
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 170745
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 78238
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 99527
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 67981
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 136923
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 48376
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 24937
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 69857
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 9605
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 4484,
+      "writes": 1062
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1770,
+      "writes": 354
+     }
+    ]
+   },
+   "2026-05": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 518572
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 223394
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 189186
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 81459
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 114005
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 72185
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 161835
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 60500
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 25834
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 81262
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 10682
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 4712,
+      "writes": 1116
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1860,
+      "writes": 372
+     }
+    ]
+   },
+   "2026-06": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 493222
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 246476
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 226030
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 88192
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 117244
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 75335
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 142995
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 52715
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 30723
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 89477
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 11997
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 4940,
+      "writes": 1170
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 1950,
+      "writes": 390
+     }
+    ]
+   },
+   "2026-07": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 591213
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 278594
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 227197
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 104022
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 130425
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 82027
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 173924
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 55547
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 29744
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 79634
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 12793
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 5167,
+      "writes": 1224
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2039,
+      "writes": 407
+     }
+    ]
+   },
+   "2026-08": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 528927
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 282458
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 239365
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 90348
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 116890
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 78369
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 186146
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 69998
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 32920
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 96437
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 12327
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 5396,
+      "writes": 1278
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2130,
+      "writes": 426
+     }
+    ]
+   },
+   "2026-09": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 640694
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 284913
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 234560
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 107180
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 120463
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 78565
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 176850
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 62651
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 33928
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 103797
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 12656
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 5624,
+      "writes": 1332
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2220,
+      "writes": 444
+     }
+    ]
+   },
+   "2026-10": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 602946
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 303163
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 250682
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 105425
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 138294
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 81066
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 192885
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 62617
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 35894
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 93371
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 13624
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 5852,
+      "writes": 1386
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2310,
+      "writes": 462
+     }
+    ]
+   },
+   "2026-11": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 648391
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 308647
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 247044
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 104970
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 155222
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 79320
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 210544
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 68753
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 34345
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 103710
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 13826
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 6080,
+      "writes": 1440
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2400,
+      "writes": 480
+     }
+    ]
+   },
+   "2026-12": {
+    "workers": [
+     {
+      "script": "ledgers-web",
+      "requests": 712934
+     },
+     {
+      "script": "ledgers-api",
+      "requests": 297958
+     },
+     {
+      "script": "sqeezin-web",
+      "requests": 277055
+     },
+     {
+      "script": "sqeezin-worker",
+      "requests": 109962
+     },
+     {
+      "script": "livingbrain-app",
+      "requests": 148091
+     },
+     {
+      "script": "cratefield-site",
+      "requests": 92264
+     },
+     {
+      "script": "owlpost-mail",
+      "requests": 186743
+     },
+     {
+      "script": "colonizer-hub",
+      "requests": 81497
+     },
+     {
+      "script": "sealbin-api",
+      "requests": 39523
+     },
+     {
+      "script": "fz-dashboard",
+      "requests": 106685
+     },
+     {
+      "script": "tmp-preview-worker",
+      "requests": 16311
+     }
+    ],
+    "d1": [
+     {
+      "database": "fz-ledgers-db",
+      "reads": 6308,
+      "writes": 1494
+     },
+     {
+      "database": "sqeezin-db",
+      "reads": 2490,
+      "writes": 498
+     }
+    ]
+   }
+  }
+ },
+ "anthropic": {
+  "cost_cents": {
+   "2026-01": "39626.46533",
+   "2026-02": "44327.10638",
+   "2026-03": "47903.52913",
+   "2026-04": "53966.48558",
+   "2026-05": "56032.32888",
+   "2026-06": "62872.78502",
+   "2026-07": "64064.09087",
+   "2026-08": "68983.48686",
+   "2026-09": "70617.08701",
+   "2026-10": "77725.92616",
+   "2026-11": "78519.68188",
+   "2026-12": "81697.84256"
+  },
+  "usage": {
+   "2026-01": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 1570095
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 974660
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 384960
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 244662
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 312701
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 61771
+    }
+   ],
+   "2026-02": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 1972125
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 900590
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 486880
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 298391
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 392045
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 55166
+    }
+   ],
+   "2026-03": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2067379
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 940870
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 439066
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 276555
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 361959
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 63710
+    }
+   ],
+   "2026-04": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 1836965
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1080161
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 427081
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 334275
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 386897
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 69087
+    }
+   ],
+   "2026-05": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2154975
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1247907
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 495300
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 287793
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 427113
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 66913
+    }
+   ],
+   "2026-06": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2376353
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1087037
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 563370
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 337638
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 504245
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 84418
+    }
+   ],
+   "2026-07": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2253764
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1255427
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 605885
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 383605
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 463167
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 71525
+    }
+   ],
+   "2026-08": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2282916
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1376034
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 615462
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 377586
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 489884
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 83513
+    }
+   ],
+   "2026-09": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2732400
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1450784
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 639436
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 397701
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 526466
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 85267
+    }
+   ],
+   "2026-10": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2755029
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1325029
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 532959
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 348666
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 497520
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 102608
+    }
+   ],
+   "2026-11": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 3135584
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1312778
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 715487
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 370580
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 511274
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 82528
+    }
+   ],
+   "2026-12": [
+    {
+     "api_key_id": "apikey_ledgers_web",
+     "tokens": 2979510
+    },
+    {
+     "api_key_id": "apikey_sqeezin",
+     "tokens": 1320733
+    },
+    {
+     "api_key_id": "apikey_cratefield",
+     "tokens": 572755
+    },
+    {
+     "api_key_id": "apikey_owlpost",
+     "tokens": 382929
+    },
+    {
+     "api_key_id": "apikey_fz_research",
+     "tokens": 519750
+    },
+    {
+     "api_key_id": "console",
+     "tokens": 94083
+    }
+   ]
+  }
+ },
+ "planetscale": {
+  "invoices": [
+   {
+    "id": "ps-demo-2026-01",
+    "total": "49.00",
+    "billing_period_start": "2026-01-01T00:00:00Z",
+    "billing_period_end": "2026-01-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-02",
+    "total": "49.00",
+    "billing_period_start": "2026-02-01T00:00:00Z",
+    "billing_period_end": "2026-02-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-03",
+    "total": "49.00",
+    "billing_period_start": "2026-03-01T00:00:00Z",
+    "billing_period_end": "2026-03-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-04",
+    "total": "55.50",
+    "billing_period_start": "2026-04-01T00:00:00Z",
+    "billing_period_end": "2026-04-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-05",
+    "total": "55.50",
+    "billing_period_start": "2026-05-01T00:00:00Z",
+    "billing_period_end": "2026-05-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-06",
+    "total": "55.50",
+    "billing_period_start": "2026-06-01T00:00:00Z",
+    "billing_period_end": "2026-06-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-07",
+    "total": "62.00",
+    "billing_period_start": "2026-07-01T00:00:00Z",
+    "billing_period_end": "2026-07-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-08",
+    "total": "62.00",
+    "billing_period_start": "2026-08-01T00:00:00Z",
+    "billing_period_end": "2026-08-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-09",
+    "total": "62.00",
+    "billing_period_start": "2026-09-01T00:00:00Z",
+    "billing_period_end": "2026-09-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-10",
+    "total": "68.50",
+    "billing_period_start": "2026-10-01T00:00:00Z",
+    "billing_period_end": "2026-10-28T23:59:59Z",
+    "paid": true,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-11",
+    "total": "68.50",
+    "billing_period_start": "2026-11-01T00:00:00Z",
+    "billing_period_end": "2026-11-28T23:59:59Z",
+    "paid": false,
+    "overdue": false
+   },
+   {
+    "id": "ps-demo-2026-12",
+    "total": "68.50",
+    "billing_period_start": "2026-12-01T00:00:00Z",
+    "billing_period_end": "2026-12-28T23:59:59Z",
+    "paid": false,
+    "overdue": false
+   }
+  ]
+ }
+}

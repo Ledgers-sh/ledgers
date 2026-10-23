@@ -49,6 +49,11 @@ pub struct BillLine {
     pub expense_account: Option<String>,
     /// The bill whose line this account was suggested from, when it was.
     pub suggested_from: Option<String>,
+    /// The business unit this line books to, when it differs from the bill's
+    /// unit (a connected source splits one invoice across units; issue #142).
+    /// Absent means the bill's unit applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_code: Option<String>,
 }
 
 impl From<&ExtractedLine> for BillLine {
@@ -61,6 +66,7 @@ impl From<&ExtractedLine> for BillLine {
             gross_minor: line.gross_minor,
             expense_account: None,
             suggested_from: None,
+            unit_code: None,
         }
     }
 }
@@ -189,6 +195,10 @@ pub struct PreviewLine {
     pub side: String,
     /// The amount, minor units of the bill currency.
     pub minor: i64,
+    /// The unit an expense line books to, when the line names one (a split
+    /// connected invoice); `None` means the bill's unit applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 /// A bill as commands and the app see it.
@@ -282,6 +292,7 @@ pub fn entry_lines(
                 account: account.to_owned(),
                 side: "debit".to_owned(),
                 minor: net,
+                unit: line.unit_code.clone(),
             });
         }
     }
@@ -290,12 +301,14 @@ pub fn entry_lines(
             account: vat_account.to_owned(),
             side: "debit".to_owned(),
             minor: vat_minor,
+            unit: None,
         });
     }
     out.push(PreviewLine {
         account: payable_account.to_owned(),
         side: "credit".to_owned(),
         minor: gross_minor,
+        unit: None,
     });
     out
 }
@@ -395,5 +408,49 @@ mod tests {
             open_flags(&[], false, false, &lines),
             vec![FLAG_NO_ACCOUNT.to_owned()]
         );
+    }
+
+    #[test]
+    fn a_line_with_its_own_unit_carries_it_into_the_entry() {
+        // A split connected invoice: each expense line names its unit; VAT and
+        // the payable carry none (issue #142).
+        let lines = vec![
+            BillLine {
+                net_minor: Some(60_000),
+                expense_account: Some("6100".into()),
+                unit_code: Some("LDG".into()),
+                ..BillLine::default()
+            },
+            BillLine {
+                net_minor: Some(40_000),
+                expense_account: Some("6100".into()),
+                unit_code: Some("SQZ".into()),
+                ..BillLine::default()
+            },
+        ];
+        let entry = entry_lines(&lines, 0, 100_000, "1050", "2010");
+        let units: Vec<(&str, Option<&str>)> = entry
+            .iter()
+            .filter(|l| l.account == "6100")
+            .map(|l| (l.side.as_str(), l.unit.as_deref()))
+            .collect();
+        assert_eq!(units, vec![("debit", Some("LDG")), ("debit", Some("SQZ"))]);
+        assert!(
+            entry
+                .iter()
+                .filter(|l| l.account == "2010" || l.account == "1050")
+                .all(|l| l.unit.is_none())
+        );
+        let debit: i64 = entry
+            .iter()
+            .filter(|l| l.side == "debit")
+            .map(|l| l.minor)
+            .sum();
+        let credit: i64 = entry
+            .iter()
+            .filter(|l| l.side == "credit")
+            .map(|l| l.minor)
+            .sum();
+        assert_eq!(debit, credit, "the split entry balances");
     }
 }

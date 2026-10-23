@@ -1042,6 +1042,7 @@ async fn entry_for(
     };
     let lines = entry_lines(&row.lines, vat_minor, gross, &vat, &payable);
     let unit = bill_unit(db, &ctx.company_id, row.unit.as_deref()).await?;
+    check_line_units(db, &ctx.company_id, &row.lines, unit.is_some()).await?;
     let journal_id = match &input.journal_id {
         Some(id) => id.clone(),
         None => ledgers_ledger::journal::find_journal(db, &ctx.company_id, "GN")
@@ -1085,6 +1086,8 @@ async fn entry_for(
                 // Expense lines carry the bill's unit; VAT and the payable are
                 // balance-sheet lines and follow their account's unit rule.
                 let on_unit = line.account != vat && line.account != payable;
+                // A line's own unit (a split connected invoice) wins over the bill's.
+                let line_unit = line.unit.clone().or_else(|| unit.clone());
                 SerializableLine {
                     account_number: line.account,
                     side: line.side,
@@ -1094,8 +1097,8 @@ async fn entry_for(
                     },
                     fx: None,
                     tax_code: None,
-                    dimensions: match (&unit, on_unit) {
-                        (Some(code), true) => BTreeMap::from([("unit".to_owned(), code.clone())]),
+                    dimensions: match (line_unit, on_unit) {
+                        (Some(code), true) => BTreeMap::from([("unit".to_owned(), code)]),
                         _ => BTreeMap::new(),
                     },
                     memo: None,
@@ -1170,6 +1173,53 @@ impl Command for BillsPost {
         out.objects = vec![row.id];
         Ok(out)
     }
+}
+
+/// Checks the unit of each expense line that names one: it must exist and be
+/// active. While the company has units and the bill names no unit, every
+/// expense line must name its own.
+///
+/// # Errors
+/// [`CommandError::InvalidInput`] for an unknown or archived unit, or an
+/// expense line with no unit where the bill has none.
+async fn check_line_units(
+    db: &dyn Database,
+    company_id: &str,
+    lines: &[BillLine],
+    bill_has_unit: bool,
+) -> Result<(), CommandError> {
+    let enabled = units::units_enabled(db, company_id)
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    for line in lines {
+        match &line.unit_code {
+            Some(code) => {
+                let unit = units::find_unit(db, company_id, code)
+                    .await
+                    .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+                    .ok_or_else(|| {
+                        CommandError::InvalidInput(format!("business unit {code} does not exist"))
+                    })?;
+                if unit.archived {
+                    return Err(CommandError::InvalidInput(format!(
+                        "business unit {code} is archived"
+                    )));
+                }
+            }
+            None if enabled
+                && !bill_has_unit
+                && line.expense_account.is_some()
+                && line.net_minor.unwrap_or(0) != 0 =>
+            {
+                return Err(CommandError::InvalidInput(
+                    "an expense line has no business unit; the company has units, so name one before it posts"
+                        .into(),
+                ));
+            }
+            None => {}
+        }
+    }
+    Ok(())
 }
 
 /// The business unit a bill posts under. While the company has units, a
