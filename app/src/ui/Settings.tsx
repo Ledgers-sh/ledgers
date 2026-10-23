@@ -13,6 +13,7 @@ import { InvoiceSettings } from './settings/InvoiceSettings';
 import { AuditSettings } from './settings/AuditSettings';
 import { People } from './People';
 import { UnitsPanel } from './Units';
+import { IntegrationsPanel } from './Integrations';
 
 /** The Settings sections, in the order the left navigation lists them. */
 export const SETTINGS_SECTIONS = [
@@ -25,6 +26,7 @@ export const SETTINGS_SECTIONS = [
   'audit',
   'people',
   'units',
+  'integrations',
   'agent-keys',
 ] as const;
 
@@ -40,6 +42,7 @@ const SECTION_LABEL: Record<SettingsSection, MessageKey> = {
   audit: 'settings.audit',
   people: 'settings.people',
   units: 'settings.units',
+  integrations: 'settings.integrations',
   'agent-keys': 'settings.agent_keys',
 };
 
@@ -59,6 +62,7 @@ const SECTION_INTRO: Record<SettingsSection, MessageKey> = {
   audit: 'settings.audit_intro',
   people: 'settings.people_intro',
   units: 'units.intro',
+  integrations: 'settings.integrations_intro',
   'agent-keys': 'agentKeys.intro',
 };
 
@@ -106,7 +110,7 @@ export function Settings({ section }: { section: SettingsSection }) {
         </nav>
         <div class="settings-body">
           <p class="muted settings-intro">{t(SECTION_INTRO[section])}</p>
-          {!personal && section !== 'agent-keys' && section !== 'units' ? (
+          {!personal && section !== 'agent-keys' && section !== 'units' && section !== 'integrations' ? (
             <Empty title={t('settings.person_title')}>{t('settings.person_body')}</Empty>
           ) : section === 'company' ? (
             <CompanySettings />
@@ -126,6 +130,8 @@ export function Settings({ section }: { section: SettingsSection }) {
             <People />
           ) : section === 'units' ? (
             <UnitsPanel />
+          ) : section === 'integrations' ? (
+            <IntegrationsPanel />
           ) : (
             <AgentKeys creating={creating} onCreatingChange={setCreating} />
           )}

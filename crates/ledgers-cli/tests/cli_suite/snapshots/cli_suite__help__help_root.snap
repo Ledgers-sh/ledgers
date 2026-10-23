@@ -13,12 +13,14 @@ Commands:
   demo               Demo company operations
   accounts           Commands under `ledgers accounts`
   agreements         Commands under `ledgers agreements`
+  allocation-rules   Commands under `ledgers allocation-rules`
   approval-settings  Commands under `ledgers approval-settings`
   approvals          Commands under `ledgers approvals`
   audit              Commands under `ledgers audit`
   bank               Commands under `ledgers bank`
   bills              Commands under `ledgers bills`
   company            Commands under `ledgers company`
+  connections        Commands under `ledgers connections`
   documents          Commands under `ledgers documents`
   entries            Commands under `ledgers entries`
   fiscal-years       Commands under `ledgers fiscal-years`
