@@ -538,6 +538,34 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers units list",
         ),
         entry(
+            "connections.list",
+            "read",
+            "GET",
+            "/v1/connections",
+            "ledgers connections list",
+        ),
+        entry(
+            "connections.runs",
+            "read",
+            "GET",
+            "/v1/connections/{connection_id}/runs",
+            "ledgers connections runs",
+        ),
+        entry(
+            "allocation_rules.list",
+            "read",
+            "GET",
+            "/v1/allocation-rules",
+            "ledgers allocation-rules list",
+        ),
+        entry(
+            "reports.costs_by_unit",
+            "read",
+            "GET",
+            "/v1/reports/costs-by-unit",
+            "ledgers reports costs-by-unit",
+        ),
+        entry(
             "entries.transfer",
             "post-within-limits",
             "POST",
@@ -546,6 +574,7 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
         ),
     ];
     commands.extend(human_only_commands());
+    commands.extend(connection_human_commands());
     commands.extend(approval_commands());
     commands.extend(bank_commands());
     commands.extend(settings_commands());
@@ -697,6 +726,50 @@ fn chart_write(name: &str, method: &str, path: &str, cli: &str) -> CommandDescri
         mcp: None,
         ..entry(name, "draft", method, path, cli)
     }
+}
+
+/// The connections and allocation writes: human only, owner and admin.
+fn connection_human_commands() -> Vec<CommandDescriptor> {
+    fn human_entry(name: &str, method: &str, path: &str, cli: &str) -> CommandDescriptor {
+        CommandDescriptor {
+            human_only: true,
+            idempotent: false,
+            mcp: None,
+            ..entry(name, "draft", method, path, cli)
+        }
+    }
+    vec![
+        human_entry(
+            "connections.create",
+            "POST",
+            "/v1/connections",
+            "ledgers connections create",
+        ),
+        human_entry(
+            "connections.update",
+            "POST",
+            "/v1/connections/{id}/update",
+            "ledgers connections update",
+        ),
+        human_entry(
+            "connections.delete",
+            "POST",
+            "/v1/connections/{id}/delete",
+            "ledgers connections delete",
+        ),
+        human_entry(
+            "connections.sync_now",
+            "POST",
+            "/v1/connections/{connection_id}/sync",
+            "ledgers connections sync",
+        ),
+        human_entry(
+            "allocation_rules.set",
+            "POST",
+            "/v1/allocation-rules/{connection_id}",
+            "ledgers allocation-rules set",
+        ),
+    ]
 }
 
 /// The human-only commands: agents get a 403 on them, and the MCP server does

@@ -54,6 +54,9 @@ import { unitsList } from './api/commands';
 import type { Unit } from './api/types';
 import { UnitSwitcher } from './ui/UnitSwitcher';
 import { Units } from './ui/Units';
+import { GroupRoute } from './ui/groups';
+import { groupsList, type GroupView } from './api/groups';
+import { groupNavVisible } from './lib/groups';
 import { normaliseRange, type MonthRange } from './lib/trends';
 import { PeriodPicker } from './ui/PeriodPicker';
 import { t, useLocale, type MessageKey } from './i18n';
@@ -71,6 +74,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' || r.startsWith('bills/') },
   { hash: 'bank', label: 'nav.bank', icon: 'bank', match: (r) => r === 'bank' || r.startsWith('bank/') },
   { hash: 'parties', label: 'nav.parties', icon: 'parties', match: (r) => r === 'parties' || r.startsWith('parties/') },
+  { hash: 'group', label: 'nav.group', icon: 'group', match: (r) => r === 'group' || r.startsWith('group/') },
   { hash: 'settings', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
@@ -262,6 +266,19 @@ function Shell({
       live = false;
     };
   }, [baseUrl, personId]);
+  // The groups the person may see: the Group nav item shows when there is one, or the person owns two companies.
+  const [groupList, setGroupList] = useState<GroupView[]>([]);
+  useEffect(() => {
+    if (!personId) return;
+    let live = true;
+    groupsList({ baseUrl }).then(
+      (list) => live && setGroupList(list),
+      () => live && setGroupList([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [baseUrl, personId, companyList.length]);
   // The company in the URL, or the deployment's own company when the URL names none.
   const companyId = companyFromSearch(window.location.search) ?? person?.companyId ?? '';
   const units = activeUnits(unitList);
@@ -300,7 +317,10 @@ function Shell({
     return { status: 'ready', commands: paletteCommands(openApi) };
   }, [openApi]);
 
-  const nav = NAV.filter((item) => item.hash !== 'approvals' || !apiKey);
+  const groupNav = person !== undefined && groupNavVisible(groupList, companyList);
+  const nav = NAV.filter(
+    (item) => (item.hash !== 'approvals' || !apiKey) && (item.hash !== 'group' || groupNav),
+  );
   const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
 
   const setRange = useCallback((next: MonthRange) => {
@@ -517,6 +537,7 @@ function renderRoute(route: string) {
   if (route.startsWith('parties/')) return <PartyPage id={decodeURIComponent(route.slice('parties/'.length))} />;
   if (route.startsWith('bank/')) return <BankAccountPage id={decodeURIComponent(route.slice('bank/'.length))} />;
   if (route === 'new') return <NewEntry />;
+  if (route === 'group' || route.startsWith('group/')) return <GroupRoute route={route} />;
   return (
     <div class="empty">
       <h2>{t('shell.not_found')}</h2>

@@ -1194,3 +1194,108 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
   .party-columns { grid-template-columns: 1fr; }
   .parties-table th.num-col, .parties-table td.num-col { text-align: start; }
 }
+/* Connected sources (issue #142): Settings → Integrations and the costs panel. */
+.integrations { display: flex; flex-direction: column; gap: 24px; }
+.integrations-section { display: flex; flex-direction: column; gap: 12px; }
+.integrations .section-title { font: 600 16px var(--sans); color: var(--text); margin: 0; }
+.integrations .section-subtitle { font: 600 14px var(--sans); color: var(--text-2); margin: 8px 0 0; }
+.gallery { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.gallery-card, .connection-card { border: 1px solid var(--rule-soft); border-radius: var(--radius); background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.gallery-head, .connection-head { display: flex; gap: 12px; align-items: flex-start; }
+.gallery-name, .connection-name { margin: 0; font: 600 15px var(--sans); color: var(--text); }
+.gallery-imports { margin: 2px 0 0; font-size: 14px; }
+.gallery-hosts { font-size: 12px; margin: 0; word-break: break-all; }
+.brand-mark { width: 28px; height: 28px; flex: 0 0 28px; fill: var(--text-2); }
+.brand-mark-empty { display: inline-block; border: 1px dashed var(--rule); border-radius: 6px; }
+.demo-badge { margin-inline-start: 8px; font-size: 11px; vertical-align: middle; }
+.connection-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.connection-detail { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--rule-soft); padding-top: 14px; }
+.connect-form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.form-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.integrations-runs td .run-notes { margin-top: 6px; }
+.run-notes summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.run-notes ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.badge.ok { color: var(--good); border-color: var(--rule); }
+.badge.warn { color: var(--danger); border-color: var(--danger-line); }
+.queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.queue-item { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; border: 1px solid var(--human-line); background: var(--human-bg); border-radius: var(--radius); padding: 10px 12px; font-size: 14px; }
+.mapping { display: flex; flex-direction: column; gap: 12px; }
+.mapping-table { max-width: 720px; }
+.coming-soon-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.coming-soon-list li { border: 1px dashed var(--rule); border-radius: 999px; padding: 4px 12px; color: var(--muted); font-size: 14px; }
+.coming-soon { opacity: 0.92; }
+.costs { display: flex; flex-direction: column; gap: 10px; }
+.costs-head { display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap; }
+.costs-head .section-title, .costs-empty .section-title { font: 600 15px var(--sans); color: var(--text); margin: 0; }
+.segmented { display: inline-flex; gap: 4px; }
+.segmented .btn[aria-pressed="true"] { border-color: var(--agent); color: var(--text); background: var(--agent-bg); }
+.costs .chart-legend { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+/* Group screens: groups, intercompany agreements, reconciliation and the group view. */
+.group-tabs { margin-bottom: 16px; }
+.group-notice { margin: 12px 0 0; font-size: 14px; }
+.group-kind.kind-holding { color: var(--text-2); }
+.group-kind.kind-ip_holding { color: var(--agent); border-color: var(--agent-line, var(--line)); background: var(--agent-bg); }
+.group-kind.kind-operating { color: var(--human-text); border-color: var(--human-line); background: var(--human-bg); }
+.status-active { color: var(--text-2); }
+.company-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.company-avatar { width: 24px; height: 24px; font-size: 12px; font-weight: 600; }
+.group-member-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 0.8fr) auto; gap: 12px; align-items: end; }
+.group-editor { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.group-editor h2 { font-size: 18px; }
+.agreement-form { display: flex; flex-direction: column; gap: 16px; }
+.form-section { min-width: 0; }
+.form-section h3, .panel h2 { font-size: 16px; font-weight: 600; }
+.accounts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.side-accounts { min-width: 0; }
+.notes-field { grid-column: 1 / -1; }
+.hint { font-size: 13px; color: var(--muted); }
+.parties { display: flex; flex-direction: column; gap: 4px; }
+.party { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.party-role { font-size: 12px; min-width: 64px; }
+.hint-text { display: block; font-size: 12px; }
+.terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin: 0; }
+.terms > div { min-width: 0; }
+.terms dt, .timeline-sides dt, .figures dt, .recon-figures dt, .wht-summary dt { font-size: 13px; color: var(--muted); }
+.terms dd, .timeline-sides dd, .figures dd, .recon-figures dd, .wht-summary dd { margin: 2px 0 0; }
+.terms-wide { grid-column: 1 / -1; }
+.account-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.run-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.timeline-row { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.timeline-row.state-failed { border-color: var(--danger-line); }
+.timeline-month { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.timeline-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; margin: 0; }
+.timeline-sides > div { min-width: 0; }
+.timeline-failure { margin: 0; color: var(--danger); font-size: 14px; overflow-wrap: anywhere; }
+.preview-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; margin-top: 12px; }
+.preview-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; min-width: 0; overflow-x: auto; }
+.preview-card h3 { font-size: 15px; margin-bottom: 8px; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.preview-table th, .preview-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: start; }
+.preview-table .num { text-align: end; }
+.preview-foot { margin: 10px 0 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.agreements-table td, .agreements-table th { vertical-align: top; }
+.recon-figures, .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.recon-figure, .figure { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+.recon-figure.flagged { border-color: var(--danger-line); background: var(--danger-bg); }
+.flag-tag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--danger); margin-inline-end: 6px; }
+.open-chip { color: var(--human-text); border-color: var(--human-line); background: var(--human-bg); }
+.pair-title { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 16px; flex: 1; min-width: 0; }
+.recon-periods th[scope='row'] { font-weight: 500; }
+tr.open-month { background: var(--human-bg); }
+.group-view-controls { align-items: flex-end; margin-bottom: 12px; }
+.consolidation-note { margin-bottom: 16px; }
+.consolidation-note h2 { font-size: 15px; margin-bottom: 6px; }
+.view-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.member-column { min-width: 0; }
+.wht-summary { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 0; }
+.source-link { margin-inline-start: 6px; font-size: 13px; }
+.country-note-list { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.parties-line { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; font-weight: 400; }
+.group-members th, .agreements-table th, .recon-periods th, .preview-table th { text-align: start; }
+.group-members th.num, .agreements-table th.num, .recon-periods th.num, .preview-table th.num { text-align: end; font-family: inherit; }
+.terms .num, .figures .num { text-align: start; }
+.pair-card .panel-head h2 { flex: 1 1 100%; }
+.pair-card .pair-title { flex: 1 1 100%; }
+.agreement-form .field-row { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.side-accounts legend .company-name { text-transform: none; letter-spacing: 0; font-size: 14px; }

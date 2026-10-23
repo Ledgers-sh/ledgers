@@ -1188,3 +1188,127 @@ fn an_agreement_names_accounts_of_the_right_type_and_only_live_postable_ones() {
         })
     });
 }
+
+/// Settlement entries in the books (both sides, any reversal state).
+async fn settle_entries(db: &dyn Database) -> i64 {
+    ledger_count(
+        db,
+        "SELECT COUNT(*) AS n FROM journal_entry WHERE external_id LIKE 'ic-%-settle-%'",
+    )
+    .await
+}
+
+#[test]
+fn a_settle_that_fails_on_one_side_is_completed_by_the_retry_without_a_second_post() {
+    each_dialect(|db| {
+        Box::pin(async move {
+            world(db).await;
+            revenue(db, OPS, "2026-01-31", 1_000_000, "jan").await;
+            run(
+                db,
+                OPS,
+                &AgreementsRunPeriod,
+                "run-jan",
+                &RunPeriodInput {
+                    id: AGREEMENT.to_owned(),
+                    periods: vec!["2026-01".to_owned()],
+                },
+            )
+            .await
+            .expect("run");
+            let healthy = Sides { db, fail: None };
+            orchestrate::post_period(db, &healthy, AGREEMENT, "2026-01", "call-p1", NOW)
+                .await
+                .expect("post jan");
+
+            // The licensee (OPS) refuses to settle after the licensor (IP) has.
+            let broken = Sides {
+                db,
+                fail: Some(OPS),
+            };
+            let err = orchestrate::settle_period(db, &broken, AGREEMENT, "2026-01", "call-s1", NOW)
+                .await
+                .expect_err("the licensee side fails");
+            assert!(err.to_string().contains("licensee"), "{err}");
+            assert!(
+                doc_statuses(db, "2026-01")
+                    .await
+                    .iter()
+                    .all(|(_, status, _)| status == "posted"),
+                "the period stays posted until both sides settle"
+            );
+            assert_eq!(settle_entries(db).await, 1, "the licensor's entry stays");
+
+            // A retry under a new call id completes it and posts nothing twice.
+            let retried =
+                orchestrate::settle_period(db, &healthy, AGREEMENT, "2026-01", "call-s2", NOW)
+                    .await
+                    .expect("the retry settles");
+            assert!(
+                retried
+                    .docs
+                    .iter()
+                    .all(|d| d.status == ledgers_group::model::DocStatus::Settled)
+            );
+            assert_eq!(settle_entries(db).await, 2, "one settlement entry per side");
+            let done = reconciliation(db).await;
+            assert_eq!(done.pairs[0].receivable_minor, 0);
+            assert_eq!(done.pairs[0].payable_minor, 0);
+            assert_eq!(done.pairs[0].balance_difference_minor, 0);
+        })
+    });
+}
+
+#[test]
+fn a_settle_whose_status_batch_did_not_land_adopts_its_entries() {
+    each_dialect(|db| {
+        Box::pin(async move {
+            world(db).await;
+            revenue(db, OPS, "2026-01-31", 1_000_000, "jan").await;
+            run(
+                db,
+                OPS,
+                &AgreementsRunPeriod,
+                "run-jan",
+                &RunPeriodInput {
+                    id: AGREEMENT.to_owned(),
+                    periods: vec!["2026-01".to_owned()],
+                },
+            )
+            .await
+            .expect("run");
+            let sides = Sides { db, fail: None };
+            orchestrate::post_period(db, &sides, AGREEMENT, "2026-01", "call-p1", NOW)
+                .await
+                .expect("post jan");
+            orchestrate::settle_period(db, &sides, AGREEMENT, "2026-01", "call-s1", NOW)
+                .await
+                .expect("settle jan");
+            assert_eq!(settle_entries(db).await, 2);
+
+            // Simulate the status batch of that settle not having landed.
+            db.execute(&Statement::with_values(
+                "UPDATE intercompany_document SET status = 'posted' WHERE agreement_id = ? AND period = ?"
+                    .to_owned(),
+                vec![
+                    sea_query::Value::from(AGREEMENT),
+                    sea_query::Value::from("2026-01"),
+                ],
+            ))
+            .await
+            .expect("reset the status");
+
+            let again =
+                orchestrate::settle_period(db, &sides, AGREEMENT, "2026-01", "call-s2", NOW)
+                    .await
+                    .expect("the settle adopts its entries");
+            assert!(
+                again
+                    .docs
+                    .iter()
+                    .all(|d| d.status == ledgers_group::model::DocStatus::Settled)
+            );
+            assert_eq!(settle_entries(db).await, 2, "nothing was posted again");
+        })
+    });
+}

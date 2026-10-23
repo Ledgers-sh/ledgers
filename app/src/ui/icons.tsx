@@ -1,9 +1,17 @@
 import type { JSX } from 'preact';
 
 type IconProps = { name: IconName; class?: string };
-export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'bank' | 'parties' | 'approvals' | 'plus' | 'sun' | 'moon' | 'logout' | 'settings' | 'chevron' | 'check' | 'close' | 'chevron-left' | 'chevron-right' | 'info';
+export type IconName = 'overview' | 'journal' | 'accounts' | 'reports' | 'bills' | 'bank' | 'parties' | 'group' | 'approvals' | 'plus' | 'sun' | 'moon' | 'logout' | 'settings' | 'chevron' | 'check' | 'close' | 'chevron-left' | 'chevron-right' | 'info';
 
 const PATHS: Record<IconName, JSX.Element> = {
+  group: (
+    <>
+      <circle cx="9" cy="8" r="3" />
+      <circle cx="17" cy="9" r="2.5" />
+      <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+      <path d="M15 14.2c2.8-.4 6 1.4 6 4.8" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />

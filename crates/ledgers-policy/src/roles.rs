@@ -55,8 +55,24 @@ impl Class {
     }
 }
 
-/// The class of a command, by its registry name. `None` for a name nobody
-/// has classified: the matrix refuses it for every role.
+/// The connections and allocation commands, classed apart from the books
+/// (keeps [`class_of`] within the line budget). Writes are owner and admin
+/// work through the `Settings` class; the reads are open to every role.
+fn integration_class(command: &str) -> Option<Class> {
+    Some(match command {
+        "connections.list"
+        | "connections.runs"
+        | "allocation_rules.list"
+        | "reports.costs_by_unit" => Class::Read,
+        "connections.create"
+        | "connections.update"
+        | "connections.delete"
+        | "connections.sync_now"
+        | "allocation_rules.set" => Class::Settings,
+        _ => return None,
+    })
+}
+
 /// Commands that only read: the Read class (listed apart so `class_of` stays short).
 const READ_COMMANDS: &[&str] = &[
     "company.get",
@@ -98,11 +114,20 @@ const READ_COMMANDS: &[&str] = &[
     "test.read",
 ];
 
+/// The class of a command, by its registry name. `None` for a name nobody
+/// has classified: the matrix refuses it for every role.
 #[must_use]
 pub fn class_of(command: &str) -> Option<Class> {
+    if let Some(class) = integration_class(command) {
+        return Some(class);
+    }
     if READ_COMMANDS.contains(&command) {
         return Some(Class::Read);
     }
+    books_class(command)
+}
+
+fn books_class(command: &str) -> Option<Class> {
     Some(match command {
         "company.update"
         | "units.create"
@@ -264,6 +289,15 @@ mod tests {
         ("fiscal_years.list", Class::Read),
         ("numbering.list", Class::Read),
         ("tax_settings.get", Class::Read),
+        ("connections.list", Class::Read),
+        ("connections.runs", Class::Read),
+        ("allocation_rules.list", Class::Read),
+        ("reports.costs_by_unit", Class::Read),
+        ("connections.create", Class::Settings),
+        ("connections.update", Class::Settings),
+        ("connections.delete", Class::Settings),
+        ("connections.sync_now", Class::Settings),
+        ("allocation_rules.set", Class::Settings),
         ("company.update", Class::Settings),
         ("tax_settings.update", Class::Settings),
         ("approval_settings.get", Class::Settings),
@@ -427,5 +461,48 @@ mod tests {
             .expect("auditor listed");
         assert!(auditor.contains(&Class::Audit));
         assert!(!auditor.contains(&Class::Post));
+    }
+}
+
+#[cfg(test)]
+mod connections_roles {
+    use super::*;
+
+    /// Connections and their credentials are an owner and admin matter: an
+    /// accountant who can post may read the costs but not connect a vendor.
+    #[test]
+    fn only_owners_and_admins_connect_sources_and_read_is_open_to_the_books() {
+        for name in [
+            "connections.create",
+            "connections.update",
+            "connections.delete",
+            "connections.sync_now",
+            "allocation_rules.set",
+        ] {
+            assert!(check(Role::Owner, name).is_ok(), "owner may {name}");
+            assert!(check(Role::Admin, name).is_ok(), "admin may {name}");
+            assert!(
+                check(Role::Accountant, name).is_err(),
+                "accountant may not {name}"
+            );
+            assert!(check(Role::Viewer, name).is_err(), "viewer may not {name}");
+        }
+        for name in [
+            "connections.list",
+            "connections.runs",
+            "allocation_rules.list",
+            "reports.costs_by_unit",
+        ] {
+            assert!(check(Role::Viewer, name).is_ok(), "viewer may read {name}");
+            assert!(
+                check(Role::Accountant, name).is_ok(),
+                "accountant may read {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unclassified_connections_name_is_refused_for_everyone() {
+        assert!(class_of("connections.anything_new").is_none());
     }
 }

@@ -23,6 +23,7 @@ import {
 import { accountName, formatDate, formatPeriod, intlLocale, t, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { ActivityChart, CashChart, DimensionShares, FlowChart, Sparkline } from './charts';
+import { CostsByVenture } from './CostsByVenture';
 import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
 import { WaitingForYou } from './Approvals';
 
@@ -127,6 +128,7 @@ export function Overview() {
       onDimension={setDimension}
       rangeLabel={range.from === range.to ? formatPeriod(range.from) : `${formatPeriod(range.from)} – ${formatPeriod(range.to)}`}
       months={monthCount(range)}
+      costs={<CostsByVenture from={range.from} to={range.to} currency={current.currency} />}
       comparison={
         units.length > 0 && unit === null ? (
           <UnitsComparison
@@ -157,10 +159,12 @@ interface DashboardProps {
   months: number;
   /** The side-by-side business units, when the company is consolidated and has units. */
   comparison: ComponentChildren;
+  /** Connected costs by venture for the range (issue #142). */
+  costs: ComponentChildren;
 }
 
 function Dashboard(props: DashboardProps) {
-  const { current, before, twelve, trialRows, balanced, difference, asOf, approvalCount, dimension, onDimension, rangeLabel, months, comparison } = props;
+  const { current, before, twelve, trialRows, balanced, difference, asOf, approvalCount, dimension, onDimension, rangeLabel, months, comparison, costs } = props;
   const currency = current.currency;
   const locale = intlLocale();
   const windowMonths: TrendMonth[] = current.months;
@@ -254,6 +258,8 @@ function Dashboard(props: DashboardProps) {
       </section>
 
       {comparison}
+
+      {costs}
 
       <div class="grid-main">
         <section class="panel chart-panel">

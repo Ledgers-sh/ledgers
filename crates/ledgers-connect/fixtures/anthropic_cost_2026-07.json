@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "starting_at": "2026-07-01T00:00:00Z",
+      "ending_at": "2026-07-02T00:00:00Z",
+      "results": [
+        { "amount": "123.78912", "currency": "USD", "cost_type": null, "description": null, "model": null, "token_type": null, "workspace_id": null }
+      ]
+    },
+    {
+      "starting_at": "2026-07-02T00:00:00Z",
+      "ending_at": "2026-07-03T00:00:00Z",
+      "results": [
+        { "amount": "50.00001", "currency": "USD", "cost_type": null, "description": null, "model": null, "token_type": null, "workspace_id": null }
+      ]
+    },
+    {
+      "starting_at": "2026-07-03T00:00:00Z",
+      "ending_at": "2026-07-04T00:00:00Z",
+      "results": []
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}
