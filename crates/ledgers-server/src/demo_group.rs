@@ -2,11 +2,14 @@
 //! licenses the software to the operating company (the demo book from
 //! `ledgers-demo`) at 5% of its revenue.
 //!
-//! The seed creates the IP company (Singapore, SGD, owned by the deployment's
-//! bootstrap owner), the group, the licence, and then, for every month of the
-//! demo year, drafts and posts the period and settles every month but the
-//! last, so the reconciliation shows one open month. It runs through the same
-//! commands and posting path as a person would use, as the demo owner.
+//! The demo is a fixed sequence of steps ([`GROUP_STEPS`]): the IP company
+//! (Singapore, SGD, owned by the deployment's bootstrap owner), the group and
+//! the licence; then, for every month of the demo year, a draft and post; then
+//! a settlement of every month but the last, so the reconciliation shows one
+//! open month. [`seed_step`] runs one step, so the Worker can run the demo one
+//! bounded request at a time; [`seed`] runs all of them in one go. Both go
+//! through the same commands and posting path as a person would use, as the
+//! demo owner.
 //!
 //! Idempotent: a company, group or agreement that exists is left alone, a
 //! period that is already posted or settled is skipped, and the accounts a
@@ -172,13 +175,118 @@ async fn ensure_accounts(deps: &Deps, company_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Seeds the group demo for the operating company `ops` (the demo book's
-/// company) and a new IP company, over `year`'s twelve months.
+/// The number of steps the group demo takes. Step 0 creates the IP company,
+/// the group and the licence. Steps 1 to 12 draft and post one month each.
+/// Steps 13 to 23 settle months 1 to 11; month 12 stays open for the
+/// reconciliation. A step is one bounded batch of work, so each one fits in a
+/// single Worker request.
+pub const GROUP_STEPS: u32 = 24;
+
+/// The last step's number.
+const LAST_STEP: u32 = GROUP_STEPS - 1;
+
+/// What one step did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroupStep {
+    /// The step that ran.
+    pub step: u32,
+    /// Whether this was the last step, so the demo is complete.
+    pub done: bool,
+    /// The step to run next, `None` once the demo is complete.
+    pub next: Option<u32>,
+    /// Periods posted by this step (0 or 1).
+    pub posted: usize,
+    /// Periods settled by this step (0 or 1).
+    pub settled: usize,
+    /// On the last step: the period left posted and unsettled, when there is one.
+    pub open_period: Option<String>,
+}
+
+/// Whether the operating company already holds a book. The group demo posts
+/// against that book, so a step refuses to run without one.
+///
+/// # Errors
+/// A message when the database read fails.
+pub async fn operating_book_present(deps: &Deps, ops: &str) -> Result<bool, String> {
+    let rows = deps
+        .db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT 1 AS found FROM journal_entry WHERE company_id = ? LIMIT 1".to_owned(),
+            vec![sea_query::Value::from(ops)],
+        ))
+        .await
+        .map_err(|err| format!("read the operating book: {err}"))?;
+    Ok(!rows.rows.is_empty())
+}
+
+/// Reads the `step` query parameter of the group demo route: absent means
+/// step 0.
+///
+/// # Errors
+/// A message when the value is not a whole number below [`GROUP_STEPS`].
+pub fn parse_step(raw: Option<&str>) -> Result<u32, String> {
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    raw.parse::<u32>()
+        .ok()
+        .filter(|step| *step < GROUP_STEPS)
+        .ok_or_else(|| format!("step must be a whole number from 0 to {LAST_STEP}"))
+}
+
+/// The period of the demo's `index`th month (1 to 12) of `year`.
+fn month(year: i32, index: u32) -> String {
+    format!("{year:04}-{index:02}")
+}
+
+/// Runs one step of the group demo. Steps run in order, one per call, and
+/// each is idempotent: a company, group, agreement or period that is already
+/// there is left alone. The operating book must be present (see
+/// [`operating_book_present`]).
 ///
 /// # Errors
 /// A message naming the step that failed: the company, group, agreement,
-/// a period's draft, post or settlement.
-#[allow(clippy::too_many_lines)]
+/// a period's draft, post or settlement, or a step past [`GROUP_STEPS`].
+pub async fn seed_step(
+    deps: &Deps,
+    home_company: &str,
+    ops: &str,
+    ip: &str,
+    year: i32,
+    step: u32,
+) -> Result<GroupStep, String> {
+    if step >= GROUP_STEPS {
+        return Err(format!("step {step} is past the last step {LAST_STEP}"));
+    }
+    let mut outcome = GroupStep {
+        step,
+        ..GroupStep::default()
+    };
+    match step {
+        0 => setup(deps, home_company, ops, ip).await?,
+        1..=12 => {
+            let period = month(year, step);
+            outcome.posted = usize::from(draft_and_post(deps, ops, &period).await?);
+        }
+        _ => {
+            let period = month(year, step - 12);
+            outcome.settled = usize::from(settle(deps, &period).await?);
+        }
+    }
+    outcome.done = step == LAST_STEP;
+    outcome.next = (!outcome.done).then_some(step + 1);
+    if outcome.done {
+        outcome.open_period = open_period(deps, &month(year, 12)).await?;
+    }
+    Ok(outcome)
+}
+
+/// Seeds the whole group demo in one go: every step of [`seed_step`] in order.
+/// The native path (and the tests) use this; the Worker runs the steps one
+/// request at a time.
+///
+/// # Errors
+/// As [`seed_step`].
 pub async fn seed(
     deps: &Deps,
     home_company: &str,
@@ -186,6 +294,20 @@ pub async fn seed(
     ip: &str,
     year: i32,
 ) -> Result<GroupSeedReport, String> {
+    let mut report = GroupSeedReport::default();
+    for step in 0..GROUP_STEPS {
+        let outcome = seed_step(deps, home_company, ops, ip, year, step).await?;
+        report.posted += outcome.posted;
+        report.settled += outcome.settled;
+        if outcome.open_period.is_some() {
+            report.open_period = outcome.open_period;
+        }
+    }
+    Ok(report)
+}
+
+/// Step 0: the IP company with its book, the group and the licence.
+async fn setup(deps: &Deps, home_company: &str, ops: &str, ip: &str) -> Result<(), String> {
     let db = deps.db.as_ref();
     dispatch::ensure_company(deps, ip, IP_COMPANY_NAME, "SGD").await?;
     dispatch::seed_company_with_journal(deps, ip, DEMO_OWNER_ID, &format!("general-{ip}")).await?;
@@ -273,72 +395,79 @@ pub async fn seed(
             .await
             .map_err(|err| format!("create the licence: {err}"))?;
     }
+    Ok(())
+}
 
-    let months: Vec<String> = (1..=12).map(|m| format!("{year:04}-{m:02}")).collect();
-    for period in &months {
-        run_as_person(
-            deps,
-            ops,
-            &AgreementsRunPeriod,
-            owner(),
-            &RunPeriodInput {
-                id: LICENCE_ID.to_owned(),
-                periods: vec![period.clone()],
-            },
-        )
+/// Drafts `period`, then posts it when it is still a draft (or failed).
+/// Returns whether this call posted the period.
+async fn draft_and_post(deps: &Deps, ops: &str, period: &str) -> Result<bool, String> {
+    run_as_person(
+        deps,
+        ops,
+        &AgreementsRunPeriod,
+        owner(),
+        &RunPeriodInput {
+            id: LICENCE_ID.to_owned(),
+            periods: vec![period.to_owned()],
+        },
+    )
+    .await
+    .map_err(|err| format!("draft {period}: {err}"))?;
+
+    let db = deps.db.as_ref();
+    // A period still in draft (or failed) posts; a posted one is left alone.
+    let docs = store::docs_for_period(db, LICENCE_ID, period)
         .await
-        .map_err(|err| format!("draft {period}: {err}"))?;
+        .map_err(|err| err.to_string())?;
+    let needs_post = docs.iter().any(|doc| {
+        matches!(
+            doc.view.status,
+            ledgers_group::model::DocStatus::Draft | ledgers_group::model::DocStatus::Failed
+        )
+    });
+    if !needs_post {
+        return Ok(false);
     }
-
     let sides = DemoSides { deps };
     let call = deps.id_gen.ulid();
     let now = dispatch::rfc3339_utc(deps.clock.now());
-    let mut report = GroupSeedReport::default();
-    for period in &months {
-        // A period still in draft (or failed) posts; a posted one is left alone.
-        let docs = store::docs_for_period(db, LICENCE_ID, period)
-            .await
-            .map_err(|err| err.to_string())?;
-        let needs_post = docs.iter().any(|doc| {
-            matches!(
-                doc.view.status,
-                ledgers_group::model::DocStatus::Draft | ledgers_group::model::DocStatus::Failed
-            )
-        });
-        if needs_post {
-            orchestrate::post_period(db, &sides, LICENCE_ID, period, &call, &now)
-                .await
-                .map_err(|err| format!("post {period}: {err}"))?;
-            report.posted += 1;
-        }
+    orchestrate::post_period(db, &sides, LICENCE_ID, period, &call, &now)
+        .await
+        .map_err(|err| format!("post {period}: {err}"))?;
+    Ok(true)
+}
+
+/// Settles `period` when both sides are posted. Returns whether this call
+/// settled it.
+async fn settle(deps: &Deps, period: &str) -> Result<bool, String> {
+    let db = deps.db.as_ref();
+    let docs = store::docs_for_period(db, LICENCE_ID, period)
+        .await
+        .map_err(|err| err.to_string())?;
+    if !docs
+        .iter()
+        .all(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
+    {
+        return Ok(false);
     }
-    // Every month but the last settles: the last one stays open for the reconciliation.
-    for period in months.iter().take(months.len() - 1) {
-        let docs = store::docs_for_period(db, LICENCE_ID, period)
-            .await
-            .map_err(|err| err.to_string())?;
-        if docs
-            .iter()
-            .all(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
-        {
-            orchestrate::settle_period(db, &sides, LICENCE_ID, period, &call, &now)
-                .await
-                .map_err(|err| format!("settle {period}: {err}"))?;
-            report.settled += 1;
-        }
-    }
-    if let Some(last) = months.last() {
-        let docs = store::docs_for_period(db, LICENCE_ID, last)
-            .await
-            .map_err(|err| err.to_string())?;
-        if docs
-            .iter()
-            .any(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
-        {
-            report.open_period = Some(last.clone());
-        }
-    }
-    Ok(report)
+    let sides = DemoSides { deps };
+    let call = deps.id_gen.ulid();
+    let now = dispatch::rfc3339_utc(deps.clock.now());
+    orchestrate::settle_period(db, &sides, LICENCE_ID, period, &call, &now)
+        .await
+        .map_err(|err| format!("settle {period}: {err}"))?;
+    Ok(true)
+}
+
+/// The last month's period when it is posted and unsettled.
+async fn open_period(deps: &Deps, period: &str) -> Result<Option<String>, String> {
+    let docs = store::docs_for_period(deps.db.as_ref(), LICENCE_ID, period)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(docs
+        .iter()
+        .any(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
+        .then(|| period.to_owned()))
 }
 
 fn owner() -> OwnerAuth {

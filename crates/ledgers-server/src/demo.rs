@@ -166,6 +166,26 @@ pub async fn seed_internal(
     seed_as(deps, company_id, AgentPoster::Internal, book).await
 }
 
+/// The external ids of the company's entries, read in one query.
+async fn existing_external_ids(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<std::collections::HashSet<String>, String> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT external_id FROM journal_entry WHERE company_id = ? AND external_id IS NOT NULL"
+                .to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await
+        .map_err(|err| format!("read the entries: {err}"))?;
+    Ok(rows
+        .rows
+        .iter()
+        .filter_map(|row| row.get::<String>("external_id"))
+        .collect())
+}
+
 /// Creates the book's business units that the company does not have yet, as
 /// the demo owner (the audit trail names the owner). Returns how many it made.
 async fn ensure_units(
@@ -246,14 +266,13 @@ pub async fn seed_as(
     report.units_created = ensure_units(db, company_id, book, &stamp, deps).await?;
 
     let agent = ServerDispatch::new(company_id);
+    // One read for every entry the company has, so a re-run checks the book
+    // without a round trip per entry (a Worker request has a time budget).
+    let mut known = existing_external_ids(db, company_id).await?;
     for entry in &book.entries {
         match &entry.kind {
             EntryKind::Post { lines } => {
-                if query::entry_by_external_id(db, company_id, &entry.external_id)
-                    .await
-                    .map_err(|err| format!("read {}: {err}", entry.external_id))?
-                    .is_some()
-                {
+                if known.contains(&entry.external_id) {
                     report.skipped += 1;
                     continue;
                 }
@@ -271,6 +290,7 @@ pub async fn seed_as(
                             .map_err(|err| format!("{}: {err}", entry.external_id))?;
                     }
                 }
+                known.insert(entry.external_id.clone());
                 report.posted += 1;
             }
             EntryKind::Reverse { of } => {
