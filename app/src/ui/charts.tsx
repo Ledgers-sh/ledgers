@@ -565,7 +565,7 @@ export function DimensionShares({
         <p class="muted chart-none">{t('chart.dimension_none')}</p>
       ) : (
         <>
-          <div class="stack" aria-hidden="true">
+          <div class="stack-bar" aria-hidden="true">
             {positive.map((row, i) => (
               <span key={row.code} class={`stack-seg c${i % 6}`} style={{ flexGrow: Number(row.amount) }} title={row.name} />
             ))}
