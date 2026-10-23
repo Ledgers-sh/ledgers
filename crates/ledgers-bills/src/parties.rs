@@ -25,6 +25,7 @@ use ledgers_extract::llm::Transport;
 use ledgers_tax::{check_vat_id, normalize_vat_id, pack_by_id};
 use schemars::JsonSchema;
 use sea_query::Value;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ const MAX_LIST_ROWS: u32 = 200;
 const DEFAULT_LIST_ROWS: u32 = 50;
 
 /// The columns a party read selects.
-const VENDOR_COLUMNS: &str = "id, name, vat_id, iban, bic, roles, merged_into, personal_data, tax_number, language, currency, payment_terms_days, default_account, default_tax_code";
+const VENDOR_COLUMNS: &str = "id, name, vat_id, iban, bic, roles, merged_into, personal_data, needs_review, tax_number, language, currency, payment_terms_days, default_account, default_tax_code, addresses, contacts";
 
 // ===================================================================== shared rules
 
@@ -204,28 +205,260 @@ async fn read_party(
     Ok(rows.rows.into_iter().next())
 }
 
+/// A text column as an optional string; blank or missing is `None`.
+fn text_column(row: &cratefield_core::Row, column: &str) -> Option<String> {
+    row.get::<Option<String>>(column)
+        .flatten()
+        .filter(|v| !v.trim().is_empty())
+}
+
+/// A text column that must be present (an id, a name, a role).
+fn text_required(row: &cratefield_core::Row, column: &str) -> Result<String, CommandError> {
+    row.get::<String>(column)
+        .ok_or_else(|| CommandError::InvalidInput(format!("missing {column}")))
+}
+
+/// Trims a text field; blank is `None`.
+fn optional_text(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+/// A text column value: blank clears it to NULL.
+fn text_value(raw: &str) -> Value {
+    optional_text(Some(raw)).map_or(Value::String(None), |v| Value::from(v.as_str()))
+}
+
+/// A list stored as JSON text; an empty list is NULL.
+fn json_column<T: Serialize>(items: &[T]) -> Result<Value, CommandError> {
+    if items.is_empty() {
+        return Ok(Value::String(None));
+    }
+    let text = serde_json::to_string(items).map_err(|_| database_error())?;
+    Ok(Value::from(text.as_str()))
+}
+
+/// Reads a JSON list column; NULL is an empty list.
+fn read_json_column<T: DeserializeOwned>(
+    row: &cratefield_core::Row,
+    column: &str,
+) -> Result<Vec<T>, CommandError> {
+    match row.get::<Option<String>>(column).flatten() {
+        None => Ok(Vec::new()),
+        Some(text) => serde_json::from_str(&text).map_err(|_| database_error()),
+    }
+}
+
 fn party_view_from_row(row: &cratefield_core::Row) -> Result<PartyView, CommandError> {
-    let id = row
-        .get::<String>("id")
-        .ok_or_else(|| CommandError::InvalidInput("missing id".to_string()))?;
-    let name = row
-        .get::<String>("name")
-        .ok_or_else(|| CommandError::InvalidInput("missing name".to_string()))?;
-    let roles = row
-        .get::<String>("roles")
-        .ok_or_else(|| CommandError::InvalidInput("missing roles".to_string()))?;
     Ok(PartyView {
-        id,
-        name,
-        vat_id: row.get::<Option<String>>("vat_id").flatten(),
-        iban: row.get::<Option<String>>("iban").flatten(),
-        bic: row.get::<Option<String>>("bic").flatten(),
-        roles,
-        merged_into: row.get::<Option<String>>("merged_into").flatten(),
+        id: text_required(row, "id")?,
+        name: text_required(row, "name")?,
+        vat_id: text_column(row, "vat_id"),
+        iban: text_column(row, "iban"),
+        bic: text_column(row, "bic"),
+        roles: text_required(row, "roles")?,
+        merged_into: text_column(row, "merged_into"),
         latest_vies: None,
         personal_data: row.get::<i64>("personal_data").unwrap_or(0) != 0,
         possible_duplicates: Vec::new(),
+        needs_review: row.get::<i64>("needs_review").unwrap_or(0) != 0,
+        tax_number: text_column(row, "tax_number"),
+        language: text_column(row, "language"),
+        currency: text_column(row, "currency"),
+        payment_terms_days: row
+            .get::<i64>("payment_terms_days")
+            .and_then(|days| i32::try_from(days).ok()),
+        default_account: text_column(row, "default_account"),
+        default_tax_code: text_column(row, "default_tax_code"),
+        addresses: read_json_column(row, "addresses")?,
+        contacts: read_json_column(row, "contacts")?,
     })
+}
+
+/// A message for a refusal, without the variant name.
+fn error_message(error: &CommandError) -> String {
+    match error {
+        CommandError::InvalidInput(message) => message.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The latest VIES result of a party, if it has been checked.
+async fn latest_vies(
+    db: &dyn Database,
+    company_id: &str,
+    party_id: &str,
+) -> Result<Option<ViesResult>, CommandError> {
+    let rows = db
+        .query(&Statement::with_values(
+            "SELECT valid, consultation_number, checked_at FROM vies_check WHERE company_id = ? AND vendor_id = ? ORDER BY checked_at DESC LIMIT 1".to_string(),
+            vec![Value::from(company_id), Value::from(party_id)],
+        ))
+        .await
+        .map_err(|_| database_error())?;
+    Ok(rows.rows.first().and_then(|row| {
+        Some(ViesResult {
+            valid: row.get::<i64>("valid").unwrap_or(0) != 0,
+            consultation_number: row.get::<Option<String>>("consultation_number").flatten(),
+            checked_at: row.get::<String>("checked_at")?,
+        })
+    }))
+}
+
+/// Every unmerged party of the company, newest first.
+async fn unmerged_parties(
+    db: &dyn Database,
+    company_id: &str,
+) -> Result<Vec<PartyView>, CommandError> {
+    let rows = db
+        .query(&Statement::with_values(
+            format!(
+                "SELECT {VENDOR_COLUMNS} FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY created_at DESC, id"
+            ),
+            vec![Value::from(company_id)],
+        ))
+        .await
+        .map_err(|_| database_error())?;
+    rows.rows.iter().map(party_view_from_row).collect()
+}
+
+// ===================================================================== addresses and contacts
+
+/// A postal address on a party.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Address {
+    /// `billing`, `shipping` or `other` (optional).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The first line.
+    pub line1: String,
+    /// The second line (optional).
+    #[serde(default)]
+    pub line2: Option<String>,
+    /// The postal code (optional).
+    #[serde(default)]
+    pub postal_code: Option<String>,
+    /// The city.
+    pub city: String,
+    /// ISO 3166-1 alpha-2 country code.
+    pub country: String,
+}
+
+/// A person to contact at a party.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Contact {
+    /// The contact's name.
+    pub name: String,
+    /// The email address (optional).
+    #[serde(default)]
+    pub email: Option<String>,
+    /// The phone number (optional).
+    #[serde(default)]
+    pub phone: Option<String>,
+    /// The contact's role at the party (optional).
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+/// Checks and tidies addresses: a first line, a city and a two-letter country
+/// each; `kind` is `billing`, `shipping` or `other` when given.
+/// # Errors
+/// A refusal naming the first address that fails a check.
+pub fn checked_addresses(addresses: &[Address]) -> Result<Vec<Address>, CommandError> {
+    addresses
+        .iter()
+        .enumerate()
+        .map(|(index, address)| {
+            let number = index + 1;
+            let line1 = address.line1.trim();
+            let city = address.city.trim();
+            let country = address.country.trim().to_ascii_uppercase();
+            let kind = optional_text(address.kind.as_deref()).map(|k| k.to_ascii_lowercase());
+            if line1.is_empty() {
+                return Err(CommandError::InvalidInput(format!(
+                    "address {number} needs its first line"
+                )));
+            }
+            if city.is_empty() {
+                return Err(CommandError::InvalidInput(format!(
+                    "address {number} needs a city"
+                )));
+            }
+            if country.len() != 2 || !country.bytes().all(|b| b.is_ascii_alphabetic()) {
+                return Err(CommandError::InvalidInput(format!(
+                    "address {number} needs a two-letter country code"
+                )));
+            }
+            if let Some(k) = &kind
+                && !["billing", "shipping", "other"].contains(&k.as_str())
+            {
+                return Err(CommandError::InvalidInput(format!(
+                    "address {number} kind must be billing, shipping or other"
+                )));
+            }
+            Ok(Address {
+                kind,
+                line1: line1.to_string(),
+                line2: optional_text(address.line2.as_deref()),
+                postal_code: optional_text(address.postal_code.as_deref()),
+                city: city.to_string(),
+                country,
+            })
+        })
+        .collect()
+}
+
+/// Whether an email address has one `@`, no spaces and a dotted domain.
+fn plausible_email(email: &str) -> bool {
+    if email.chars().any(char::is_whitespace) {
+        return false;
+    }
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            !local.is_empty()
+                && !domain.contains('@')
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+        }
+        None => false,
+    }
+}
+
+/// Checks and tidies contacts: a name each, and a plausible email when given.
+/// # Errors
+/// A refusal naming the first contact that fails a check.
+pub fn checked_contacts(contacts: &[Contact]) -> Result<Vec<Contact>, CommandError> {
+    contacts
+        .iter()
+        .enumerate()
+        .map(|(index, contact)| {
+            let number = index + 1;
+            let name = contact.name.trim();
+            if name.is_empty() {
+                return Err(CommandError::InvalidInput(format!(
+                    "contact {number} needs a name"
+                )));
+            }
+            let email = optional_text(contact.email.as_deref());
+            if let Some(e) = &email
+                && !plausible_email(e)
+            {
+                return Err(CommandError::InvalidInput(format!(
+                    "contact {number} has an email address that does not look right"
+                )));
+            }
+            Ok(Contact {
+                name: name.to_string(),
+                email,
+                phone: optional_text(contact.phone.as_deref()),
+                role: optional_text(contact.role.as_deref()),
+            })
+        })
+        .collect()
 }
 
 // ===================================================================== list
@@ -237,9 +470,18 @@ pub struct ListInput {
     /// Maximum rows to return; defaults to 50, at most 200.
     #[serde(default)]
     pub limit: Option<u32>,
-    /// Number of rows to skip; defaults to 0.
+    /// Number of matching rows to skip; defaults to 0.
     #[serde(default)]
     pub offset: Option<u32>,
+    /// Keep parties whose name, VAT ID or IBAN contains this text (case-insensitive).
+    #[serde(default)]
+    pub q: Option<String>,
+    /// Keep only parties with exactly this role: 'customer', 'vendor' or 'both'.
+    #[serde(default)]
+    pub roles: Option<String>,
+    /// Keep only parties that still need a person's review (true) or only reviewed ones (false).
+    #[serde(default)]
+    pub needs_review: Option<bool>,
 }
 
 /// A party, with its latest VIES result.
@@ -250,27 +492,42 @@ pub struct PartyView {
     /// The legal name.
     pub name: String,
     /// The VAT id (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub vat_id: Option<String>,
     /// The IBAN (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub iban: Option<String>,
     /// The BIC (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub bic: Option<String>,
     /// Roles: 'customer', 'vendor', or 'both'.
     pub roles: String,
     /// The party this one was merged into, when it was.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub merged_into: Option<String>,
     /// Latest VIES check result (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_vies: Option<ViesResult>,
     /// Whether this party's name/address/contacts is personal data.
     pub personal_data: bool,
     /// Other unmerged parties with the same VAT ID, IBAN or name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub possible_duplicates: Vec<String>,
+    /// Whether a person still has to confirm this party (created from a bill or a bank line).
+    pub needs_review: bool,
+    /// The tax number (optional).
+    pub tax_number: Option<String>,
+    /// The language code (optional).
+    pub language: Option<String>,
+    /// The currency code (optional).
+    pub currency: Option<String>,
+    /// Payment terms in days (optional).
+    pub payment_terms_days: Option<i32>,
+    /// The default expense or revenue account (optional).
+    pub default_account: Option<String>,
+    /// The default tax code (optional).
+    pub default_tax_code: Option<String>,
+    /// Postal addresses.
+    #[serde(default)]
+    pub addresses: Vec<Address>,
+    /// Contacts.
+    #[serde(default)]
+    pub contacts: Vec<Contact>,
 }
 
 /// The latest VIES check result for a party.
@@ -285,16 +542,51 @@ pub struct ViesResult {
     pub checked_at: String,
 }
 
-/// The output of `parties.list`.
+/// The output of `parties.list`: one page, and the count of every match.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ListOutput {
     /// The parties on this page.
     pub parties: Vec<PartyView>,
-    /// Total number of unmerged parties.
+    /// Total number of unmerged parties that match the filters.
     pub total: u32,
 }
 
-/// `parties.list`: unmerged parties, with their latest VIES results.
+/// Whether a party passes the search, role and review filters.
+fn matches_filters(
+    party: &PartyView,
+    needle: Option<&str>,
+    roles: Option<&str>,
+    needs_review: Option<bool>,
+) -> bool {
+    let text_ok = needle.is_none_or(|n| {
+        let compact: String = n.chars().filter(|c| !c.is_whitespace()).collect();
+        party.name.to_lowercase().contains(n)
+            || party
+                .vat_id
+                .as_deref()
+                .is_some_and(|v| v.to_lowercase().contains(n))
+            || party
+                .iban
+                .as_deref()
+                .is_some_and(|i| iban::normalise(i).to_lowercase().contains(&compact))
+    });
+    let roles_ok = roles.is_none_or(|r| party.roles == r);
+    let review_ok = needs_review.is_none_or(|flag| party.needs_review == flag);
+    text_ok && roles_ok && review_ok
+}
+
+/// The other unmerged parties that may be this one (same VAT ID, IBAN or name).
+fn duplicates_among(party: &PartyView, all: &[PartyView]) -> Vec<String> {
+    if party.merged_into.is_some() {
+        return Vec::new();
+    }
+    all.iter()
+        .filter(|other| other.id != party.id && is_possible_duplicate(party, other))
+        .map(|other| other.id.clone())
+        .collect()
+}
+
+/// `parties.list`: unmerged parties, filtered and paged, with their latest VIES results.
 pub struct PartiesList;
 
 #[async_trait::async_trait]
@@ -327,55 +619,31 @@ impl Command for PartiesList {
             .unwrap_or(DEFAULT_LIST_ROWS)
             .clamp(1, MAX_LIST_ROWS) as usize;
         let offset = input.offset.unwrap_or(0) as usize;
-
-        let rows = db
-            .query(&Statement::with_values(
-                format!(
-                    "SELECT {VENDOR_COLUMNS} FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY created_at DESC, id"
-                ),
-                vec![Value::from(ctx.company_id.as_str())],
-            ))
-            .await
-            .map_err(|_| database_error())?;
-
-        let total = u32::try_from(rows.rows.len()).unwrap_or(u32::MAX);
-        let all: Vec<PartyView> = rows
-            .rows
+        if let Some(roles) = &input.roles {
+            check_roles(roles)?;
+        }
+        let needle = optional_text(input.q.as_deref()).map(|q| q.to_lowercase());
+        let all = unmerged_parties(db, &ctx.company_id).await?;
+        let matching: Vec<&PartyView> = all
             .iter()
-            .map(party_view_from_row)
-            .collect::<Result<_, _>>()?;
-
+            .filter(|party| {
+                matches_filters(
+                    party,
+                    needle.as_deref(),
+                    input.roles.as_deref(),
+                    input.needs_review,
+                )
+            })
+            .collect();
+        let total = u32::try_from(matching.len()).unwrap_or(u32::MAX);
         let mut parties = Vec::new();
-        for party in all.iter().skip(offset).take(limit) {
-            let vies = db
-                .query(&Statement::with_values(
-                    "SELECT valid, consultation_number, checked_at FROM vies_check WHERE company_id = ? AND vendor_id = ? ORDER BY checked_at DESC LIMIT 1".to_string(),
-                    vec![
-                        Value::from(ctx.company_id.as_str()),
-                        Value::from(party.id.as_str()),
-                    ],
-                ))
-                .await
-                .map_err(|_| database_error())?;
-            let latest_vies = vies.rows.first().and_then(|row| {
-                Some(ViesResult {
-                    valid: row.get::<i64>("valid").unwrap_or(0) != 0,
-                    consultation_number: row.get::<Option<String>>("consultation_number").flatten(),
-                    checked_at: row.get::<String>("checked_at")?,
-                })
-            });
-            let possible_duplicates = all
-                .iter()
-                .filter(|other| other.id != party.id && is_possible_duplicate(party, other))
-                .map(|other| other.id.clone())
-                .collect();
+        for party in matching.into_iter().skip(offset).take(limit) {
             parties.push(PartyView {
-                latest_vies,
-                possible_duplicates,
+                latest_vies: latest_vies(db, &ctx.company_id, &party.id).await?,
+                possible_duplicates: duplicates_among(party, &all),
                 ..party.clone()
             });
         }
-
         Ok(Plan::with_output(ListOutput { parties, total }))
     }
 }
@@ -387,6 +655,296 @@ fn is_possible_duplicate(a: &PartyView, b: &PartyView) -> bool {
     let name_a = normalise_name(&a.name);
     let same_name = !name_a.is_empty() && name_a == normalise_name(&b.name);
     same_vat || same_iban || same_name
+}
+
+// ===================================================================== get
+
+/// The input of `parties.get`, by id from the path.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetInput {
+    /// The party id.
+    pub id: String,
+}
+
+/// One change of a party's bank details, from the append-only history.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BankChangeView {
+    /// The change id.
+    pub id: String,
+    /// The IBAN before the change (none when the party had none).
+    pub before_iban: Option<String>,
+    /// The BIC before the change.
+    pub before_bic: Option<String>,
+    /// The IBAN after the change.
+    pub after_iban: Option<String>,
+    /// The BIC after the change.
+    pub after_bic: Option<String>,
+    /// The person who made the change.
+    pub changed_by: String,
+    /// When the change was made.
+    pub changed_at: String,
+    /// The reason the person gave.
+    pub reason: Option<String>,
+}
+
+/// The output of `parties.get`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetOutput {
+    /// The party, with its latest VIES result and possible duplicates.
+    pub party: PartyView,
+    /// Bank details changes, newest first.
+    pub bank_changes: Vec<BankChangeView>,
+    /// How many bills name this party (a merge repoints them to the survivor).
+    pub bill_count: u32,
+    /// Whether `parties.check_vat` can call VIES on this server (`LEDGERS_VIES=1`).
+    pub vies_enabled: bool,
+}
+
+/// `parties.get`: one party with its bank history and bill count.
+pub struct PartiesGet {
+    /// Whether VAT checks are on for this server; the output says so.
+    pub vies_enabled: bool,
+}
+
+impl PartiesGet {
+    /// A get that reports whether VAT checks are on.
+    #[must_use]
+    pub fn new(vies_enabled: bool) -> Self {
+        Self { vies_enabled }
+    }
+}
+
+#[async_trait::async_trait]
+impl Command for PartiesGet {
+    const NAME: &'static str = "parties.get";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = GetInput;
+    type Output = GetOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let row = read_party(db, &ctx.company_id, &input.id)
+            .await?
+            .ok_or_else(|| CommandError::InvalidInput("party not found".to_string()))?;
+        let mut party = party_view_from_row(&row)?;
+        party.latest_vies = latest_vies(db, &ctx.company_id, &input.id).await?;
+        let all = unmerged_parties(db, &ctx.company_id).await?;
+        party.possible_duplicates = duplicates_among(&party, &all);
+        let changes = db
+            .query(&Statement::with_values(
+                "SELECT id, before_iban, before_bic, after_iban, after_bic, changed_by, changed_at, reason FROM vendor_bank_change WHERE company_id = ? AND vendor_id = ? ORDER BY changed_at DESC, id DESC".to_string(),
+                vec![Value::from(ctx.company_id.as_str()), Value::from(input.id.as_str())],
+            ))
+            .await
+            .map_err(|_| database_error())?;
+        let bank_changes = changes
+            .rows
+            .iter()
+            .map(|row| {
+                Ok(BankChangeView {
+                    id: text_required(row, "id")?,
+                    before_iban: text_column(row, "before_iban"),
+                    before_bic: text_column(row, "before_bic"),
+                    after_iban: text_column(row, "after_iban"),
+                    after_bic: text_column(row, "after_bic"),
+                    changed_by: text_required(row, "changed_by")?,
+                    changed_at: text_required(row, "changed_at")?,
+                    reason: text_column(row, "reason"),
+                })
+            })
+            .collect::<Result<Vec<_>, CommandError>>()?;
+        let counted = db
+            .query(&Statement::with_values(
+                "SELECT COUNT(*) AS n FROM bill WHERE company_id = ? AND vendor_id = ?".to_string(),
+                vec![
+                    Value::from(ctx.company_id.as_str()),
+                    Value::from(input.id.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|_| database_error())?;
+        let bill_count = counted
+            .rows
+            .first()
+            .and_then(|row| row.get::<i64>("n"))
+            .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX));
+        Ok(Plan::with_output(GetOutput {
+            party,
+            bank_changes,
+            bill_count,
+            vies_enabled: self.vies_enabled,
+        }))
+    }
+}
+
+// ===================================================================== validate
+
+/// The input of `parties.validate`: the fields a form holds. A field left out
+/// is not checked; a blank name or VAT ID that is sent is checked.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateInput {
+    /// The party being edited, so its own VAT ID is not a conflict (optional).
+    #[serde(default)]
+    pub id: Option<String>,
+    /// The legal name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The VAT ID, checked against its country's pack and the other parties.
+    #[serde(default)]
+    pub vat_id: Option<String>,
+    /// The IBAN.
+    #[serde(default)]
+    pub iban: Option<String>,
+    /// The BIC.
+    #[serde(default)]
+    pub bic: Option<String>,
+    /// The roles.
+    #[serde(default)]
+    pub roles: Option<String>,
+    /// The payment terms in days.
+    #[serde(default)]
+    pub payment_terms_days: Option<i32>,
+    /// The addresses.
+    #[serde(default)]
+    pub addresses: Vec<Address>,
+    /// The contacts.
+    #[serde(default)]
+    pub contacts: Vec<Contact>,
+}
+
+/// One refused field and why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FieldError {
+    /// The input field name (`vat_id`, `iban`, ...).
+    pub field: String,
+    /// The message, in the server's words.
+    pub message: String,
+}
+
+/// The output of `parties.validate`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ValidateOutput {
+    /// True when no field is refused.
+    pub valid: bool,
+    /// Every refused field, once each.
+    pub errors: Vec<FieldError>,
+}
+
+fn note(errors: &mut Vec<FieldError>, field: &str, result: Result<(), CommandError>) {
+    if let Err(error) = result {
+        errors.push(FieldError {
+            field: field.to_string(),
+            message: error_message(&error),
+        });
+    }
+}
+
+/// `parties.validate`: runs the same checks as create, update and `set_bank`
+/// without writing anything, and names each field it refuses.
+pub struct PartiesValidate;
+
+#[async_trait::async_trait]
+impl Command for PartiesValidate {
+    const NAME: &'static str = "parties.validate";
+    const TIER: Tier = Tier::Read;
+    const IDEMPOTENT: bool = true;
+
+    type Input = ValidateInput;
+    type Output = ValidateOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let mut errors = Vec::new();
+        if let Some(name) = &input.name {
+            note(&mut errors, "name", checked_name(name).map(|_| ()));
+        }
+        if let Some(vat) = &input.vat_id {
+            match checked_vat(vat) {
+                Err(error) => note(&mut errors, "vat_id", Err(error)),
+                Ok(Some(normalised)) => {
+                    if let Some(owner) =
+                        vat_owner(db, &ctx.company_id, &normalised, input.id.as_deref()).await?
+                    {
+                        errors.push(FieldError {
+                            field: "vat_id".to_string(),
+                            message: format!("party {owner} already has this VAT ID"),
+                        });
+                    }
+                }
+                Ok(None) => {}
+            }
+        }
+        if let Some(iban) = &input.iban {
+            note(
+                &mut errors,
+                "iban",
+                iban::validate(iban)
+                    .map(|_| ())
+                    .map_err(|err| CommandError::InvalidInput(err.to_string())),
+            );
+        }
+        if let Some(bic) = &input.bic {
+            note(&mut errors, "bic", checked_bic(bic).map(|_| ()));
+        }
+        if let Some(roles) = &input.roles {
+            note(&mut errors, "roles", check_roles(roles));
+        }
+        note(
+            &mut errors,
+            "payment_terms_days",
+            check_terms(input.payment_terms_days),
+        );
+        if !input.addresses.is_empty() {
+            note(
+                &mut errors,
+                "addresses",
+                checked_addresses(&input.addresses).map(|_| ()),
+            );
+        }
+        if !input.contacts.is_empty() {
+            note(
+                &mut errors,
+                "contacts",
+                checked_contacts(&input.contacts).map(|_| ()),
+            );
+        }
+        Ok(Plan::with_output(ValidateOutput {
+            valid: errors.is_empty(),
+            errors,
+        }))
+    }
 }
 
 // ===================================================================== create
@@ -427,6 +985,12 @@ pub struct CreateInput {
     /// Default tax code (optional).
     #[serde(default)]
     pub default_tax_code: Option<String>,
+    /// Postal addresses (optional).
+    #[serde(default)]
+    pub addresses: Vec<Address>,
+    /// Contacts (optional).
+    #[serde(default)]
+    pub contacts: Vec<Contact>,
 }
 
 /// The output of `parties.create`.
@@ -481,28 +1045,35 @@ impl Command for PartiesCreate {
                 "party {owner} already has this VAT ID"
             )));
         }
+        let addresses = checked_addresses(&input.addresses)?;
+        let contacts = checked_contacts(&input.contacts)?;
         let personal_data = input.personal_data.unwrap_or(false);
-
+        let tax_number = optional_text(input.tax_number.as_deref());
+        let language = optional_text(input.language.as_deref());
+        let currency = optional_text(input.currency.as_deref());
+        let default_account = optional_text(input.default_account.as_deref());
+        let default_tax_code = optional_text(input.default_tax_code.as_deref());
         let statement = Statement::with_values(
-            "INSERT INTO vendor (id, company_id, name, vat_id, roles, tax_number, language, currency, personal_data, payment_terms_days, default_account, default_tax_code, source, needs_review, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', 0, ?, ?)".to_string(),
+            "INSERT INTO vendor (id, company_id, name, vat_id, roles, tax_number, language, currency, personal_data, payment_terms_days, default_account, default_tax_code, addresses, contacts, source, needs_review, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', 0, ?, ?)".to_string(),
             vec![
                 Value::from(id.as_str()),
                 Value::from(ctx.company_id.as_str()),
                 Value::from(name.as_str()),
                 optional_string_value(vat_id.as_ref()),
                 Value::from(roles.as_str()),
-                optional_string_value(input.tax_number.as_ref()),
-                optional_string_value(input.language.as_ref()),
-                optional_string_value(input.currency.as_ref()),
+                optional_string_value(tax_number.as_ref()),
+                optional_string_value(language.as_ref()),
+                optional_string_value(currency.as_ref()),
                 Value::from(i32::from(personal_data)),
                 input.payment_terms_days.map_or(Value::Int(None), Value::from),
-                optional_string_value(input.default_account.as_ref()),
-                optional_string_value(input.default_tax_code.as_ref()),
+                optional_string_value(default_account.as_ref()),
+                optional_string_value(default_tax_code.as_ref()),
+                json_column(&addresses)?,
+                json_column(&contacts)?,
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.now.as_str()),
             ],
         );
-
         let party = PartyView {
             id: id.clone(),
             name,
@@ -514,8 +1085,16 @@ impl Command for PartiesCreate {
             latest_vies: None,
             personal_data,
             possible_duplicates: Vec::new(),
+            needs_review: false,
+            tax_number,
+            language,
+            currency,
+            payment_terms_days: input.payment_terms_days,
+            default_account,
+            default_tax_code,
+            addresses,
+            contacts,
         };
-
         let mut plan = Plan::with_output(CreateOutput { party });
         plan.statements.push(statement);
         plan.objects.push(format!("vendor:{id}"));
@@ -534,7 +1113,7 @@ pub struct UpdateInput {
     /// The legal name (optional).
     #[serde(default)]
     pub name: Option<String>,
-    /// The VAT id (optional), checked against its country's pack.
+    /// The VAT id (optional), checked against its country's pack. Blank clears it.
     #[serde(default)]
     pub vat_id: Option<String>,
     /// Roles (optional).
@@ -561,6 +1140,12 @@ pub struct UpdateInput {
     /// Default tax code (optional).
     #[serde(default)]
     pub default_tax_code: Option<String>,
+    /// Postal addresses; when given, they replace the list (optional).
+    #[serde(default)]
+    pub addresses: Option<Vec<Address>>,
+    /// Contacts; when given, they replace the list (optional).
+    #[serde(default)]
+    pub contacts: Option<Vec<Contact>>,
 }
 
 /// The output of `parties.update`.
@@ -573,6 +1158,106 @@ pub struct UpdateOutput {
 /// `parties.update`: update a party's master data (agent allowed). Bank
 /// details change only through `parties.set_bank`.
 pub struct PartiesUpdate;
+
+/// The party as an update leaves it, for the output: the fields the input
+/// named take their new values, the rest stay as they were.
+fn party_after_update(
+    current: PartyView,
+    input: &UpdateInput,
+    name: String,
+    new_vat: Option<String>,
+    addresses: Option<Vec<Address>>,
+    contacts: Option<Vec<Contact>>,
+) -> PartyView {
+    let mut party = PartyView {
+        name,
+        vat_id: new_vat,
+        roles: input.roles.clone().unwrap_or_else(|| current.roles.clone()),
+        personal_data: input.personal_data.unwrap_or(current.personal_data),
+        possible_duplicates: Vec::new(),
+        ..current
+    };
+    if let Some(t) = &input.tax_number {
+        party.tax_number = optional_text(Some(t));
+    }
+    if let Some(l) = &input.language {
+        party.language = optional_text(Some(l));
+    }
+    if let Some(c) = &input.currency {
+        party.currency = optional_text(Some(c));
+    }
+    if input.payment_terms_days.is_some() {
+        party.payment_terms_days = input.payment_terms_days;
+    }
+    if let Some(a) = &input.default_account {
+        party.default_account = optional_text(Some(a));
+    }
+    if let Some(t) = &input.default_tax_code {
+        party.default_tax_code = optional_text(Some(t));
+    }
+    if let Some(list) = addresses {
+        party.addresses = list;
+    }
+    if let Some(list) = contacts {
+        party.contacts = list;
+    }
+    party
+}
+
+/// The SET clauses of `parties.update` and their values: only the fields the
+/// input named, with the `updated_at` stamp first.
+fn update_columns(
+    input: &UpdateInput,
+    name: &str,
+    new_vat: Option<&String>,
+    addresses: Option<&[Address]>,
+    contacts: Option<&[Contact]>,
+    now: &str,
+) -> Result<(Vec<&'static str>, Vec<Value>), CommandError> {
+    let mut updates = vec!["updated_at = ?"];
+    let mut values = vec![Value::from(now)];
+    let mut set = |column: &'static str, value: Value| {
+        updates.push(column);
+        values.push(value);
+    };
+    if input.name.is_some() {
+        set("name = ?", Value::from(name));
+    }
+    if input.vat_id.is_some() {
+        set("vat_id = ?", optional_string_value(new_vat));
+    }
+    if let Some(r) = &input.roles {
+        set("roles = ?", Value::from(r.as_str()));
+    }
+    if let Some(t) = &input.tax_number {
+        set("tax_number = ?", text_value(t));
+    }
+    if let Some(l) = &input.language {
+        set("language = ?", text_value(l));
+    }
+    if let Some(c) = &input.currency {
+        set("currency = ?", text_value(c));
+    }
+    if let Some(p) = input.personal_data {
+        set("personal_data = ?", Value::from(i32::from(p)));
+    }
+    if let Some(d) = input.payment_terms_days {
+        set("payment_terms_days = ?", Value::from(d));
+    }
+    if let Some(a) = &input.default_account {
+        set("default_account = ?", text_value(a));
+    }
+    if let Some(t) = &input.default_tax_code {
+        set("default_tax_code = ?", text_value(t));
+    }
+    if let Some(list) = addresses {
+        set("addresses = ?", json_column(list)?);
+    }
+    if let Some(list) = contacts {
+        set("contacts = ?", json_column(list)?);
+    }
+    Ok((updates, values))
+}
 
 #[async_trait::async_trait]
 impl Command for PartiesUpdate {
@@ -628,46 +1313,26 @@ impl Command for PartiesUpdate {
                 "party {owner} already has this VAT ID"
             )));
         }
-
-        let mut updates = vec!["updated_at = ?"];
-        let mut values = vec![Value::from(ctx.now.as_str())];
-        let mut set = |column: &'static str, value: Value| {
-            updates.push(column);
-            values.push(value);
-        };
-        if input.name.is_some() {
-            set("name = ?", Value::from(name.as_str()));
-        }
-        if input.vat_id.is_some() {
-            set("vat_id = ?", optional_string_value(new_vat.as_ref()));
-        }
-        if let Some(r) = &input.roles {
-            set("roles = ?", Value::from(r.as_str()));
-        }
-        if let Some(t) = &input.tax_number {
-            set("tax_number = ?", Value::from(t.as_str()));
-        }
-        if let Some(l) = &input.language {
-            set("language = ?", Value::from(l.as_str()));
-        }
-        if let Some(c) = &input.currency {
-            set("currency = ?", Value::from(c.as_str()));
-        }
-        if let Some(p) = input.personal_data {
-            set("personal_data = ?", Value::from(i32::from(p)));
-        }
-        if let Some(d) = input.payment_terms_days {
-            set("payment_terms_days = ?", Value::from(d));
-        }
-        if let Some(a) = &input.default_account {
-            set("default_account = ?", Value::from(a.as_str()));
-        }
-        if let Some(t) = &input.default_tax_code {
-            set("default_tax_code = ?", Value::from(t.as_str()));
-        }
+        let addresses = input
+            .addresses
+            .as_deref()
+            .map(checked_addresses)
+            .transpose()?;
+        let contacts = input
+            .contacts
+            .as_deref()
+            .map(checked_contacts)
+            .transpose()?;
+        let (updates, mut values) = update_columns(
+            input,
+            &name,
+            new_vat.as_ref(),
+            addresses.as_deref(),
+            contacts.as_deref(),
+            &ctx.now,
+        )?;
         values.push(Value::from(ctx.company_id.as_str()));
         values.push(Value::from(input.id.as_str()));
-
         let guard_key = guard::guard_key(&["party_not_merged", &input.id]);
         let statements = vec![
             guard::assert_statement(
@@ -687,16 +1352,7 @@ impl Command for PartiesUpdate {
             ),
             guard::release_statement(&guard_key),
         ];
-
-        let party = PartyView {
-            name,
-            vat_id: new_vat,
-            roles: input.roles.clone().unwrap_or_else(|| current.roles.clone()),
-            personal_data: input.personal_data.unwrap_or(current.personal_data),
-            possible_duplicates: Vec::new(),
-            ..current
-        };
-
+        let party = party_after_update(current, input, name, new_vat, addresses, contacts);
         let mut plan = Plan::with_output(UpdateOutput { party });
         plan.statements = statements;
         plan.objects.push(format!("vendor:{}", input.id));

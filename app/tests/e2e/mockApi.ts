@@ -9,6 +9,7 @@ import { handleBills, resetBills, servedFile } from './mockBills';
 import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
 import { handlePeople, resetPeople } from './mockPeople';
+import { handleParties, resetParties } from './mockParties';
 import { handleUnits, resetUnits } from './mockUnits';
 import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
@@ -984,6 +985,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   keyCounter = 0;
   resetSettings();
   resetPeople();
+  resetParties();
   resetUnits(options.units ?? false);
   resetCompanies(options.companies ?? 'none');
   nextNumber = state.entries.length + 1;
@@ -1050,6 +1052,14 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.writeHead(companiesReply.status, { ...headers, 'Content-Type': companiesReply.problem ? 'application/problem+json' : 'application/json' });
           res.end(JSON.stringify(companiesReply.body));
           return;
+        }
+        if (path.startsWith('/v1/parties')) {
+          const partiesReply = handleParties(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
+          if (partiesReply) {
+            res.writeHead(partiesReply.status, { ...headers, 'Content-Type': partiesReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(partiesReply.body));
+            return;
+          }
         }
         if (path.startsWith('/v1/bank')) {
           const bankReply = handleBank(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);

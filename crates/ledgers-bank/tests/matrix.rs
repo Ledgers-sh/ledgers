@@ -292,6 +292,133 @@ async fn parties_match_by_iban(db: &dyn Database) {
     );
 }
 
+/// A bill row for the payables read: posted or not, discarded or not, in one currency.
+async fn exec_bill(
+    db: &dyn Database,
+    id: &str,
+    vendor_id: &str,
+    currency: &str,
+    gross_minor: i64,
+    posted: bool,
+    discarded: bool,
+) {
+    exec(
+        db,
+        "INSERT INTO bill (id, company_id, document_id, vendor_id, invoice_number, currency, gross_minor, \
+         lines_json, checks_json, instruction_flags, iban_changed, source, posted_entry_id, discarded_at, \
+         created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', 0, 'manual', ?, ?, 'test', \
+         '2026-03-01T00:00:00Z', '2026-03-01T00:00:00Z')",
+        vec![
+            Value::from(id),
+            Value::from(COMPANY),
+            Value::from(format!("doc-{id}").as_str()),
+            Value::from(vendor_id),
+            Value::from(format!("INV-{id}").as_str()),
+            Value::from(currency),
+            Value::from(gross_minor),
+            if posted {
+                Value::from(format!("entry-{id}").as_str())
+            } else {
+                Value::String(None)
+            },
+            if discarded {
+                Value::from("2026-03-02T00:00:00Z")
+            } else {
+                Value::String(None)
+            },
+        ],
+    )
+    .await;
+}
+
+/// `parties.balances`: posted, undiscarded bills that no bank line settled, of
+/// unmerged parties, grouped by party and currency.
+async fn party_balances(db: &dyn Database) {
+    seed(db).await;
+    exec_party(
+        db,
+        "party-a",
+        "Halden Works GmbH",
+        "DE89370400440532013000",
+        None,
+    )
+    .await;
+    exec_party(db, "party-b", "Acme GmbH", "GB82WEST12345698765432", None).await;
+    exec_party(
+        db,
+        "party-gone",
+        "Old Co",
+        "FR1420041010050500013M02606",
+        Some("party-a"),
+    )
+    .await;
+    exec_bill(db, "bill-open-a", "party-a", "EUR", 100_000, true, false).await;
+    exec_bill(db, "bill-settled-a", "party-a", "EUR", 50_000, true, false).await;
+    exec(
+        db,
+        "INSERT INTO bank_transaction (id, company_id, account_id, statement_id, fingerprint, group_key, \
+         booking_date, value_date, minor, currency, counterparty_name, counterparty_iban, remittance, \
+         bank_reference, status, matched_entry_id, matched_bill_id, created_at, updated_at) \
+         VALUES ('bank-settles-a', ?, ?, ?, 'fp-settles-a', 'g-settles-a', '2026-03-10', NULL, -50000, 'EUR', \
+         'Halden Works GmbH', NULL, 'INV-settled', NULL, 'matched', NULL, 'bill-settled-a', \
+         '2026-03-10T00:00:00Z', '2026-03-10T00:00:00Z')",
+        vec![Value::from(COMPANY), Value::from(ACCOUNT), Value::from(STATEMENT)],
+    )
+    .await;
+    exec_bill(db, "bill-draft-a", "party-a", "EUR", 20_000, false, false).await;
+    exec_bill(db, "bill-discarded-b", "party-b", "EUR", 30_000, true, true).await;
+    exec_bill(db, "bill-usd-b", "party-b", "USD", 70_000, true, false).await;
+    exec_bill(
+        db,
+        "bill-merged-gone",
+        "party-gone",
+        "EUR",
+        90_000,
+        true,
+        false,
+    )
+    .await;
+
+    let rows = ledgers_bank::party_balances::open_payables(db, COMPANY)
+        .await
+        .expect("balances");
+    let got: Vec<(String, String, i64, u32)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.party_id.clone(),
+                r.currency.clone(),
+                r.payable_minor,
+                r.open_bills,
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("party-a".to_string(), "EUR".to_string(), 100_000, 1),
+            ("party-b".to_string(), "USD".to_string(), 70_000, 1),
+        ],
+        "only open bills of live parties; settled, draft, discarded and merged are left out"
+    );
+}
+
+#[test]
+fn party_balances_count_only_open_payables_on_every_dialect() {
+    for kit in TestHarness::all_dialects(|| {
+        vec![
+            Box::new(ledgers_storage::StorageModule),
+            Box::new(ledgers_ledger::LedgerModule),
+            Box::new(DbModule),
+            Box::new(BillsModule),
+            Box::new(BankModule),
+        ]
+    }) {
+        pollster::block_on(party_balances(&*kit.db));
+    }
+}
+
 #[test]
 fn parties_are_matched_to_counterparties_by_iban_on_every_dialect() {
     for kit in TestHarness::all_dialects(|| {

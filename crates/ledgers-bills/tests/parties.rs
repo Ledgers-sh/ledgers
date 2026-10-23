@@ -255,6 +255,9 @@ fn a_vendor_row_from_before_parties_is_a_vendor_and_its_bills_still_link() {
                 OWNER_TOKEN,
                 "list-old",
                 &ListInput {
+                    q: None,
+                    roles: None,
+                    needs_review: None,
                     limit: None,
                     offset: None,
                 },
@@ -281,6 +284,8 @@ fn create_checks_the_vat_id_with_its_country_pack_and_refuses_duplicates() {
     for kit in TestHarness::all_dialects(modules) {
         pollster::block_on(async {
             let create = |id: &str, vat: &str| CreateInput {
+                addresses: Vec::new(),
+                contacts: Vec::new(),
                 id: Some(id.to_string()),
                 name: "Acme GmbH".to_string(),
                 vat_id: Some(vat.to_string()),
@@ -359,6 +364,8 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                 OWNER_TOKEN,
                 "blank",
                 &CreateInput {
+                    addresses: Vec::new(),
+                    contacts: Vec::new(),
                     id: Some("p-blank".to_string()),
                     name: "   ".to_string(),
                     vat_id: None,
@@ -381,6 +388,8 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                 AGENT_TOKEN,
                 "role",
                 &UpdateInput {
+                    addresses: None,
+                    contacts: None,
                     id: "p-1".to_string(),
                     name: None,
                     vat_id: None,
@@ -403,6 +412,8 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                 AGENT_TOKEN,
                 "vat",
                 &UpdateInput {
+                    addresses: None,
+                    contacts: None,
                     id: "p-1".to_string(),
                     name: None,
                     vat_id: Some("NL123456789B1".to_string()),
@@ -459,6 +470,8 @@ fn a_merged_party_cannot_be_updated() {
                 OWNER_TOKEN,
                 "update-gone",
                 &UpdateInput {
+                    addresses: None,
+                    contacts: None,
                     id: "p-gone".to_string(),
                     name: Some("Renamed".to_string()),
                     vat_id: None,
@@ -956,6 +969,8 @@ fn the_zero_rating_guard_follows_the_latest_check_for_the_current_vat_id() {
                 OWNER_TOKEN,
                 "zr-vat",
                 &UpdateInput {
+                    addresses: None,
+                    contacts: None,
                     id: "p-zr".to_string(),
                     name: None,
                     vat_id: Some("DE111111125".to_string()),
@@ -1071,6 +1086,9 @@ fn list_marks_parties_that_may_be_duplicates_and_skips_merged_ones() {
                 OWNER_TOKEN,
                 "dups",
                 &ListInput {
+                    q: None,
+                    roles: None,
+                    needs_review: None,
                     limit: Some(200),
                     offset: None,
                 },
@@ -1112,6 +1130,9 @@ fn list_marks_parties_that_may_be_duplicates_and_skips_merged_ones() {
                 OWNER_TOKEN,
                 "dups-after",
                 &ListInput {
+                    q: None,
+                    roles: None,
+                    needs_review: None,
                     limit: Some(200),
                     offset: None,
                 },
@@ -1177,6 +1198,9 @@ fn a_party_of_one_company_is_invisible_to_another() {
                 OWNER_TOKEN,
                 "iso-list",
                 &ListInput {
+                    q: None,
+                    roles: None,
+                    needs_review: None,
                     limit: None,
                     offset: None,
                 },
@@ -1265,6 +1289,9 @@ fn a_party_of_one_company_is_invisible_to_another() {
                 OWNER_TOKEN,
                 "iso-a",
                 &ListInput {
+                    q: None,
+                    roles: None,
+                    needs_review: None,
                     limit: None,
                     offset: None,
                 },
@@ -1272,6 +1299,408 @@ fn a_party_of_one_company_is_invisible_to_another() {
             .await
             .expect("list in A");
             assert_eq!(of_a.total, 2);
+        });
+    }
+}
+
+// ============================================================================
+// Customers and vendors screens: list filters, the party read, field checks,
+// addresses and contacts.
+// ============================================================================
+
+fn blank_list() -> ListInput {
+    ListInput {
+        q: None,
+        roles: None,
+        needs_review: None,
+        limit: None,
+        offset: None,
+    }
+}
+
+fn new_party(id: &str, name: &str, roles: &str) -> CreateInput {
+    CreateInput {
+        id: Some(id.to_string()),
+        name: name.to_string(),
+        vat_id: None,
+        roles: Some(roles.to_string()),
+        tax_number: None,
+        language: None,
+        currency: None,
+        personal_data: None,
+        payment_terms_days: None,
+        default_account: None,
+        default_tax_code: None,
+        addresses: Vec::new(),
+        contacts: Vec::new(),
+    }
+}
+
+#[test]
+fn list_filters_by_search_role_and_review_flag_and_counts_the_matches() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            for (id, name, roles) in [
+                ("p-acme", "Acme GmbH", "customer"),
+                ("p-halden", "Halden Works", "vendor"),
+                ("p-both", "Acme Logistics", "both"),
+            ] {
+                run(
+                    db,
+                    &PartiesCreate,
+                    OWNER_TOKEN,
+                    id,
+                    &new_party(id, name, roles),
+                )
+                .await
+                .expect("create");
+            }
+            exec(
+                db,
+                "UPDATE vendor SET needs_review = 1 WHERE id = 'p-halden'",
+                vec![],
+            )
+            .await;
+
+            let search = run(
+                db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-search",
+                &ListInput {
+                    q: Some("  ACME ".to_string()),
+                    ..blank_list()
+                },
+            )
+            .await
+            .expect("search");
+            assert_eq!(search.total, 2, "search is case-insensitive and trims");
+
+            let customers = run(
+                db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-customers",
+                &ListInput {
+                    roles: Some("customer".to_string()),
+                    ..blank_list()
+                },
+            )
+            .await
+            .expect("roles");
+            assert_eq!(customers.total, 1);
+            assert_eq!(customers.parties[0].id, "p-acme");
+
+            let review = run(
+                db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-review",
+                &ListInput {
+                    needs_review: Some(true),
+                    ..blank_list()
+                },
+            )
+            .await
+            .expect("review");
+            assert_eq!(review.total, 1);
+            assert!(review.parties[0].needs_review);
+
+            let paged = run(
+                db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-paged",
+                &ListInput {
+                    limit: Some(1),
+                    offset: Some(1),
+                    ..blank_list()
+                },
+            )
+            .await
+            .expect("paged");
+            assert_eq!(paged.total, 3, "total counts every match, not the page");
+            assert_eq!(paged.parties.len(), 1);
+
+            let bad_role = run(
+                db,
+                &PartiesList,
+                OWNER_TOKEN,
+                "list-bad-role",
+                &ListInput {
+                    roles: Some("supplier".to_string()),
+                    ..blank_list()
+                },
+            )
+            .await;
+            assert!(matches!(bad_role, Err(CommandError::InvalidInput(_))));
+        });
+    }
+}
+
+#[test]
+fn get_returns_the_bank_history_newest_first_and_the_bill_count() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            party(db, "ven-bank", "Bank Test GmbH", None, None).await;
+            bill(db, "bill-bank", "ven-bank", "INV-9", false).await;
+            for (iban, reason) in [
+                ("DE89370400440532013000", "first"),
+                ("GB82WEST12345698765432", "second"),
+            ] {
+                run(
+                    db,
+                    &PartiesSetBank::new(Some(OWNER_ID.to_string())),
+                    OWNER_TOKEN,
+                    &format!("bank-{reason}"),
+                    &bank_input("ven-bank", iban),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("set_bank {reason}: {e:?}"));
+            }
+            let got = run(
+                db,
+                &PartiesGet::new(false),
+                OWNER_TOKEN,
+                "get-bank",
+                &GetInput {
+                    id: "ven-bank".to_string(),
+                },
+            )
+            .await
+            .expect("get");
+            assert_eq!(got.party.name, "Bank Test GmbH");
+            assert_eq!(got.bill_count, 1);
+            assert_eq!(got.bank_changes.len(), 2);
+            assert_eq!(
+                got.bank_changes[0].after_iban.as_deref(),
+                Some("GB82WEST12345698765432"),
+                "newest change first"
+            );
+            assert_eq!(got.bank_changes[0].changed_by, OWNER_ID);
+            assert!(got.bank_changes[0].reason.is_some(), "the reason is kept");
+
+            let missing = run(
+                db,
+                &PartiesGet::new(false),
+                OWNER_TOKEN,
+                "get-missing",
+                &GetInput {
+                    id: "nobody".to_string(),
+                },
+            )
+            .await;
+            assert!(matches!(missing, Err(CommandError::InvalidInput(_))));
+        });
+    }
+}
+
+#[test]
+fn validate_names_each_refused_field_and_writes_nothing() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            party(db, "ven-taken", "Taken GmbH", Some("DE136695976"), None).await;
+            let before = scalar_i64(db, "SELECT COUNT(*) AS n FROM vendor").await;
+
+            let bad = run(
+                db,
+                &PartiesValidate,
+                OWNER_TOKEN,
+                "validate-bad",
+                &ValidateInput {
+                    name: Some("  ".to_string()),
+                    vat_id: Some("DE000".to_string()),
+                    iban: Some("DE00 0000".to_string()),
+                    bic: Some("NOPE".to_string()),
+                    roles: Some("supplier".to_string()),
+                    payment_terms_days: Some(-1),
+                    addresses: vec![Address {
+                        kind: None,
+                        line1: String::new(),
+                        line2: None,
+                        postal_code: None,
+                        city: "Berlin".to_string(),
+                        country: "DE".to_string(),
+                    }],
+                    contacts: vec![Contact {
+                        name: "Ada".to_string(),
+                        email: Some("not-an-email".to_string()),
+                        phone: None,
+                        role: None,
+                    }],
+                    ..ValidateInput::default()
+                },
+            )
+            .await
+            .expect("validate");
+            assert!(!bad.valid);
+            let fields: Vec<&str> = bad.errors.iter().map(|e| e.field.as_str()).collect();
+            for field in [
+                "name",
+                "vat_id",
+                "iban",
+                "bic",
+                "roles",
+                "payment_terms_days",
+                "addresses",
+                "contacts",
+            ] {
+                assert!(fields.contains(&field), "{field} refused: {fields:?}");
+            }
+
+            let after = scalar_i64(db, "SELECT COUNT(*) AS n FROM vendor").await;
+            assert_eq!(before, after, "validate writes nothing");
+        });
+    }
+}
+
+#[test]
+fn validate_takes_a_partys_own_vat_id_and_accepts_a_clean_form() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            party(db, "ven-taken", "Taken GmbH", Some("DE136695976"), None).await;
+            let taken = run(
+                db,
+                &PartiesValidate,
+                OWNER_TOKEN,
+                "validate-taken",
+                &ValidateInput {
+                    vat_id: Some("DE 136 695 976".to_string()),
+                    ..ValidateInput::default()
+                },
+            )
+            .await
+            .expect("validate");
+            assert_eq!(taken.errors.len(), 1);
+            assert_eq!(taken.errors[0].field, "vat_id");
+            assert!(taken.errors[0].message.contains("already has this VAT ID"));
+
+            let own = run(
+                db,
+                &PartiesValidate,
+                OWNER_TOKEN,
+                "validate-own",
+                &ValidateInput {
+                    id: Some("ven-taken".to_string()),
+                    vat_id: Some("DE136695976".to_string()),
+                    ..ValidateInput::default()
+                },
+            )
+            .await
+            .expect("validate");
+            assert!(own.valid, "a party's own VAT ID is not a conflict");
+
+            let good = run(
+                db,
+                &PartiesValidate,
+                OWNER_TOKEN,
+                "validate-good",
+                &ValidateInput {
+                    name: Some("Acme GmbH".to_string()),
+                    iban: Some("DE89370400440532013000".to_string()),
+                    bic: Some("COBADEFFXXX".to_string()),
+                    roles: Some("both".to_string()),
+                    payment_terms_days: Some(30),
+                    ..ValidateInput::default()
+                },
+            )
+            .await
+            .expect("validate");
+            assert!(good.valid);
+            assert!(good.errors.is_empty());
+        });
+    }
+}
+
+#[test]
+fn addresses_and_contacts_round_trip_and_an_update_replaces_them() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            let mut create = new_party("p-addr", "Address Test GmbH", "vendor");
+            create.addresses = vec![Address {
+                kind: Some("Billing".to_string()),
+                line1: " Musterstrasse 1 ".to_string(),
+                line2: None,
+                postal_code: Some("10115".to_string()),
+                city: "Berlin".to_string(),
+                country: "de".to_string(),
+            }];
+            create.contacts = vec![Contact {
+                name: "Ada Lovelace".to_string(),
+                email: Some("ada@example.com".to_string()),
+                phone: None,
+                role: Some("Accounts".to_string()),
+            }];
+            let made = run(db, &PartiesCreate, OWNER_TOKEN, "create-addr", &create)
+                .await
+                .expect("create");
+            assert_eq!(made.party.addresses[0].country, "DE");
+            assert_eq!(made.party.addresses[0].kind.as_deref(), Some("billing"));
+            assert_eq!(made.party.addresses[0].line1, "Musterstrasse 1");
+
+            let got = run(
+                db,
+                &PartiesGet::new(false),
+                OWNER_TOKEN,
+                "get-addr",
+                &GetInput {
+                    id: "p-addr".to_string(),
+                },
+            )
+            .await
+            .expect("get");
+            assert_eq!(got.party.addresses.len(), 1);
+            assert_eq!(got.party.contacts[0].name, "Ada Lovelace");
+
+            let cleared = run(
+                db,
+                &PartiesUpdate,
+                OWNER_TOKEN,
+                "update-addr",
+                &UpdateInput {
+                    id: "p-addr".to_string(),
+                    name: None,
+                    vat_id: None,
+                    roles: None,
+                    tax_number: None,
+                    language: None,
+                    currency: None,
+                    personal_data: None,
+                    payment_terms_days: Some(14),
+                    default_account: None,
+                    default_tax_code: None,
+                    addresses: Some(Vec::new()),
+                    contacts: None,
+                },
+            )
+            .await
+            .expect("update");
+            assert!(cleared.party.addresses.is_empty());
+            assert_eq!(cleared.party.payment_terms_days, Some(14));
+            assert_eq!(cleared.party.contacts.len(), 1, "contacts untouched");
+
+            let mut bad = new_party("p-bad-addr", "Bad Address GmbH", "vendor");
+            bad.addresses = vec![Address {
+                kind: None,
+                line1: "Street 1".to_string(),
+                line2: None,
+                postal_code: None,
+                city: "Berlin".to_string(),
+                country: "Germany".to_string(),
+            }];
+            let refused = run(db, &PartiesCreate, OWNER_TOKEN, "create-bad-addr", &bad).await;
+            assert!(matches!(refused, Err(CommandError::InvalidInput(m)) if m.contains("country")));
+            let count = scalar_i64(
+                db,
+                "SELECT COUNT(*) AS n FROM vendor WHERE id = 'p-bad-addr'",
+            )
+            .await;
+            assert_eq!(count, 0, "a refused party is not written");
         });
     }
 }

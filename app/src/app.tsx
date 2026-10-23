@@ -45,6 +45,9 @@ import { BankAccountPage } from './ui/BankAccount';
 import { BankRules } from './ui/BankRules';
 import { ApprovalDetail, Approvals } from './ui/Approvals';
 import { Settings, settingsSectionOf } from './ui/Settings';
+import { Parties } from './ui/Parties';
+import { PartyNew, PartyEdit } from './ui/PartyForm';
+import { PartyPage } from './ui/PartyPage';
 import { badgeText } from './lib/approvals';
 import { activeUnits, hashWithUnit, navigateToUnit, routeOf, unitFromHash } from './lib/units';
 import { unitsList } from './api/commands';
@@ -67,6 +70,7 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'reports', label: 'nav.reports', icon: 'reports', match: (r) => r === 'reports' },
   { hash: 'bills', label: 'nav.bills', icon: 'bills', match: (r) => r === 'bills' || r.startsWith('bills/') },
   { hash: 'bank', label: 'nav.bank', icon: 'bank', match: (r) => r === 'bank' || r.startsWith('bank/') },
+  { hash: 'parties', label: 'nav.parties', icon: 'parties', match: (r) => r === 'parties' || r.startsWith('parties/') },
   { hash: 'settings', label: 'nav.settings', icon: 'settings', match: (r) => r === 'settings' || r.startsWith('settings/') },
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
@@ -507,6 +511,10 @@ function renderRoute(route: string) {
   if (route === 'bank') return <BankAccounts />;
   if (route === 'bank/new') return <BankAccountNew />;
   if (route === 'bank/rules') return <BankRules />;
+  if (route === 'parties') return <Parties />;
+  if (route === 'parties/new') return <PartyNew />;
+  if (route.startsWith('parties/') && route.endsWith('/edit')) return <PartyEdit id={decodeURIComponent(route.slice('parties/'.length, -'/edit'.length))} />;
+  if (route.startsWith('parties/')) return <PartyPage id={decodeURIComponent(route.slice('parties/'.length))} />;
   if (route.startsWith('bank/')) return <BankAccountPage id={decodeURIComponent(route.slice('bank/'.length))} />;
   if (route === 'new') return <NewEntry />;
   return (

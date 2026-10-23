@@ -216,6 +216,19 @@ async fn resolve_vendor(
     ctx: &CommandContext,
 ) -> Result<(VendorView, Option<VendorView>, bool), CommandError> {
     let known = store::vendors(db, company_id).await?;
+    if let Some(picked) = input.vendor_id.as_deref() {
+        let vendor = known
+            .iter()
+            .find(|v| v.id == picked)
+            .cloned()
+            .ok_or_else(|| {
+                CommandError::InvalidInput(
+                    "the party is not one of this company's unmerged parties".into(),
+                )
+            })?;
+        let changed = iban_differs(vendor.iban.as_deref(), input.vendor_iban.as_deref());
+        return Ok((vendor, None, changed));
+    }
     let candidates: Vec<MatchCandidate> = known
         .iter()
         .map(|v| MatchCandidate {
@@ -593,12 +606,25 @@ impl Command for BillsUpdate {
         fields.source = Some(existing.source.clone());
         fields.reader = existing.reader.clone();
         fields.created_by = existing.created_by.clone();
+        // A picked party re-points the bill; otherwise the vendor stays.
+        let vendor = match fields.vendor_id.as_deref() {
+            Some(picked) if picked != existing.vendor_id => store::vendors(db, &ctx.company_id)
+                .await?
+                .into_iter()
+                .find(|v| v.id == picked)
+                .ok_or_else(|| {
+                    CommandError::InvalidInput(
+                        "the party is not one of this company's unmerged parties".into(),
+                    )
+                })?,
+            _ => existing.vendor.clone(),
+        };
         let text = document_text(db, &ctx.company_id, &existing.document_id).await?;
         check_duplicates(
             db,
             &ctx.company_id,
             &existing.document_id,
-            Some(&existing.vendor_id),
+            Some(&vendor.id),
             fields.invoice_number.as_deref(),
             Some(&existing.id),
         )
@@ -606,16 +632,13 @@ impl Command for BillsUpdate {
         let chart = load_chart(db, &ctx.company_id).await?;
         check_expense_accounts(&chart, &fields.lines)?;
         let mut lines = fields.lines.clone();
-        suggest_accounts(db, &ctx.company_id, &chart, &existing.vendor_id, &mut lines).await?;
+        suggest_accounts(db, &ctx.company_id, &chart, &vendor.id, &mut lines).await?;
         let (checks, flags) = checks_and_flags(&fields, today(ctx)?, text.as_deref());
-        let iban_changed = iban_differs(
-            existing.vendor.iban.as_deref(),
-            fields.vendor_iban.as_deref(),
-        );
+        let iban_changed = iban_differs(vendor.iban.as_deref(), fields.vendor_iban.as_deref());
         let row = row_of(
             &existing.id,
             &fields,
-            existing.vendor.clone(),
+            vendor.clone(),
             lines,
             checks,
             flags,
@@ -626,7 +649,7 @@ impl Command for BillsUpdate {
         let statement = Statement::with_values(
             "UPDATE bill SET invoice_number = ?, invoice_date = ?, due_date = ?, currency = ?, net_minor = ?, \
              vat_minor = ?, gross_minor = ?, lines_json = ?, checks_json = ?, instruction_flags = ?, \
-             iban_changed = ?, unit_code = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
+             iban_changed = ?, unit_code = ?, vendor_id = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
                 .to_owned(),
             vec![
                 Value::from(row.invoice_number.clone()),
@@ -641,6 +664,7 @@ impl Command for BillsUpdate {
                 Value::from(json_text(&row.instruction_flags)?),
                 Value::from(i64::from(row.iban_changed)),
                 Value::from(row.unit.clone()),
+                Value::from(vendor.id.as_str()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
                 Value::from(existing.id.as_str()),

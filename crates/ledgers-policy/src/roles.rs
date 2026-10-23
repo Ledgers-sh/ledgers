@@ -87,6 +87,9 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "numbering.list"
         | "tax_settings.get"
         | "parties.list"
+        | "parties.get"
+        | "parties.validate"
+        | "parties.balances"
         | "test.read" => Class::Read,
         "company.update"
         | "units.create"
@@ -273,6 +276,9 @@ mod tests {
         ("fiscal_years.create", Class::Close),
         ("fiscal_years.close", Class::Close),
         ("parties.list", Class::Read),
+        ("parties.get", Class::Read),
+        ("parties.validate", Class::Read),
+        ("parties.balances", Class::Read),
         ("parties.create", Class::Post),
         ("parties.update", Class::Post),
         ("parties.check_vat", Class::Post),

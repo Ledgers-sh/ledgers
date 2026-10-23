@@ -90,6 +90,8 @@ export interface BillExtraction {
 
 /** The fields a person can correct on a bill. Amounts are minor units. */
 export interface BillFields {
+  /** The party the bill is for; a picked party re-points the bill. */
+  vendor_id?: string | null;
   vendor_name?: string | null;
   vendor_vat_id?: string | null;
   vendor_iban?: string | null;
