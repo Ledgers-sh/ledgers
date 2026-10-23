@@ -22,7 +22,7 @@ impl Module for DocumentsStoreModule {
     }
 
     fn tables(&self) -> &'static [&'static str] {
-        &["document", "document_upload_event"]
+        &["document", "document_upload_event", "document_anchor"]
     }
 
     fn migrations(&self) -> Migrations {

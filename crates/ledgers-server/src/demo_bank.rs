@@ -280,6 +280,7 @@ pub async fn seed_bank(
                 uploaded_by: format!("person:{DEMO_OWNER_ID}"),
                 text_layer: Some(String::from_utf8_lossy(&bytes).into_owned()),
                 retention_class: None,
+                source: None,
             };
             let auth = OwnerAuth {
                 person_id: DEMO_OWNER_ID.to_owned(),

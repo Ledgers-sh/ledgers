@@ -4275,6 +4275,177 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/documents/{id}/anchors": {
+      "get": {
+        "operationId": "documents_anchors",
+        "description": "Execute command: documents.anchors",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AnchorsOutput",
+                  "description": "Output of `documents.anchors`.",
+                  "type": "object",
+                  "properties": {
+                    "anchors": {
+                      "description": "The anchors.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Anchor"
+                      }
+                    }
+                  },
+                  "required": [
+                    "anchors"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.anchors",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers documents anchors",
+        "x-ledgers-mcp": "documents_anchors",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/documents/{id}/anchors\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/documents/{id}/delete": {
+      "post": {
+        "operationId": "documents_delete",
+        "description": "Execute command: documents.delete",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "GetInput",
+                "description": "Input of `documents.get`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The document id (from the path).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "DeleteOutput",
+                  "description": "Output of `documents.delete`.",
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "description": "The SHA-256 of the deleted document's blob (for garbage collection).",
+                      "type": "string"
+                    },
+                    "mime": {
+                      "description": "The MIME type of the deleted document (for re-storing the blob if concurrent upload sees it missing).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "mime"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.delete",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers documents delete",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/documents/{id}/delete\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/documents/{id}/url": {
       "get": {
         "operationId": "documents_download_url",
@@ -4492,6 +4663,108 @@
         "x-ledgers-cli": "ledgers documents list",
         "x-ledgers-mcp": "documents_list",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/documents\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/documents/{id}/set-anchors": {
+      "post": {
+        "operationId": "documents_set_anchors",
+        "description": "Execute command: documents.set_anchors",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "documents"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SetAnchorsInput",
+                "description": "Input of `documents.set_anchors`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The document id.",
+                    "type": "string"
+                  },
+                  "anchors": {
+                    "description": "The anchors to set (replaces existing ones).",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Anchor"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "anchors"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "SetAnchorsOutput",
+                  "description": "Output of `documents.set_anchors`.",
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "description": "The number of anchors set.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "documents.set_anchors",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers documents set-anchors",
+        "x-ledgers-mcp": "documents_set_anchors",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/documents/{id}/set-anchors\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
     "/v1/entries/{external_id}": {
@@ -9790,6 +10063,98 @@
             "default": ""
           }
         }
+      },
+      "Anchor": {
+        "description": "A semantic field location within a document.",
+        "type": "object",
+        "properties": {
+          "field": {
+            "description": "The field name (e.g., `\"total\"`, `\"invoice_number\"`, `\"lines.0.amount\"`).\nNon-empty, bounded length (255 chars).",
+            "type": "string"
+          },
+          "location": {
+            "description": "Where the field is located.",
+            "$ref": "#/components/schemas/Location"
+          }
+        },
+        "required": [
+          "field",
+          "location"
+        ]
+      },
+      "Location": {
+        "description": "The location of a field: either a page-relative bounding box or an XML path.",
+        "anyOf": [
+          {
+            "description": "A page-based location: page number (1-based) and a bounding box.",
+            "type": "object",
+            "properties": {
+              "page": {
+                "description": "Page number, 1-based.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "bbox": {
+                "description": "The bounding box.",
+                "$ref": "#/components/schemas/BoundingBox"
+              }
+            },
+            "required": [
+              "page",
+              "bbox"
+            ]
+          },
+          {
+            "description": "An XML path within a structured document.",
+            "type": "object",
+            "properties": {
+              "path": {
+                "description": "`XPath` or simplified path (e.g., `/Invoice/TaxAmount[1]`).\nNon-empty, bounded length (500 chars).",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        ]
+      },
+      "BoundingBox": {
+        "description": "A bounding box in 1/10000 units of the page size, origin top-left.\nAll values are integers; a 1240×1754 px A4 page at 96 DPI translates to\napproximately (0,0,10000,10000) in normalized units.",
+        "type": "object",
+        "properties": {
+          "x": {
+            "description": "X-offset in 1/10000 units (0..=10000).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "y": {
+            "description": "Y-offset in 1/10000 units (0..=10000).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "w": {
+            "description": "Width in 1/10000 units (>0, x+w ≤ 10000).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "h": {
+            "description": "Height in 1/10000 units (>0, y+h ≤ 10000).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ]
       },
       "EntryLineRecordView": {
         "description": "One entry line, as the app's `EntryLineRecord` types it.",

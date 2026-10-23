@@ -45,7 +45,10 @@ use ledgers_commands::{
     Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
     PendingApproval, Plan, Registry,
 };
-use ledgers_documents::commands::{DocumentsGet, DocumentsList, DocumentsRegister};
+use ledgers_documents::commands::{
+    DocumentsAnchors, DocumentsDelete, DocumentsGet, DocumentsList, DocumentsRegister,
+    DocumentsSetAnchors,
+};
 use ledgers_extract::provider::ModelSettings;
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
@@ -526,6 +529,70 @@ impl ServerDispatch {
             .await
     }
 
+    /// `documents.delete`: a person only. An agent gets 403 (`human-only`). Also drops the
+    /// original blob from storage when nothing references it.
+    /// Counts how many documents reference a given sha256 hash.
+    async fn document_rows_with_hash(deps: &Deps, sha256: &str) -> i64 {
+        deps.db
+            .query(&Statement::with_values(
+                "SELECT COUNT(*) AS n FROM document WHERE sha256 = ?".to_owned(),
+                vec![sea_query::Value::from(sha256)],
+            ))
+            .await
+            .ok()
+            .and_then(|rows| rows.first().and_then(|row| row.get("n")))
+            .unwrap_or(0)
+    }
+
+    async fn documents_delete(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        let output = self
+            .execute(deps, &DocumentsDelete, presented, request_id, input)
+            .await?;
+
+        // Delete the blob if no other documents reference it. The blob key is
+        // global per sha256 (deduplicated across companies), so the check must
+        // count all companies.
+        if let Some(blob) = &deps.blob {
+            let sha256 = output.get("sha256").and_then(Value::as_str).unwrap_or("");
+            let mime = output.get("mime").and_then(Value::as_str).unwrap_or("");
+            let key = crate::documents::blob_key(sha256);
+
+            // Check if any document still references this sha256.
+            if Self::document_rows_with_hash(deps, sha256).await == 0 {
+                // No documents left: get the blob bytes, delete from blob, then re-check.
+                // If a concurrent upload saw the blob and skipped its put, we restore it.
+                match blob.get(&key).await {
+                    Ok(Some(object)) => {
+                        let bytes = object.bytes;
+                        if let Err(delete_err) = blob.delete(&key).await {
+                            tracing::error!("blob delete failed for {}: {delete_err:?}", sha256);
+                        }
+                        // Re-check: if a document appeared while we were deleting, restore.
+                        if Self::document_rows_with_hash(deps, sha256).await > 0
+                            && let Err(put_err) = blob.put(&key, &bytes, mime).await
+                        {
+                            tracing::error!("blob restore failed for {}: {put_err:?}", sha256);
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::warn!("blob not found for deleted document {}", sha256);
+                    }
+                    Err(get_err) => {
+                        tracing::error!("blob read failed for {}: {get_err:?}", sha256);
+                    }
+                }
+            }
+        }
+
+        Ok(output)
+    }
+
     /// `bills.create`: the server fills the id and the author from the credential.
     async fn bills_create(
         &self,
@@ -756,6 +823,18 @@ impl Dispatch for ServerDispatch {
             }
             "documents.download_url" => {
                 self.documents_download_url(deps, presented, request_id, input)
+                    .await
+            }
+            "documents.set_anchors" => {
+                self.execute(deps, &DocumentsSetAnchors, presented, request_id, input)
+                    .await
+            }
+            "documents.anchors" => {
+                self.execute(deps, &DocumentsAnchors, presented, request_id, input)
+                    .await
+            }
+            "documents.delete" => {
+                self.documents_delete(deps, presented, request_id, input)
                     .await
             }
             "bills.extract" => self.bills_extract(deps, presented, request_id, input).await,
@@ -1900,6 +1979,34 @@ pub fn registry() -> Registry {
             (
                 schema_of::<DocumentUrlInput>(),
                 schema_of::<DocumentUrlOutput>(),
+            ),
+        ),
+        (
+            "documents.register",
+            (
+                schema_of::<ledgers_documents::commands::RegisterInput>(),
+                schema_of::<ledgers_documents::commands::RegisterOutput>(),
+            ),
+        ),
+        (
+            "documents.anchors",
+            (
+                schema_of::<ledgers_documents::commands::AnchorsInput>(),
+                schema_of::<ledgers_documents::commands::AnchorsOutput>(),
+            ),
+        ),
+        (
+            "documents.set_anchors",
+            (
+                schema_of::<ledgers_documents::commands::SetAnchorsInput>(),
+                schema_of::<ledgers_documents::commands::SetAnchorsOutput>(),
+            ),
+        ),
+        (
+            "documents.delete",
+            (
+                schema_of::<ledgers_documents::commands::GetInput>(),
+                schema_of::<ledgers_documents::commands::DeleteOutput>(),
             ),
         ),
         (
