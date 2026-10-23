@@ -6,6 +6,7 @@ pub mod companies;
 pub mod config;
 pub mod demo;
 pub mod demo_bank;
+pub mod demo_group;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;
@@ -186,6 +187,9 @@ pub fn compose(
     // Bank accounts, statements and reconciliation: after the documents and the
     // bills whose tables reconciliation reads.
     let builder = builder.module(ledgers_bank::BankModule);
+    // Company groups and intercompany agreements: after the bank, whose
+    // migrations the group's period ledger reads alongside.
+    let builder = builder.module(ledgers_group::GroupModule);
     // The company's organization: members, roles and invitations. Mounted after
     // the bills module so its migrations are the last in the D1 set.
     let builder = builder.module(members::MembersModule::new(cors_origins.clone()));

@@ -23,15 +23,21 @@ Within the matrix, each command belongs to one class:
 
 | Class | Commands | owner | admin | accountant | approver | viewer | auditor |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| read | accounts, entries, reports, documents, bills (read), parties (list), fiscal years, numbering, company, tax settings | yes | yes | yes | yes | yes | yes |
-| settings | company update, tax settings update, approval settings, numbering sequence, party bank details (`parties.set_bank`, human only), party merge (`parties.merge`, human only) | yes | yes | | | | |
+| read | accounts, entries, reports, documents, bills (read), parties (list), fiscal years, numbering, company, tax settings, groups and agreements (read), intercompany reconciliation and group view | yes | yes | yes | yes | yes | yes |
+| settings | company update, tax settings update, approval settings, numbering sequence, party bank details (`parties.set_bank`, human only), party merge (`parties.merge`, human only), groups create and update (owner only, see below), intercompany agreements create, update and terminate | yes | yes | | | | |
 | keys | agent keys (create, list, revoke), policy (put, revoke, explain) | yes | yes | | | | |
 | audit | audit log (`audit-events`) | yes | yes | | | | yes |
 | approvals-read | approvals inbox: list and get | yes | yes | | yes | yes | yes |
 | approvals-decide | approve or reject a request | yes | yes | | yes | | |
-| post | post, reverse, journal entries, bills create/update/extract/confirm/discard/post, documents register, accounts create/update/archive/restore, parties create/update and VAT check (`parties.check_vat`) | yes | yes | yes | | | |
-| money-out | bill payments | yes | yes | | | | |
+| post | post, reverse, journal entries, bills create/update/extract/confirm/discard/post, documents register, accounts create/update/archive/restore, parties create/update and VAT check (`parties.check_vat`), intercompany periods run and post (`agreements.run_period`, `agreements.post_period`) | yes | yes | yes | | | |
+| money-out | bill payments, intercompany settlement (`agreements.settle_period`) | yes | yes | | | | |
 | close | close or reopen a period, create or close a fiscal year | yes | yes | | | | |
+
+Group commands touch more than one company, so the server checks the role in
+every company a command names, not only the one in the request. A group
+is created and its members changed by an owner of every member company.
+Lists and reports show a person only the member companies they hold a role in;
+a company they cannot see is never named, not even by its id.
 
 A command that is not classified is refused for everyone, so a new command is
 unusable until someone decides which role may run it.

@@ -92,3 +92,18 @@ boxes = [
   { number = "7", label = "Input tax and refunds claimed", figure = "input_vat" },
   { number = "8", label = "Net GST to be paid or reclaimed", figure = "net_payable" },
 ]
+
+# Withholding tax on royalties paid to non-residents (advisory). The rate
+# applies to a payee with no business or permanent establishment in Singapore;
+# a double tax agreement can lower it, which an intercompany agreement records as
+# a treaty override. A resident payee has no withholding.
+# Source checked 2026-10-23: IRAS, "Payments that are subject to withholding tax",
+# https://www.iras.gov.sg/taxes/withholding-tax/payments-to-non-resident-company/payments-that-are-subject-to-withholding-tax
+# (the page states 10% on copyright royalty payments to non-residents, or a
+# reduced DTA rate).
+[[withholding]]
+kind = "royalty"
+percent = "10"
+source = "IRAS, Payments that are subject to withholding tax (non-resident company), https://www.iras.gov.sg/taxes/withholding-tax/payments-to-non-resident-company/payments-that-are-subject-to-withholding-tax"
+verified = true
+note = "Non-resident payee with no business or permanent establishment in Singapore. Treaty rates can be lower. The payer withholds and remits; the rate is not tax advice."

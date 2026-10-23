@@ -9,6 +9,8 @@ Usage: reports <COMMAND>
 Commands:
   account-balance-by-dimension  reports.account_balance_by_dimension
   balance-sheet                 reports.balance_sheet
+  group-view                    reports.group_view
+  intercompany-reconciliation   reports.intercompany_reconciliation
   profit-and-loss               reports.profit_and_loss
   trends                        reports.trends
   trial-balance                 reports.trial_balance

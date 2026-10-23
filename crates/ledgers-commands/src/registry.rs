@@ -702,6 +702,7 @@ fn chart_write(name: &str, method: &str, path: &str, cli: &str) -> CommandDescri
 /// The human-only commands: agents get a 403 on them, and the MCP server does
 /// not offer them as tools.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 fn human_only_commands() -> Vec<CommandDescriptor> {
     fn human_entry(
         name: &str,
@@ -738,6 +739,97 @@ fn human_only_commands() -> Vec<CommandDescriptor> {
             "POST",
             "/v1/parties/{id}/merge",
             "ledgers parties merge",
+        ),
+        human_entry(
+            "groups.list",
+            "read",
+            "GET",
+            "/v1/groups",
+            "ledgers groups list",
+        ),
+        human_entry(
+            "groups.create",
+            "draft",
+            "POST",
+            "/v1/groups",
+            "ledgers groups create",
+        ),
+        human_entry(
+            "groups.update",
+            "draft",
+            "POST",
+            "/v1/groups/{id}/update",
+            "ledgers groups update",
+        ),
+        human_entry(
+            "agreements.list",
+            "read",
+            "GET",
+            "/v1/agreements",
+            "ledgers agreements list",
+        ),
+        human_entry(
+            "agreements.get",
+            "read",
+            "GET",
+            "/v1/agreements/{id}",
+            "ledgers agreements get",
+        ),
+        human_entry(
+            "agreements.create",
+            "draft",
+            "POST",
+            "/v1/agreements",
+            "ledgers agreements create",
+        ),
+        human_entry(
+            "agreements.update",
+            "draft",
+            "POST",
+            "/v1/agreements/{id}/update",
+            "ledgers agreements update",
+        ),
+        human_entry(
+            "agreements.terminate",
+            "draft",
+            "POST",
+            "/v1/agreements/{id}/terminate",
+            "ledgers agreements terminate",
+        ),
+        human_entry(
+            "agreements.run_period",
+            "post-within-limits",
+            "POST",
+            "/v1/agreements/{id}/run-period",
+            "ledgers agreements run-period",
+        ),
+        human_entry(
+            "agreements.post_period",
+            "post-within-limits",
+            "POST",
+            "/v1/agreements/{id}/post-period",
+            "ledgers agreements post-period",
+        ),
+        human_entry(
+            "agreements.settle_period",
+            "post-within-limits",
+            "POST",
+            "/v1/agreements/{id}/settle-period",
+            "ledgers agreements settle-period",
+        ),
+        human_entry(
+            "reports.intercompany_reconciliation",
+            "read",
+            "GET",
+            "/v1/groups/{id}/reconciliation",
+            "ledgers reports intercompany-reconciliation",
+        ),
+        human_entry(
+            "reports.group_view",
+            "read",
+            "GET",
+            "/v1/groups/{id}/view",
+            "ledgers reports group-view",
         ),
         human_entry("keys.list", "read", "GET", "/v1/keys", "ledgers keys list"),
         human_entry(
