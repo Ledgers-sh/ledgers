@@ -301,6 +301,7 @@ fn row_of(
         checks,
         instruction_flags: flags,
         iban_changed,
+        iban_confirmed: false,
         source: input.source.clone().unwrap_or_else(|| "manual".to_owned()),
         reader: input.reader.clone(),
         unit: input.unit.clone(),
@@ -339,7 +340,7 @@ fn view_of(row: BillRow, journal_preview: Vec<PreviewLine>) -> BillView {
     let flags = open_flags(
         &row.instruction_flags,
         row.vendor.needs_review,
-        row.iban_changed,
+        row.iban_changed && !row.iban_confirmed,
         &row.lines,
     );
     let posted = row.posted_entry_id.is_some();
@@ -658,7 +659,7 @@ impl Command for BillsUpdate {
         let statement = Statement::with_values(
             "UPDATE bill SET invoice_number = ?, invoice_date = ?, due_date = ?, currency = ?, net_minor = ?, \
              vat_minor = ?, gross_minor = ?, lines_json = ?, checks_json = ?, instruction_flags = ?, \
-             iban_changed = ?, unit_code = ?, vendor_id = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
+             iban_changed = ?, iban_confirmed = 0, unit_code = ?, vendor_id = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
                 .to_owned(),
             vec![
                 Value::from(row.invoice_number.clone()),
@@ -890,8 +891,10 @@ pub struct ConfirmInput {
     pub id: String,
 }
 
-/// `bills.confirm`: clears the new-vendor and changed-IBAN flags. Human only:
-/// an agent that creates a vendor cannot confirm it.
+/// `bills.confirm`: clears the new-vendor flag and records that a person
+/// confirmed a changed IBAN, so the bill can post. The changed IBAN itself stays
+/// on record: an agent still cannot pay that bill. Human only: an agent that
+/// creates a vendor cannot confirm it.
 pub struct BillsConfirm;
 
 #[async_trait::async_trait]
@@ -930,7 +933,7 @@ impl Command for BillsConfirm {
             ));
         }
         row.vendor.needs_review = false;
-        row.iban_changed = false;
+        row.iban_confirmed = true;
         let statements = vec![
             Statement::with_values(
                 "UPDATE vendor SET needs_review = 0, updated_at = ? WHERE company_id = ? AND id = ?".to_owned(),
@@ -941,7 +944,7 @@ impl Command for BillsConfirm {
                 ],
             ),
             Statement::with_values(
-                "UPDATE bill SET iban_changed = 0, updated_at = ? WHERE company_id = ? AND id = ?".to_owned(),
+                "UPDATE bill SET iban_confirmed = 1, updated_at = ? WHERE company_id = ? AND id = ?".to_owned(),
                 vec![
                     Value::from(ctx.now.as_str()),
                     Value::from(ctx.company_id.as_str()),
@@ -1032,7 +1035,7 @@ async fn entry_for(
     let flags = open_flags(
         &row.instruction_flags,
         row.vendor.needs_review,
-        row.iban_changed,
+        row.iban_changed && !row.iban_confirmed,
         &row.lines,
     );
     if !row.checks.iter().all(|c| c.ok) || !flags.is_empty() {

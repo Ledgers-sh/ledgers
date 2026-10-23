@@ -40,8 +40,11 @@ pub struct BillRow {
     pub checks: Vec<CheckView>,
     /// The stored instruction flags.
     pub instruction_flags: Vec<String>,
-    /// Whether the invoice IBAN differs from the vendor's.
+    /// Whether the invoice IBAN differs from the vendor's. Stays set after a
+    /// person confirms the bill: an agent still cannot pay it.
     pub iban_changed: bool,
+    /// Whether a person confirmed a changed IBAN, which unblocks posting.
+    pub iban_confirmed: bool,
     /// The extractor (or manual).
     pub source: String,
     /// The reader that produced the fields, when one did.
@@ -63,7 +66,7 @@ pub struct BillRow {
 /// The columns a bill read selects, with the vendor joined.
 pub const BILL_SELECT: &str = "SELECT b.id, b.document_id, b.vendor_id, b.invoice_number, b.invoice_date, \
      b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.paid_minor, b.lines_json, b.confidence_json, b.checks_json, \
-     b.instruction_flags, b.iban_changed, b.source, b.reader, b.unit_code, b.posted_entry_id, b.discarded_at, b.created_by, \
+     b.instruction_flags, b.iban_changed, b.iban_confirmed, b.source, b.reader, b.unit_code, b.posted_entry_id, b.discarded_at, b.created_by, \
      b.created_at, b.updated_at, v.name AS vendor_name, v.vat_id AS vendor_vat_id, v.iban AS vendor_iban, \
      v.needs_review AS vendor_needs_review FROM bill b JOIN vendor v ON v.id = b.vendor_id";
 
@@ -103,6 +106,7 @@ fn from_row(row: &Row) -> Result<BillRow, DbError> {
         checks: json_column(row, "checks_json")?,
         instruction_flags: json_column(row, "instruction_flags")?,
         iban_changed: row.get::<i64>("iban_changed").unwrap_or(0) == 1,
+        iban_confirmed: row.get::<i64>("iban_confirmed").unwrap_or(0) == 1,
         source: text(row, "source")?,
         reader: row.get::<Option<String>>("reader").flatten(),
         unit: row.get::<Option<String>>("unit_code").flatten(),

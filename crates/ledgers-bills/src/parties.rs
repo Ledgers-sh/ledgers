@@ -1496,7 +1496,7 @@ impl Command for PartiesSetBank {
             // Open bills from this party now carry a changed-IBAN flag: a
             // person must confirm the payee before anything is paid.
             statements.push(Statement::with_values(
-                "UPDATE bill SET iban_changed = 1, updated_at = ? WHERE company_id = ? AND vendor_id = ? AND posted_entry_id IS NULL AND discarded_at IS NULL".to_string(),
+                "UPDATE bill SET iban_changed = 1, iban_confirmed = 0, updated_at = ? WHERE company_id = ? AND vendor_id = ? AND posted_entry_id IS NULL AND discarded_at IS NULL".to_string(),
                 vec![
                     Value::from(ctx.now.as_str()),
                     Value::from(ctx.company_id.as_str()),

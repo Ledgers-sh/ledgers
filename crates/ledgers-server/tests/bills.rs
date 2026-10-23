@@ -111,6 +111,15 @@ fn doc_id_of(upload: &Value) -> String {
         .to_owned()
 }
 
+/// The slug of a problem document: the last segment of its `type` URL.
+fn problem_slug(body: &Value) -> String {
+    body["type"]
+        .as_str()
+        .and_then(|t| t.rsplit('/').next())
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Asserts a check passed or failed in a bill's checks list.
 fn check_ok(bill: &Value, id: &str) -> bool {
     bill["checks"]
@@ -870,7 +879,7 @@ fn record_payment_partial_then_full_marks_paid_and_refuses_overpayment() {
         })),
     );
     assert_eq!(overpay.status, StatusCode::BAD_REQUEST);
-    assert_eq!(overpay.json()["slug"], "bill-overpay");
+    assert_eq!(problem_slug(&overpay.json()), "bill-overpay");
 }
 
 #[test]
@@ -926,7 +935,7 @@ fn agent_cannot_pay_a_bill_with_iban_changed_but_person_can() {
         ),
     );
     assert_eq!(agent_pay.status, StatusCode::FORBIDDEN);
-    assert_eq!(agent_pay.json()["slug"], "bill-person");
+    assert_eq!(problem_slug(&agent_pay.json()), "bill-person");
 
     // Person can pay
     let person_pay = call(

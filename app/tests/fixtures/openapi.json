@@ -5153,6 +5153,195 @@
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/post\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
+    "/v1/bills/{id}/propose-entry": {
+      "get": {
+        "operationId": "bills_propose-entry",
+        "description": "Execute command: bills.propose-entry",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ProposeEntryOutput",
+                  "description": "The lines a bill would post as, with VAT and AP on specific accounts.",
+                  "type": "object",
+                  "properties": {
+                    "lines": {
+                      "description": "The balanced lines, in the same format as a preview.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PreviewLine"
+                      }
+                    }
+                  },
+                  "required": [
+                    "lines"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.propose-entry",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bills proposed-entry",
+        "x-ledgers-mcp": "bills_propose-entry",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bills/{id}/propose-entry\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/bills/{id}/record-payment": {
+      "post": {
+        "operationId": "bills_record-payment",
+        "description": "Execute command: bills.record-payment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RecordPaymentInput",
+                "description": "Input of `bills.record-payment`: the bill id and payment details.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The bill id (from the path).",
+                    "type": "string"
+                  },
+                  "amount": {
+                    "description": "The amount paid, in minor units.",
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "date": {
+                    "description": "The payment date, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "from_account": {
+                    "description": "The bank account to credit, postable and tagged \"bank\".",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "description": "Optional reference text for the payment.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "id",
+                  "amount",
+                  "date",
+                  "from_account"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "Output of `bills.get`.",
+                  "type": "object",
+                  "properties": {
+                    "bill": {
+                      "description": "The bill.",
+                      "$ref": "#/components/schemas/BillView"
+                    }
+                  },
+                  "required": [
+                    "bill"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bills.record-payment",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers bills record-payment",
+        "x-ledgers-mcp": "bills_record-payment",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/bills/{id}/record-payment\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/bills/{id}/update": {
       "post": {
         "operationId": "bills_update",
@@ -12898,6 +13087,11 @@
             ],
             "format": "int64"
           },
+          "paid_minor": {
+            "description": "Amount paid so far, minor units (0 if not posted).",
+            "type": "integer",
+            "format": "int64"
+          },
           "lines": {
             "description": "The lines.",
             "type": "array",
@@ -12980,6 +13174,7 @@
           "document_id",
           "vendor",
           "currency",
+          "paid_minor",
           "lines",
           "confidence",
           "checks",
@@ -13013,6 +13208,16 @@
             "description": "A person discarded the draft; it can no longer post.",
             "type": "string",
             "const": "discarded"
+          },
+          {
+            "description": "The bill is posted but not fully paid.",
+            "type": "string",
+            "const": "partially-paid"
+          },
+          {
+            "description": "The bill is posted and fully paid.",
+            "type": "string",
+            "const": "paid"
           }
         ]
       },
