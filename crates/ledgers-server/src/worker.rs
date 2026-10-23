@@ -290,11 +290,29 @@ async fn seed_demo_route(
             .var("LEDGERS_COMPANY_ID")
             .map(|value| value.to_string())
             .unwrap_or_default();
-        match demo::seed_company_book(&deps, &company_id, &book).await {
+        let seeded = match demo::seed_company_book(&deps, &company_id, &book).await {
             Ok(report) => demo::grant_bootstrap_owner(&deps, &home, &company_id)
                 .await
                 .map(|()| report),
             Err(err) => Err(err),
+        };
+        // The group demo (issue #128) needs the operating book's revenue, so it
+        // runs after the book; it is skipped when no IP company id is configured.
+        match (seeded, env.var("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID")) {
+            (Ok(report), Ok(ip)) if !ip.to_string().is_empty() => {
+                crate::demo_group::seed(&deps, &home, &company_id, &ip.to_string(), year)
+                    .await
+                    .map(|group| {
+                        console_log!(
+                            "group demo: posted {}, settled {}, open {:?}",
+                            group.posted,
+                            group.settled,
+                            group.open_period
+                        );
+                        report
+                    })
+            }
+            (seeded, _) => seeded,
         }
     } else {
         let book = ledgers_demo::halden::book(year);

@@ -73,3 +73,15 @@ category = "exempt"
 id = "generic"
 label = "PPN return (generic)"
 kind = "generic"
+
+# Withholding on royalties paid to foreign taxpayers (PPh Pasal 26, advisory).
+# Checked 2026-10-23: DJP, PPh Pasal 26 (Kredit Pajak),
+# https://pajak.go.id/en/node/34286 : royalties are listed; the rate is 20%
+# and the withholding is final. A tax treaty (P3B) with the payee's country
+# can lower it when the payee provides the required residence documents.
+[[withholding]]
+kind = "royalty"
+percent = "20"
+source = "DJP, PPh Pasal 26 (Kredit Pajak), https://pajak.go.id/en/node/34286"
+verified = true
+note = "Foreign taxpayer payee. The treaty rate (P3B) can be lower with the required residence documents. The rate is not tax advice."

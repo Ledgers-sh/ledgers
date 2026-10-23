@@ -170,6 +170,7 @@ pub fn fixture_with_options(
         Box::new(ledgers_bills::BillsModule),
         Box::new(ledgers_bank::BankModule),
         Box::new(ledgers_tax::module::TaxModule),
+        Box::new(ledgers_group::GroupModule),
     ];
     let blob = Arc::new(MemoryBlob::new());
     let (patch_clock, patch_ids) = (clock.clone(), ids.clone());
