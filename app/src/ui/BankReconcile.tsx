@@ -1,3 +1,4 @@
+import { Ltr } from '../i18n/Ltr';
 /**
  * The reconcile panel for one bank line: what the line is, the suggestions
  * the server ranked, the entry it would post, and the actions. Match posts the
@@ -233,6 +234,21 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
           <dd>
             {line.counterparty_name || t('bank.no_counterparty')}
             {line.counterparty_iban && <span class="mono bank-fact-iban">{formatIban(line.counterparty_iban)}</span>}
+            {line.party ? (
+              <span class="bank-party">
+                <span class="muted">{t('parties.bank_party')}: </span>
+                <a href={`#/parties/${encodeURIComponent(line.party.id)}`}>
+                  <Ltr>{line.party.name}</Ltr>
+                </a>
+              </span>
+            ) : (
+              line.counterparty_iban && (
+                <span class="bank-party">
+                  <span class="muted">{t('parties.bank_no_party')}</span>{' '}
+                  <a href="#/parties/new">{t('parties.bank_add_party')}</a>
+                </span>
+              )
+            )}
           </dd>
         </div>
         <div>

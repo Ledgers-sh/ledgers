@@ -5,6 +5,7 @@
  * nothing (no model key), so it is entered by hand. No model is called.
  */
 import { createHash } from 'node:crypto';
+import { partiesState } from './mockParties';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -328,7 +329,10 @@ export function handleBills(method: string, url: URL, bodyText: string, raw: Buf
       bill.vat_minor = input.vat_minor ?? null;
       bill.gross_minor = input.gross_minor ?? null;
       bill.lines = (input.lines ?? []).map((line: BillLineInput) => ({ ...line, suggested_from: line.suggested_from ?? null }));
-      bill.vendor.name = input.vendor_name ?? bill.vendor.name;
+      // A party picked on the form re-points the bill to that party (its own name, VAT ID and IBAN).
+      const picked = partiesState.parties.find((p) => p.id === input.vendor_id && !p.merged_into);
+      if (picked) bill.vendor = { id: picked.id, name: picked.name, vat_id: picked.vat_id, iban: picked.iban, needs_review: false };
+      else bill.vendor.name = input.vendor_name ?? bill.vendor.name;
       bill.updated_at = now;
       return { status: 200, body: { bill: billView(bill) } };
     }

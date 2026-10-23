@@ -1,0 +1,6 @@
+{
+  "data": null,
+  "errors": [
+    { "message": "limit exceeded: the requested time range is beyond the plan's retention", "path": ["viewer"] }
+  ]
+}

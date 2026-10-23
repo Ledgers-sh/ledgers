@@ -9,7 +9,9 @@ import { handleBills, resetBills, servedFile } from './mockBills';
 import { handleBank, handleStatementUpload, resetBank } from './mockBank';
 import { handleSettings, resetSettings } from './mockSettings';
 import { handlePeople, resetPeople } from './mockPeople';
+import { handleParties, resetParties } from './mockParties';
 import { handleUnits, resetUnits } from './mockUnits';
+import { handleConnect, resetConnect } from './mockConnect';
 import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +67,8 @@ export interface MockOptions {
   extraEntries?: number;
   /** Seeds three business units (SQZ, LDG, FZ) so the unit switcher, the comparison and the units screens show. */
   units?: boolean;
+  /** Seeds the Factory Zero demo connections, their runs, rules and monthly costs. */
+  connect?: boolean;
   /** The companies the person belongs to: none, one (the switcher hides), or two (it shows). */
   companies?: 'none' | 'one' | 'many';
   /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
@@ -987,7 +991,9 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   keyCounter = 0;
   resetSettings();
   resetPeople();
+  resetParties();
   resetUnits(options.units ?? false);
+  resetConnect(options.connect ?? false);
   resetCompanies(options.companies ?? 'none');
   resetGroups(options.groups === true);
   nextNumber = state.entries.length + 1;
@@ -1081,6 +1087,14 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.end(JSON.stringify(companiesReply.body));
           return;
         }
+        if (path.startsWith('/v1/parties')) {
+          const partiesReply = handleParties(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
+          if (partiesReply) {
+            res.writeHead(partiesReply.status, { ...headers, 'Content-Type': partiesReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(partiesReply.body));
+            return;
+          }
+        }
         if (path.startsWith('/v1/bank')) {
           const bankReply = handleBank(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, asPerson);
           if (bankReply) {
@@ -1111,6 +1125,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           const empty = peopleReply.body === undefined;
           res.writeHead(peopleReply.status, empty ? { ...headers } : { ...headers, 'Content-Type': peopleReply.problem ? 'application/problem+json' : 'application/json' });
           res.end(empty ? undefined : JSON.stringify(peopleReply.body));
+          return;
+        }
+        // Connected sources (issue #142): connections, runs, allocation rules and costs.
+        const connectReply = handleConnect(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text, req.headers.authorization === `Bearer ${API_KEY}`);
+        if (connectReply) {
+          res.writeHead(connectReply.status, { ...headers, 'Content-Type': connectReply.problem ? 'application/problem+json' : 'application/json' });
+          res.end(JSON.stringify(connectReply.body));
           return;
         }
         // Business units (the writes are a person's; an agent key gets 403 on them).

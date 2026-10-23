@@ -1,0 +1,58 @@
+{
+  "success": true,
+  "errors": [],
+  "messages": [],
+  "result": [
+    {
+      "id": "cf-bill-2026-0801",
+      "action": "charge",
+      "amount": 25.00,
+      "currency": "USD",
+      "description": "Workers Paid plan, August 2026",
+      "occurred_at": "2026-08-01T00:00:00Z",
+      "invoice_id": "inv-cf-2026-08",
+      "external_invoice_id": "CF-INV-2026-08",
+      "hosted_invoice_url": "https://dash.cloudflare.com/billing/invoices/inv-cf-2026-08",
+      "status": "paid",
+      "type": "charge"
+    },
+    {
+      "id": "cf-bill-2026-0815",
+      "action": "charge",
+      "amount": 12.34,
+      "currency": "USD",
+      "description": "R2 storage and operations, August 2026",
+      "occurred_at": "2026-08-15T00:00:00Z",
+      "invoice_id": "inv-cf-2026-08-r2",
+      "status": "paid",
+      "type": "charge"
+    },
+    {
+      "id": "cf-credit-2026-0820",
+      "action": "credit",
+      "amount": -5.00,
+      "currency": "USD",
+      "description": "Goodwill credit",
+      "occurred_at": "2026-08-20T00:00:00Z",
+      "status": "paid",
+      "type": "credit"
+    },
+    {
+      "id": "cf-bill-2026-0701",
+      "action": "charge",
+      "amount": 25.00,
+      "currency": "USD",
+      "description": "Workers Paid plan, July 2026",
+      "occurred_at": "2026-07-01T00:00:00Z",
+      "invoice_id": "inv-cf-2026-07",
+      "status": "paid",
+      "type": "charge"
+    }
+  ],
+  "result_info": {
+    "count": 4,
+    "page": 1,
+    "per_page": 50,
+    "total_count": 4
+  }
+}

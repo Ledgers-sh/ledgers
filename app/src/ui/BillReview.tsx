@@ -22,6 +22,9 @@ import { parseMajorToMinor, toPlainMajor } from '../lib/money';
 import { accountNameFromCatalogue } from '../i18n/chart';
 import { ConfirmDialog, ErrorBanner, Money, PageHead, Skeleton, useToasts, Toasts } from './common';
 import { Select } from './Select';
+import { PartyPicker } from './PartyPicker';
+import { ReadValue } from './PartyFields';
+import { formatIban } from '../lib/parties';
 import { t, useLocale, type MessageKey } from '../i18n';
 
 /** Below this, the field is highlighted for a closer look. */
@@ -31,6 +34,8 @@ export const LOW_CONFIDENCE = 70;
 interface Draft {
   /** The business unit the expense lines belong to; empty when none is chosen. */
   unit: string;
+  /** The party the bill is for, chosen with the party picker. */
+  vendor_id: string;
   vendor_name: string;
   vendor_vat_id: string;
   vendor_iban: string;
@@ -57,6 +62,7 @@ function draftFrom(bill: Bill): Draft {
   const major = (minor: number | null) => (minor === null ? '' : toPlainMajor(String(minor), bill.currency));
   return {
     unit: bill.unit ?? '',
+    vendor_id: bill.vendor.id,
     vendor_name: bill.vendor.name,
     vendor_vat_id: bill.vendor.vat_id ?? '',
     vendor_iban: bill.vendor.iban ?? '',
@@ -124,6 +130,7 @@ export function fieldsFrom(
   return {
     fields: {
       unit: draft.unit === '' ? null : draft.unit,
+      vendor_id: draft.vendor_id === '' ? null : draft.vendor_id,
       vendor_name: draft.vendor_name.trim() === '' ? bill.vendor.name : draft.vendor_name.trim(),
       vendor_vat_id: draft.vendor_vat_id.trim() === '' ? null : draft.vendor_vat_id.trim(),
       vendor_iban: draft.vendor_iban.trim() === '' ? null : draft.vendor_iban.replace(/\s+/g, '').toUpperCase(),
@@ -283,9 +290,34 @@ export function BillReview({ billId }: { billId: string }) {
 
             <fieldset class="field-group" disabled={readOnly}>
               <legend>{t('bills.group_vendor')}</legend>
-              <TextField label={t('bills.vendor_name')} value={draft.vendor_name} onInput={(v) => update({ vendor_name: v })} confidence={confidence.vendor_name} />
-              <TextField label={t('bills.vat_id')} value={draft.vendor_vat_id} mono onInput={(v) => update({ vendor_vat_id: v })} confidence={confidence.vendor_vat_id} />
-              <TextField label={t('bills.iban')} value={draft.vendor_iban} mono onInput={(v) => update({ vendor_iban: v })} confidence={confidence.vendor_iban} />
+              <PartyPicker
+                id="bill-vendor"
+                label={t('parties.bill_vendor')}
+                selected={{ id: draft.vendor_id, name: draft.vendor_name, vat_id: draft.vendor_vat_id || null }}
+                allowCreate
+                disabled={readOnly}
+                onPick={(party) =>
+                  update({
+                    vendor_id: party.id,
+                    vendor_name: party.name,
+                    vendor_vat_id: party.vat_id ?? '',
+                    vendor_iban: party.iban ?? '',
+                  })
+                }
+              />
+              {confidence.vendor_name !== undefined && confidence.vendor_name < LOW_CONFIDENCE && (
+                <span class="low-tag">{t('bills.low_confidence')}</span>
+              )}
+              <p class="muted party-bill-note">{t('parties.bill_vendor_note')}</p>
+              <dl class="party-facts">
+                <ReadValue label={t('bills.vat_id')} ltr>
+                  {draft.vendor_vat_id ? <span class="mono">{draft.vendor_vat_id}</span> : <span class="muted">{t('parties.none')}</span>}
+                </ReadValue>
+                <ReadValue label={t('bills.iban')} ltr>
+                  {draft.vendor_iban ? <span class="mono">{formatIban(draft.vendor_iban)}</span> : <span class="muted">{t('parties.none')}</span>}
+                </ReadValue>
+              </dl>
+              {current.vendor.id !== draft.vendor_id && <span class="muted">{t('parties.bill_vendor_changed')}</span>}
               {needsVendor && (
                 <div class="vendor-review">
                   <span>{t('bills.vendor_review_note')}</span>

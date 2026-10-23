@@ -94,6 +94,8 @@ export interface TransactionView {
   matched: MatchedView | null;
   suggestions: Suggestion[];
   flags: string[];
+  /** The unmerged party whose IBAN is the counterparty's, when one is on file. */
+  party: { id: string; name: string } | null;
 }
 
 export interface TransactionsListOutput {

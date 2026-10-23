@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "starting_at": "2026-07-01T00:00:00Z",
+      "ending_at": "2026-07-02T00:00:00Z",
+      "results": [
+        { "api_key_id": "apikey_ledgers_web", "uncached_input_tokens": 1500, "cache_read_input_tokens": 200, "output_tokens": 500, "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 }, "model": "claude-opus-5-5" },
+        { "api_key_id": "apikey_sqeezin", "uncached_input_tokens": 500, "cache_read_input_tokens": 0, "output_tokens": 100, "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 }, "model": "claude-haiku-5-5" }
+      ]
+    },
+    {
+      "starting_at": "2026-07-02T00:00:00Z",
+      "ending_at": "2026-07-03T00:00:00Z",
+      "results": [
+        { "api_key_id": "apikey_ledgers_web", "uncached_input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 300, "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 }, "model": "claude-opus-5-5" },
+        { "api_key_id": null, "uncached_input_tokens": 100, "cache_read_input_tokens": 0, "output_tokens": 50, "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0 }, "model": "claude-haiku-5-5" }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

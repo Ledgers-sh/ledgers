@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { mockApi, signInPerson, stopMockApi } from './mockApi';
 import { billsMock, fixtureBytes } from './mockBills';
+import { partiesState } from './mockParties';
 
 const SHOT_DIR = process.env.BILLS_SHOT_DIR ?? join(process.cwd(), 'bills-screenshots');
 
@@ -40,7 +41,8 @@ test.describe('bills: inbox, review and posting (issues #20 to #22, #32, #34)', 
     await expect(page.getByRole('region', { name: 'Document' }).locator('iframe.doc-frame')).toBeVisible();
     await expect(page.getByRole('complementary', { name: 'Checks' }).getByText('Line items are present')).toBeVisible();
     // Low-confidence fields are marked in text, not only by colour.
-    await expect(page.getByLabel(/Vendor name/).locator('xpath=ancestor::label')).toContainText('check this');
+    await expect(page.locator('.party-picker-current')).toContainText('Halden Supplies GmbH');
+    await expect(page.locator('.low-tag').first()).toBeVisible();
     // The journal preview is empty until every line has an account.
     await expect(page.getByText('The entry appears once every line has an account')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Post', exact: true })).toBeDisabled();
@@ -173,4 +175,33 @@ test.describe('bills: inbox, review and posting (issues #20 to #22, #32, #34)', 
       await context.close();
     }
   });
+});
+
+test('the vendor on a bill is a party chosen from the list, or created on the spot, and saved with the bill', async ({ page }) => {
+  await mockApi({ person: true });
+  await signInPerson(page);
+  await page.goto('#/bills');
+  await upload(page, 'invoice.pdf');
+  await page.getByRole('row', { name: /Halden Supplies GmbH/ }).getByRole('link', { name: 'Review' }).click();
+  await expect(page.getByRole('heading', { name: 'Review bill' })).toBeVisible();
+
+  await page.locator('.party-picker-current').getByRole('button', { name: 'Change' }).click();
+  const picker = page.getByRole('combobox', { name: 'Vendor (party)' });
+  await picker.fill('Acme');
+  await page.getByRole('option', { name: 'Acme GmbH' }).click();
+  await expect(page.getByText('The bill moves to this party when you save.')).toBeVisible();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.party-picker-current')).toContainText('Acme GmbH');
+  await expect(page.getByText('The bill moves to this party when you save.')).toHaveCount(0);
+
+  await page.locator('.party-picker-current').getByRole('button', { name: 'Change' }).click();
+  // Keyboard, the way a person who cannot use a pointer reaches it: with no match the create row is the active option.
+  const typed = page.getByRole('combobox', { name: 'Vendor (party)' });
+  await typed.fill('Brand New Vendor');
+  await expect(page.getByRole('option', { name: 'Create "Brand New Vendor" as a new vendor' })).toBeVisible();
+  await typed.press('Enter');
+  await expect(page.locator('.party-picker-current')).toContainText('Brand New Vendor');
+  expect(partiesState.requests).toContain('POST /v1/parties');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.party-picker-current')).toContainText('Brand New Vendor');
 });

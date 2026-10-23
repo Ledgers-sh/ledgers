@@ -1705,6 +1705,212 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/allocation-rules": {
+      "get": {
+        "operationId": "allocation_rules_list",
+        "description": "Execute command: allocation_rules.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "allocation-rules"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AllocationListOutput",
+                  "description": "The output of `allocation_rules.list`.",
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "description": "Each connection's allocation.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectionAllocation"
+                      }
+                    },
+                    "units": {
+                      "description": "The active units.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnitChoice"
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections",
+                    "units"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "allocation_rules.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers allocation-rules list",
+        "x-ledgers-mcp": "allocation_rules_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/allocation-rules\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/allocation-rules/{connection_id}": {
+      "post": {
+        "operationId": "allocation_rules_set",
+        "description": "Execute command: allocation_rules.set",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "allocation-rules"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "AllocationSetInput",
+                "description": "The input of `allocation_rules.set`: the rules replace the old set, and the\nunposted drafts of the connection are re-split under them.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  },
+                  "rules": {
+                    "description": "The new rules, in order.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/AllocationRule"
+                    }
+                  },
+                  "default_unit": {
+                    "description": "A new default unit, when given.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "connection_id",
+                  "rules"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "AllocationSetOutput",
+                  "description": "The output of `allocation_rules.set`.",
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "description": "The rules now in force.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AllocationRule"
+                      }
+                    },
+                    "resplit": {
+                      "description": "Drafts re-split under them.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0
+                    },
+                    "kept_frozen": {
+                      "description": "Posted or discarded bills whose split stays as it was.",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "rules",
+                    "resplit",
+                    "kept_frozen"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "allocation_rules.set",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers allocation-rules set",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/allocation-rules/{connection_id}\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/approval-settings": {
       "get": {
         "operationId": "approval_settings_get",
@@ -4298,6 +4504,14 @@
                     "type": "string",
                     "default": ""
                   },
+                  "vendor_id": {
+                    "description": "The party the bill is for, picked by a person. When set it is used as\nis (it must be an unmerged party of the company); otherwise the vendor\nis matched by VAT id, then by name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
                   "vendor_name": {
                     "description": "The vendor's name.",
                     "type": [
@@ -4971,6 +5185,14 @@
                     "type": "string",
                     "default": ""
                   },
+                  "vendor_id": {
+                    "description": "The party the bill is for, picked by a person. When set it is used as\nis (it must be an unmerged party of the company); otherwise the vendor\nis matched by VAT id, then by name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
                   "vendor_name": {
                     "description": "The vendor's name.",
                     "type": [
@@ -5362,6 +5584,798 @@
         "x-ledgers-cli": "ledgers company update",
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/company\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/connections": {
+      "post": {
+        "operationId": "connections_create",
+        "description": "Execute command: connections.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "CreateInput",
+                "description": "The input of `connections.create`. `sealed_credential` is filled by the\nserver from the token it received; a client that sends it is overwritten.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection id (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "connector": {
+                    "description": "The connector id: `cloudflare`, `anthropic` or `planetscale`.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The name the company gives it.",
+                    "type": "string"
+                  },
+                  "config": {
+                    "description": "The non-secret settings for the connector."
+                  },
+                  "default_unit": {
+                    "description": "The unit that receives unmapped resources.",
+                    "type": "string"
+                  },
+                  "sealed_credential": {
+                    "description": "The sealed token (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "created_by": {
+                    "description": "Who created it (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  },
+                  "demo": {
+                    "description": "Demo connections hold no token: they sync from recorded fixtures. Only\nthe demo seeder sets it (server-filled, false for every client).",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "token": {
+                    "description": "The token, as the client sends it. The server seals it and removes this\nfield before the command runs, so it is never in the executor's input.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "connector",
+                  "name",
+                  "config",
+                  "default_unit"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ConnectionView",
+                  "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "connector": {
+                      "description": "The connector id.",
+                      "type": "string"
+                    },
+                    "connector_name": {
+                      "description": "The connector's name.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name the company gave it.",
+                      "type": "string"
+                    },
+                    "config": {
+                      "description": "The non-secret settings."
+                    },
+                    "default_unit": {
+                      "description": "The unit that receives unmapped resources.",
+                      "type": "string"
+                    },
+                    "is_demo": {
+                      "description": "Whether it is demo data (recorded fixtures, no tokens).",
+                      "type": "boolean"
+                    },
+                    "has_credential": {
+                      "description": "Whether a token is held (the token itself is never shown).",
+                      "type": "boolean"
+                    },
+                    "last_sync_at": {
+                      "description": "The last successful sync, RFC 3339.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "connector",
+                    "connector_name",
+                    "name",
+                    "config",
+                    "default_unit",
+                    "is_demo",
+                    "has_credential",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections create",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      },
+      "get": {
+        "operationId": "connections_list",
+        "description": "Execute command: connections.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ListOutput",
+                  "description": "The output of `connections.list`.",
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "description": "The company's connections.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectionView"
+                      }
+                    },
+                    "connectors": {
+                      "description": "The connectors Ledgers ships.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConnectorView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "connections",
+                    "connectors"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers connections list",
+        "x-ledgers-mcp": "connections_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/connections\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/connections/{id}/delete": {
+      "post": {
+        "operationId": "connections_delete",
+        "description": "Execute command: connections.delete",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "DeleteInput",
+                "description": "The input of `connections.delete`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "DeleteOutput",
+                  "description": "The output of `connections.delete`.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "disconnected": {
+                      "description": "Always true when the plan runs.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "disconnected"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.delete",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections delete",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{id}/delete\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/connections/{connection_id}/runs": {
+      "get": {
+        "operationId": "connections_runs",
+        "description": "Execute command: connections.runs",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RunsOutput",
+                  "description": "The output of `connections.runs`.",
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "description": "The runs, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "runs"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.runs",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers connections runs",
+        "x-ledgers-mcp": "connections_runs",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/connections/{connection_id}/runs\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/connections/{connection_id}/sync": {
+      "post": {
+        "operationId": "connections_sync_now",
+        "description": "Execute command: connections.sync_now",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SyncInput",
+                "description": "The input of `connections.sync_now`. The server fills `run_id`, `created_by`\nand exactly one of `fetched` (the vendor's answer) or `fetch_error`.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection to sync.",
+                    "type": "string"
+                  },
+                  "since": {
+                    "description": "The first day of the window, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "The last day of the window, `YYYY-MM-DD`.",
+                    "type": "string"
+                  },
+                  "fetched": {
+                    "description": "What the vendor returned (server-filled).",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/SyncOutput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "fetch_error": {
+                    "description": "Why the vendor could not be read (server-filled).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "created_by": {
+                    "description": "Who ran the sync (server-filled).",
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "connection_id",
+                  "since",
+                  "until"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RunView",
+                  "description": "One sync run, as the history shows it.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The run id.",
+                      "type": "string"
+                    },
+                    "window_since": {
+                      "description": "The window start.",
+                      "type": "string"
+                    },
+                    "window_until": {
+                      "description": "The window end.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "`succeeded` or `failed`.",
+                      "type": "string"
+                    },
+                    "invoices_found": {
+                      "description": "Invoices the vendor returned in the window.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "bills_created": {
+                      "description": "Draft bills this run created.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "usage_rows": {
+                      "description": "Usage rows this run stored.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "error_message": {
+                      "description": "The failure, when it failed.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "notes": {
+                      "description": "The notes the run recorded.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "finished_at": {
+                      "description": "When the run finished.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "window_since",
+                    "window_until",
+                    "status",
+                    "invoices_found",
+                    "bills_created",
+                    "usage_rows",
+                    "notes",
+                    "finished_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.sync_now",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections sync",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{connection_id}/sync\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
+    "/v1/connections/{id}/update": {
+      "post": {
+        "operationId": "connections_update",
+        "description": "Execute command: connections.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UpdateInput",
+                "description": "The input of `connections.update`. Every field is optional; a sealed\ncredential is written only when the server fills it (a token was sent).",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The connection.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "A new name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "config": {
+                    "description": "A new config (replaces the old one)."
+                  },
+                  "default_unit": {
+                    "description": "A new default unit.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "sealed_credential": {
+                    "description": "A new sealed token (server-filled).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "token": {
+                    "description": "A new token, as the client sends it: sealed and removed by the server\nbefore the command runs, the same as on create.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ConnectionView",
+                  "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "The connection id.",
+                      "type": "string"
+                    },
+                    "connector": {
+                      "description": "The connector id.",
+                      "type": "string"
+                    },
+                    "connector_name": {
+                      "description": "The connector's name.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The name the company gave it.",
+                      "type": "string"
+                    },
+                    "config": {
+                      "description": "The non-secret settings."
+                    },
+                    "default_unit": {
+                      "description": "The unit that receives unmapped resources.",
+                      "type": "string"
+                    },
+                    "is_demo": {
+                      "description": "Whether it is demo data (recorded fixtures, no tokens).",
+                      "type": "boolean"
+                    },
+                    "has_credential": {
+                      "description": "Whether a token is held (the token itself is never shown).",
+                      "type": "boolean"
+                    },
+                    "last_sync_at": {
+                      "description": "The last successful sync, RFC 3339.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "description": "When created.",
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "description": "When last changed.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "connector",
+                    "connector_name",
+                    "name",
+                    "config",
+                    "default_unit",
+                    "is_demo",
+                    "has_credential",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections update",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
         "x-ledgers-human-only": true
       }
     },
@@ -7600,6 +8614,540 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/parties/balances": {
+      "get": {
+        "operationId": "parties_balances",
+        "description": "Execute command: parties.balances",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PartyBalancesOutput",
+                  "description": "The output of `parties.balances`.",
+                  "type": "object",
+                  "properties": {
+                    "balances": {
+                      "description": "One row per party and currency with an open payable; parties with\nnothing open are absent.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PartyBalanceView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "balances"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.balances",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties balances",
+        "x-ledgers-mcp": "parties_balances",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties/balances\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/parties/{id}/check-vat": {
+      "post": {
+        "operationId": "parties_check_vat",
+        "description": "Execute command: parties.check_vat",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "CheckVatInput",
+                "description": "The input of `parties.check_vat`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party id (from the path).",
+                    "type": "string"
+                  },
+                  "country_code": {
+                    "description": "The country code (e.g. `DE`, `FR`); must be a VIES member state.",
+                    "type": "string"
+                  },
+                  "vat_number": {
+                    "description": "The VAT number without its country prefix. Together they must be the\nparty's VAT ID.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "country_code",
+                  "vat_number"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CheckVatOutput",
+                  "description": "The output of `parties.check_vat`.",
+                  "type": "object",
+                  "properties": {
+                    "vies_result": {
+                      "description": "The VIES check result.",
+                      "$ref": "#/components/schemas/ViesCheckResult"
+                    }
+                  },
+                  "required": [
+                    "vies_result"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.check_vat",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties check-vat",
+        "x-ledgers-mcp": "parties_check_vat",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/check-vat\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/parties": {
+      "post": {
+        "operationId": "parties_create",
+        "description": "Execute command: parties.create",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "CreateInput",
+                "description": "The input of `parties.create`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party id (generated by server if empty).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "name": {
+                    "description": "The legal name.",
+                    "type": "string"
+                  },
+                  "vat_id": {
+                    "description": "The VAT id (optional), checked against its country's pack.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "roles": {
+                    "description": "Roles: 'customer', 'vendor', or 'both'; defaults to 'vendor'.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tax_number": {
+                    "description": "Tax number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "language": {
+                    "description": "Language code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "currency": {
+                    "description": "Currency code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "personal_data": {
+                    "description": "Whether this party's name/addresses/contacts is personal data (default false).",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "payment_terms_days": {
+                    "description": "Payment terms in days (optional, >= 0).",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int32",
+                    "default": null
+                  },
+                  "default_account": {
+                    "description": "Default account number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "default_tax_code": {
+                    "description": "Default tax code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "addresses": {
+                    "description": "Postal addresses (optional).",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Address"
+                    },
+                    "default": []
+                  },
+                  "contacts": {
+                    "description": "Contacts (optional).",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Contact"
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CreateOutput",
+                  "description": "The output of `parties.create`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The created party.",
+                      "$ref": "#/components/schemas/PartyView"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.create",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties create",
+        "x-ledgers-mcp": "parties_create",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      },
+      "get": {
+        "operationId": "parties_list",
+        "description": "Execute command: parties.list",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ListOutput",
+                  "description": "The output of `parties.list`: one page, and the count of every match.",
+                  "type": "object",
+                  "properties": {
+                    "parties": {
+                      "description": "The parties on this page.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PartyView"
+                      }
+                    },
+                    "total": {
+                      "description": "Total number of unmerged parties that match the filters.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "parties",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.list",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties list",
+        "x-ledgers-mcp": "parties_list",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/parties/{id}": {
+      "get": {
+        "operationId": "parties_get",
+        "description": "Execute command: parties.get",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "GetOutput",
+                  "description": "The output of `parties.get`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The party, with its latest VIES result and possible duplicates.",
+                      "$ref": "#/components/schemas/PartyView"
+                    },
+                    "bank_changes": {
+                      "description": "Bank details changes, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BankChangeView"
+                      }
+                    },
+                    "bill_count": {
+                      "description": "How many bills name this party (a merge repoints them to the survivor).",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "vies_enabled": {
+                      "description": "Whether `parties.check_vat` can call VIES on this server (`LEDGERS_VIES=1`).",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "party",
+                    "bank_changes",
+                    "bill_count",
+                    "vies_enabled"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.get",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties get",
+        "x-ledgers-mcp": "parties_get",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/parties/{id}/merge": {
       "post": {
         "operationId": "parties_merge",
@@ -7809,6 +9357,369 @@
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/set-bank\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
         "x-ledgers-human-only": true
+      }
+    },
+    "/v1/parties/{id}/update": {
+      "post": {
+        "operationId": "parties_update",
+        "description": "Execute command: parties.update",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "UpdateInput",
+                "description": "The input of `parties.update`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party id (from the path).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The legal name (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vat_id": {
+                    "description": "The VAT id (optional), checked against its country's pack. Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "roles": {
+                    "description": "Roles (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tax_number": {
+                    "description": "Tax number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "language": {
+                    "description": "Language code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "currency": {
+                    "description": "Currency code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "personal_data": {
+                    "description": "Whether personal data (optional).",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "payment_terms_days": {
+                    "description": "Payment terms in days (optional).",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int32",
+                    "default": null
+                  },
+                  "default_account": {
+                    "description": "Default account number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "default_tax_code": {
+                    "description": "Default tax code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "addresses": {
+                    "description": "Postal addresses; when given, they replace the list (optional).",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/Address"
+                    },
+                    "default": null
+                  },
+                  "contacts": {
+                    "description": "Contacts; when given, they replace the list (optional).",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/Contact"
+                    },
+                    "default": null
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "UpdateOutput",
+                  "description": "The output of `parties.update`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The updated party.",
+                      "$ref": "#/components/schemas/PartyView"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.update",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties update",
+        "x-ledgers-mcp": "parties_update",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/update\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/parties/validate": {
+      "post": {
+        "operationId": "parties_validate",
+        "description": "Execute command: parties.validate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ValidateInput",
+                "description": "The input of `parties.validate`: the fields a form holds. A field left out\nis not checked; a blank name or VAT ID that is sent is checked.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party being edited, so its own VAT ID is not a conflict (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "name": {
+                    "description": "The legal name.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "vat_id": {
+                    "description": "The VAT ID, checked against its country's pack and the other parties.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "iban": {
+                    "description": "The IBAN.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "bic": {
+                    "description": "The BIC.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "roles": {
+                    "description": "The roles.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "payment_terms_days": {
+                    "description": "The payment terms in days.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int32",
+                    "default": null
+                  },
+                  "addresses": {
+                    "description": "The addresses.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Address"
+                    },
+                    "default": []
+                  },
+                  "contacts": {
+                    "description": "The contacts.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Contact"
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ValidateOutput",
+                  "description": "The output of `parties.validate`.",
+                  "type": "object",
+                  "properties": {
+                    "valid": {
+                      "description": "True when no field is refused.",
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "description": "Every refused field, once each.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FieldError"
+                      }
+                    }
+                  },
+                  "required": [
+                    "valid",
+                    "errors"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.validate",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties validate",
+        "x-ledgers-mcp": "parties_validate",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/validate\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
     "/v1/periods/close": {
@@ -8203,6 +10114,79 @@
         "x-ledgers-cli": "ledgers reports balance-sheet",
         "x-ledgers-mcp": "reports_balance_sheet",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/balance-sheet\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/reports/costs-by-unit": {
+      "get": {
+        "operationId": "reports_costs_by_unit",
+        "description": "Execute command: reports.costs_by_unit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "CostsOutput",
+                  "description": "The output of `reports.costs_by_unit`.",
+                  "type": "object",
+                  "properties": {
+                    "lines": {
+                      "description": "The lines, by month, unit and source.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CostLine"
+                      }
+                    }
+                  },
+                  "required": [
+                    "lines"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "reports.costs_by_unit",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers reports costs-by-unit",
+        "x-ledgers-mcp": "reports_costs_by_unit",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/costs-by-unit\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
     "/v1/groups/{id}/view": {
@@ -10086,6 +12070,119 @@
           "docs"
         ]
       },
+      "ConnectionAllocation": {
+        "description": "One connection's rules, default and queue.",
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The connection name.",
+            "type": "string"
+          },
+          "default_unit": {
+            "description": "The default unit.",
+            "type": "string"
+          },
+          "rules": {
+            "description": "The rules in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllocationRule"
+            }
+          },
+          "unmapped": {
+            "description": "Resources waiting for a mapping.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnmappedResource"
+            }
+          }
+        },
+        "required": [
+          "connection_id",
+          "name",
+          "default_unit",
+          "rules",
+          "unmapped"
+        ]
+      },
+      "AllocationRule": {
+        "description": "One rule: a resource id pattern and the unit it books to.",
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "description": "An exact resource id, or a prefix followed by `*`.",
+            "type": "string"
+          },
+          "unit_code": {
+            "description": "The business unit code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern",
+          "unit_code"
+        ]
+      },
+      "UnmappedResource": {
+        "description": "A resource with usage and no rule: the needs-mapping queue.",
+        "type": "object",
+        "properties": {
+          "resource_kind": {
+            "description": "The resource kind.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "The vendor's resource id.",
+            "type": "string"
+          },
+          "resource_name": {
+            "description": "The name it was given.",
+            "type": "string"
+          },
+          "periods": {
+            "description": "The periods it had usage in.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggested_unit": {
+            "description": "The unit whose name or code it resembles, as a suggestion only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "resource_kind",
+          "resource_id",
+          "resource_name",
+          "periods"
+        ]
+      },
+      "UnitChoice": {
+        "description": "A business unit the mapping can name.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "The unit code.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The unit name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ]
+      },
       "AuditEventView": {
         "description": "One audit event as the Settings read returns it.",
         "type": "object",
@@ -11016,6 +13113,13 @@
               "null"
             ],
             "default": null
+          },
+          "unit_code": {
+            "description": "The business unit this line books to, when it differs from the bill's\nunit (a connected source splits one invoice across units; issue #142).\nAbsent means the bill's unit applies.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -11058,6 +13162,13 @@
             "description": "The amount, minor units of the bill currency.",
             "type": "integer",
             "format": "int64"
+          },
+          "unit": {
+            "description": "The unit an expense line books to, when the line names one (a split\nconnected invoice); `None` means the bill's unit applies.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -11251,6 +13362,320 @@
             "default": ""
           }
         }
+      },
+      "ConnectionView": {
+        "description": "A connection as the books see it. The credential is never in it: only\nwhether one is held.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "connector": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "connector_name": {
+            "description": "The connector's name.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the company gave it.",
+            "type": "string"
+          },
+          "config": {
+            "description": "The non-secret settings."
+          },
+          "default_unit": {
+            "description": "The unit that receives unmapped resources.",
+            "type": "string"
+          },
+          "is_demo": {
+            "description": "Whether it is demo data (recorded fixtures, no tokens).",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "description": "Whether a token is held (the token itself is never shown).",
+            "type": "boolean"
+          },
+          "last_sync_at": {
+            "description": "The last successful sync, RFC 3339.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When created.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When last changed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connector",
+          "connector_name",
+          "name",
+          "config",
+          "default_unit",
+          "is_demo",
+          "has_credential",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "ConnectorView": {
+        "description": "One connector, as the app's gallery shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name shown.",
+            "type": "string"
+          },
+          "credential_fields": {
+            "description": "The credential fields a connection needs.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialField"
+            }
+          },
+          "hosts": {
+            "description": "The hosts it may call.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "config_keys": {
+            "description": "The config keys it reads, besides the common ones.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "credential_fields",
+          "hosts",
+          "config_keys"
+        ]
+      },
+      "CredentialField": {
+        "description": "One credential field a connection needs.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The field name in the API (`token`).",
+            "type": "string"
+          },
+          "label": {
+            "description": "The label the app shows.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ]
+      },
+      "RunView": {
+        "description": "One sync run, as the history shows it.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The run id.",
+            "type": "string"
+          },
+          "window_since": {
+            "description": "The window start.",
+            "type": "string"
+          },
+          "window_until": {
+            "description": "The window end.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`succeeded` or `failed`.",
+            "type": "string"
+          },
+          "invoices_found": {
+            "description": "Invoices the vendor returned in the window.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "bills_created": {
+            "description": "Draft bills this run created.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "usage_rows": {
+            "description": "Usage rows this run stored.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "error_message": {
+            "description": "The failure, when it failed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "description": "The notes the run recorded.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "finished_at": {
+            "description": "When the run finished.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "window_since",
+          "window_until",
+          "status",
+          "invoices_found",
+          "bills_created",
+          "usage_rows",
+          "notes",
+          "finished_at"
+        ]
+      },
+      "SyncOutput": {
+        "description": "What one sync produced.",
+        "type": "object",
+        "properties": {
+          "invoices": {
+            "description": "The invoices found in the sync window.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRecord"
+            }
+          },
+          "usage": {
+            "description": "The usage lines the allocation reads.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageRecord"
+            }
+          },
+          "notes": {
+            "description": "Things the sync could not read, as plain sentences for the run log.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "invoices",
+          "usage",
+          "notes"
+        ]
+      },
+      "InvoiceRecord": {
+        "description": "One vendor invoice (or billing line that stands for one) as a bill.",
+        "type": "object",
+        "properties": {
+          "external_id": {
+            "description": "The vendor's stable id for this invoice. Re-syncing the same id is a no-op.",
+            "type": "string"
+          },
+          "vendor_name": {
+            "description": "The vendor name as the vendor printed it (becomes the party name).",
+            "type": "string"
+          },
+          "invoice_number": {
+            "description": "The invoice number, when the vendor gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issued_on": {
+            "description": "The issue date, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "period": {
+            "description": "The billing period the invoice covers, `YYYY-MM`. Allocation uses it.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency code the amount is in (ISO 4217, upper case).",
+            "type": "string"
+          },
+          "total_minor": {
+            "description": "The gross total in minor units of `currency`.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "description": "A one-line description, sanitised.",
+            "type": "string"
+          },
+          "hosted_url": {
+            "description": "A link the vendor gives for the invoice. Never fetched by Ledgers.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "external_id",
+          "vendor_name",
+          "issued_on",
+          "period",
+          "currency",
+          "total_minor",
+          "description"
+        ]
+      },
+      "UsageRecord": {
+        "description": "Usage of one resource in one billing period (the allocation key).",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The billing period, `YYYY-MM`.",
+            "type": "string"
+          },
+          "resource_kind": {
+            "description": "What kind of resource: `worker`, `d1-database`, `api-key`, `organization`.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "The vendor's id for the resource (the mapping key).",
+            "type": "string"
+          },
+          "resource_name": {
+            "description": "A human name for the resource (suggestions match on it).",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "The weight the resource carries: requests, queries or tokens.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "resource_kind",
+          "resource_id",
+          "resource_name",
+          "quantity"
+        ]
       },
       "Anchor": {
         "description": "A semantic field location within a document.",
@@ -12000,6 +14425,164 @@
           "editable"
         ]
       },
+      "PartyBalanceView": {
+        "description": "One party's open payable in one currency.",
+        "type": "object",
+        "properties": {
+          "party_id": {
+            "description": "The party id.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The ISO 4217 currency of the amount.",
+            "type": "string"
+          },
+          "payable_minor": {
+            "description": "The sum of the open bills' gross amounts, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "open_bills": {
+            "description": "How many bills make up the amount.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "party_id",
+          "currency",
+          "payable_minor",
+          "open_bills"
+        ]
+      },
+      "ViesCheckResult": {
+        "description": "The VIES check result returned to the caller.",
+        "type": "object",
+        "properties": {
+          "valid": {
+            "description": "Whether the VAT number is valid.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The returned business name (if valid).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "description": "The returned address (if valid).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consultation_number": {
+            "description": "The VIES request identifier.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_date": {
+            "description": "The VIES request date.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "valid"
+        ]
+      },
+      "Address": {
+        "description": "A postal address on a party.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "`billing`, `shipping` or `other` (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "line1": {
+            "description": "The first line.",
+            "type": "string"
+          },
+          "line2": {
+            "description": "The second line (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "postal_code": {
+            "description": "The postal code (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "city": {
+            "description": "The city.",
+            "type": "string"
+          },
+          "country": {
+            "description": "ISO 3166-1 alpha-2 country code.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "line1",
+          "city",
+          "country"
+        ]
+      },
+      "Contact": {
+        "description": "A person to contact at a party.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The contact's name.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "phone": {
+            "description": "The phone number (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "role": {
+            "description": "The contact's role at the party (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ]
+      },
       "PartyView": {
         "description": "A party, with its latest VIES result.",
         "type": "object",
@@ -12065,6 +14648,69 @@
             "items": {
               "type": "string"
             }
+          },
+          "needs_review": {
+            "description": "Whether a person still has to confirm this party (created from a bill or a bank line).",
+            "type": "boolean"
+          },
+          "tax_number": {
+            "description": "The tax number (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "description": "The language code (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "The currency code (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payment_terms_days": {
+            "description": "Payment terms in days (optional).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "default_account": {
+            "description": "The default expense or revenue account (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_tax_code": {
+            "description": "The default tax code (optional).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addresses": {
+            "description": "Postal addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            },
+            "default": []
+          },
+          "contacts": {
+            "description": "Contacts.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "default": []
           }
         },
         "required": [
@@ -12072,7 +14718,8 @@
           "name",
           "roles",
           "personal_data",
-          "possible_duplicates"
+          "possible_duplicates",
+          "needs_review"
         ]
       },
       "ViesResult": {
@@ -12100,6 +14747,82 @@
           "checked_at"
         ]
       },
+      "BankChangeView": {
+        "description": "One change of a party's bank details, from the append-only history.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The change id.",
+            "type": "string"
+          },
+          "before_iban": {
+            "description": "The IBAN before the change (none when the party had none).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "before_bic": {
+            "description": "The BIC before the change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "after_iban": {
+            "description": "The IBAN after the change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "after_bic": {
+            "description": "The BIC after the change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changed_by": {
+            "description": "The person who made the change.",
+            "type": "string"
+          },
+          "changed_at": {
+            "description": "When the change was made.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "The reason the person gave.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "changed_by",
+          "changed_at"
+        ]
+      },
+      "FieldError": {
+        "description": "One refused field and why.",
+        "type": "object",
+        "properties": {
+          "field": {
+            "description": "The input field name (`vat_id`, `iban`, ...).",
+            "type": "string"
+          },
+          "message": {
+            "description": "The message, in the server's words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ]
+      },
       "DimensionValueView": {
         "description": "One dimension value's balance.",
         "type": "object",
@@ -12116,6 +14839,45 @@
         "required": [
           "dimension_value",
           "balance"
+        ]
+      },
+      "CostLine": {
+        "description": "One cost line: a unit, a source and a month.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "`YYYY-MM`.",
+            "type": "string"
+          },
+          "unit_code": {
+            "description": "The business unit.",
+            "type": "string"
+          },
+          "connector": {
+            "description": "The connector id.",
+            "type": "string"
+          },
+          "connection_id": {
+            "description": "The connection id.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency.",
+            "type": "string"
+          },
+          "amount_minor": {
+            "description": "The amount in minor units.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "period",
+          "unit_code",
+          "connector",
+          "connection_id",
+          "currency",
+          "amount_minor"
         ]
       },
       "MemberFigures": {

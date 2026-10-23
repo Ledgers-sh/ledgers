@@ -216,6 +216,19 @@ async fn resolve_vendor(
     ctx: &CommandContext,
 ) -> Result<(VendorView, Option<VendorView>, bool), CommandError> {
     let known = store::vendors(db, company_id).await?;
+    if let Some(picked) = input.vendor_id.as_deref() {
+        let vendor = known
+            .iter()
+            .find(|v| v.id == picked)
+            .cloned()
+            .ok_or_else(|| {
+                CommandError::InvalidInput(
+                    "the party is not one of this company's unmerged parties".into(),
+                )
+            })?;
+        let changed = iban_differs(vendor.iban.as_deref(), input.vendor_iban.as_deref());
+        return Ok((vendor, None, changed));
+    }
     let candidates: Vec<MatchCandidate> = known
         .iter()
         .map(|v| MatchCandidate {
@@ -593,12 +606,25 @@ impl Command for BillsUpdate {
         fields.source = Some(existing.source.clone());
         fields.reader = existing.reader.clone();
         fields.created_by = existing.created_by.clone();
+        // A picked party re-points the bill; otherwise the vendor stays.
+        let vendor = match fields.vendor_id.as_deref() {
+            Some(picked) if picked != existing.vendor_id => store::vendors(db, &ctx.company_id)
+                .await?
+                .into_iter()
+                .find(|v| v.id == picked)
+                .ok_or_else(|| {
+                    CommandError::InvalidInput(
+                        "the party is not one of this company's unmerged parties".into(),
+                    )
+                })?,
+            _ => existing.vendor.clone(),
+        };
         let text = document_text(db, &ctx.company_id, &existing.document_id).await?;
         check_duplicates(
             db,
             &ctx.company_id,
             &existing.document_id,
-            Some(&existing.vendor_id),
+            Some(&vendor.id),
             fields.invoice_number.as_deref(),
             Some(&existing.id),
         )
@@ -606,16 +632,13 @@ impl Command for BillsUpdate {
         let chart = load_chart(db, &ctx.company_id).await?;
         check_expense_accounts(&chart, &fields.lines)?;
         let mut lines = fields.lines.clone();
-        suggest_accounts(db, &ctx.company_id, &chart, &existing.vendor_id, &mut lines).await?;
+        suggest_accounts(db, &ctx.company_id, &chart, &vendor.id, &mut lines).await?;
         let (checks, flags) = checks_and_flags(&fields, today(ctx)?, text.as_deref());
-        let iban_changed = iban_differs(
-            existing.vendor.iban.as_deref(),
-            fields.vendor_iban.as_deref(),
-        );
+        let iban_changed = iban_differs(vendor.iban.as_deref(), fields.vendor_iban.as_deref());
         let row = row_of(
             &existing.id,
             &fields,
-            existing.vendor.clone(),
+            vendor.clone(),
             lines,
             checks,
             flags,
@@ -626,7 +649,7 @@ impl Command for BillsUpdate {
         let statement = Statement::with_values(
             "UPDATE bill SET invoice_number = ?, invoice_date = ?, due_date = ?, currency = ?, net_minor = ?, \
              vat_minor = ?, gross_minor = ?, lines_json = ?, checks_json = ?, instruction_flags = ?, \
-             iban_changed = ?, unit_code = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
+             iban_changed = ?, unit_code = ?, vendor_id = ?, updated_at = ? WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
                 .to_owned(),
             vec![
                 Value::from(row.invoice_number.clone()),
@@ -641,6 +664,7 @@ impl Command for BillsUpdate {
                 Value::from(json_text(&row.instruction_flags)?),
                 Value::from(i64::from(row.iban_changed)),
                 Value::from(row.unit.clone()),
+                Value::from(vendor.id.as_str()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
                 Value::from(existing.id.as_str()),
@@ -1042,6 +1066,7 @@ async fn entry_for(
     };
     let lines = entry_lines(&row.lines, vat_minor, gross, &vat, &payable);
     let unit = bill_unit(db, &ctx.company_id, row.unit.as_deref()).await?;
+    check_line_units(db, &ctx.company_id, &row.lines, unit.is_some()).await?;
     let journal_id = match &input.journal_id {
         Some(id) => id.clone(),
         None => ledgers_ledger::journal::find_journal(db, &ctx.company_id, "GN")
@@ -1085,6 +1110,8 @@ async fn entry_for(
                 // Expense lines carry the bill's unit; VAT and the payable are
                 // balance-sheet lines and follow their account's unit rule.
                 let on_unit = line.account != vat && line.account != payable;
+                // A line's own unit (a split connected invoice) wins over the bill's.
+                let line_unit = line.unit.clone().or_else(|| unit.clone());
                 SerializableLine {
                     account_number: line.account,
                     side: line.side,
@@ -1094,8 +1121,8 @@ async fn entry_for(
                     },
                     fx: None,
                     tax_code: None,
-                    dimensions: match (&unit, on_unit) {
-                        (Some(code), true) => BTreeMap::from([("unit".to_owned(), code.clone())]),
+                    dimensions: match (line_unit, on_unit) {
+                        (Some(code), true) => BTreeMap::from([("unit".to_owned(), code)]),
                         _ => BTreeMap::new(),
                     },
                     memo: None,
@@ -1170,6 +1197,53 @@ impl Command for BillsPost {
         out.objects = vec![row.id];
         Ok(out)
     }
+}
+
+/// Checks the unit of each expense line that names one: it must exist and be
+/// active. While the company has units and the bill names no unit, every
+/// expense line must name its own.
+///
+/// # Errors
+/// [`CommandError::InvalidInput`] for an unknown or archived unit, or an
+/// expense line with no unit where the bill has none.
+async fn check_line_units(
+    db: &dyn Database,
+    company_id: &str,
+    lines: &[BillLine],
+    bill_has_unit: bool,
+) -> Result<(), CommandError> {
+    let enabled = units::units_enabled(db, company_id)
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
+    for line in lines {
+        match &line.unit_code {
+            Some(code) => {
+                let unit = units::find_unit(db, company_id, code)
+                    .await
+                    .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+                    .ok_or_else(|| {
+                        CommandError::InvalidInput(format!("business unit {code} does not exist"))
+                    })?;
+                if unit.archived {
+                    return Err(CommandError::InvalidInput(format!(
+                        "business unit {code} is archived"
+                    )));
+                }
+            }
+            None if enabled
+                && !bill_has_unit
+                && line.expense_account.is_some()
+                && line.net_minor.unwrap_or(0) != 0 =>
+            {
+                return Err(CommandError::InvalidInput(
+                    "an expense line has no business unit; the company has units, so name one before it posts"
+                        .into(),
+                ));
+            }
+            None => {}
+        }
+    }
+    Ok(())
 }
 
 /// The business unit a bill posts under. While the company has units, a

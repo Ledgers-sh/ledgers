@@ -121,6 +121,19 @@ pub fn compose(
     // request on Workers as well as natively; persons pass through.
     //
     let document_key = optional.document_key;
+    // Connection credentials are sealed under this key. Unset is allowed (the
+    // connections commands then refuse to hold a token); a short key is a
+    // configuration error, not a silent weak key.
+    let connect_key = match cfg.get(ledgers_connect::secret::KEY_ENV) {
+        Some(secret) => Some(
+            ledgers_connect::secret::ConnectKey::from_secret(&secret).map_err(|err| {
+                let mut errors = cratefield_core::ConfigError::default();
+                errors.push(err.to_string());
+                errors
+            })?,
+        ),
+        None => None,
+    };
     let extraction = optional.selection.status.clone();
     let dispatch: Arc<dyn routes::Dispatch> = Arc::new(
         dispatch::ServerDispatch::new(company_id.clone())
@@ -131,7 +144,8 @@ pub fn compose(
             )
             .with_document_key(document_key.clone())
             .with_model_reader(optional.selection.settings)
-            .with_vies_enabled(cfg.get("LEDGERS_VIES").as_deref() == Some("1")),
+            .with_vies_enabled(cfg.get("LEDGERS_VIES").as_deref() == Some("1"))
+            .with_connect_key(connect_key),
     );
 
     // Generate domain modules
@@ -188,6 +202,9 @@ pub fn compose(
     // Bank accounts, statements and reconciliation: after the documents and the
     // bills whose tables reconciliation reads.
     let builder = builder.module(ledgers_bank::BankModule);
+    // Connected sources (issue #142): connections, sync runs, allocation rules.
+    // After the bills module, whose vendor and bill rows the sync writes.
+    let builder = builder.module(ledgers_connect::ConnectModule);
     // Company groups and intercompany agreements: after the bank, whose
     // migrations the group's period ledger reads alongside.
     let builder = builder.module(ledgers_group::GroupModule);

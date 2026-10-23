@@ -13,6 +13,7 @@ mod accounts;
 mod approvals;
 mod bank;
 mod bills;
+mod connect;
 mod groups;
 pub(crate) mod settings;
 mod settings_rules;
@@ -33,12 +34,13 @@ use ledgers_approvals::{
 };
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
+use ledgers_bank::party_balances::PartiesBalances;
 use ledgers_bills::commands::{
     BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
 };
 use ledgers_bills::parties::{
-    HttpVies, PartiesCheckVat, PartiesCreate, PartiesList, PartiesMerge, PartiesSetBank,
-    PartiesUpdate, ViesPort,
+    HttpVies, PartiesCheckVat, PartiesCreate, PartiesGet, PartiesList, PartiesMerge,
+    PartiesSetBank, PartiesUpdate, PartiesValidate, ViesPort,
 };
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
@@ -178,6 +180,9 @@ pub struct ServerDispatch {
     /// Whether `parties.check_vat` may call VIES (`LEDGERS_VIES=1`). Off by
     /// default: no VAT number leaves the server unless an operator turns it on.
     vies_enabled: bool,
+    /// The key that seals connection credentials (`LEDGERS_CONNECT_KEY`);
+    /// `None` until configured, and then connections cannot hold a token.
+    connect_key: Option<ledgers_connect::secret::ConnectKey>,
 }
 
 impl ServerDispatch {
@@ -194,6 +199,7 @@ impl ServerDispatch {
             document_key: Vec::new(),
             model: None,
             vies_enabled: false,
+            connect_key: None,
         }
     }
 
@@ -215,6 +221,19 @@ impl ServerDispatch {
     pub fn with_model_reader(mut self, settings: Option<ModelSettings>) -> Self {
         self.model = settings;
         self
+    }
+
+    /// The key that seals connection credentials.
+    #[must_use]
+    pub fn with_connect_key(mut self, key: Option<ledgers_connect::secret::ConnectKey>) -> Self {
+        self.connect_key = key;
+        self
+    }
+
+    /// The key that seals connection credentials, when one is configured.
+    #[must_use]
+    pub fn connect_key(&self) -> Option<&ledgers_connect::secret::ConnectKey> {
+        self.connect_key.as_ref()
     }
 
     /// Turns VIES VAT checks on or off (`LEDGERS_VIES=1` turns them on).
@@ -713,6 +732,7 @@ impl Dispatch for ServerDispatch {
             document_key: self.document_key.clone(),
             model: self.model.clone(),
             vies_enabled: self.vies_enabled,
+            connect_key: self.connect_key.clone(),
         })
     }
 
@@ -837,6 +857,72 @@ impl Dispatch for ServerDispatch {
                 self.documents_delete(deps, presented, request_id, input)
                     .await
             }
+            "connections.list" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::ConnectionsList,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "connections.create" => {
+                self.connections_create(deps, presented, request_id, input)
+                    .await
+            }
+            "connections.update" => {
+                self.connections_update(deps, presented, request_id, input)
+                    .await
+            }
+            "connections.delete" => {
+                self.connections_delete(deps, presented, request_id, input)
+                    .await
+            }
+            "connections.sync_now" => {
+                self.connections_sync_now(deps, presented, request_id, input)
+                    .await
+            }
+            "connections.runs" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::ConnectionsRuns,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "allocation_rules.list" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::AllocationRulesList,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "allocation_rules.set" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::AllocationRulesSet,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "reports.costs_by_unit" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::ReportsCostsByUnit,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
             "bills.extract" => self.bills_extract(deps, presented, request_id, input).await,
             "bills.create" => self.bills_create(deps, presented, request_id, input).await,
             "bills.list" => {
@@ -862,6 +948,24 @@ impl Dispatch for ServerDispatch {
             }
             "parties.list" => {
                 self.execute(deps, &PartiesList, presented, request_id, input)
+                    .await
+            }
+            "parties.get" => {
+                self.execute(
+                    deps,
+                    &PartiesGet::new(self.vies_enabled),
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "parties.validate" => {
+                self.execute(deps, &PartiesValidate, presented, request_id, input)
+                    .await
+            }
+            "parties.balances" => {
+                self.execute(deps, &PartiesBalances, presented, request_id, input)
                     .await
             }
             "parties.create" => {
@@ -2050,6 +2154,69 @@ pub fn registry() -> Registry {
     let mut schemas = schemas;
     schemas.extend([
         (
+            "connections.list",
+            (
+                schema_of::<ledgers_connect::commands::ListInput>(),
+                schema_of::<ledgers_connect::commands::ListOutput>(),
+            ),
+        ),
+        (
+            "connections.create",
+            (
+                schema_of::<ledgers_connect::commands::CreateInput>(),
+                schema_of::<ledgers_connect::commands::ConnectionView>(),
+            ),
+        ),
+        (
+            "connections.update",
+            (
+                schema_of::<ledgers_connect::commands::UpdateInput>(),
+                schema_of::<ledgers_connect::commands::ConnectionView>(),
+            ),
+        ),
+        (
+            "connections.delete",
+            (
+                schema_of::<ledgers_connect::commands::DeleteInput>(),
+                schema_of::<ledgers_connect::commands::DeleteOutput>(),
+            ),
+        ),
+        (
+            "connections.sync_now",
+            (
+                schema_of::<ledgers_connect::commands::SyncInput>(),
+                schema_of::<ledgers_connect::commands::RunView>(),
+            ),
+        ),
+        (
+            "connections.runs",
+            (
+                schema_of::<ledgers_connect::commands::RunsInput>(),
+                schema_of::<ledgers_connect::commands::RunsOutput>(),
+            ),
+        ),
+        (
+            "allocation_rules.list",
+            (
+                schema_of::<ledgers_connect::commands::AllocationListInput>(),
+                schema_of::<ledgers_connect::commands::AllocationListOutput>(),
+            ),
+        ),
+        (
+            "allocation_rules.set",
+            (
+                schema_of::<ledgers_connect::commands::AllocationSetInput>(),
+                schema_of::<ledgers_connect::commands::AllocationSetOutput>(),
+            ),
+        ),
+        (
+            "reports.costs_by_unit",
+            (
+                schema_of::<ledgers_connect::commands::CostsInput>(),
+                schema_of::<ledgers_connect::commands::CostsOutput>(),
+            ),
+        ),
+        (
             "documents.list",
             (
                 schema_of::<ledgers_documents::commands::ListInput>(),
@@ -2159,6 +2326,27 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::parties::ListInput>(),
                 schema_of::<ledgers_bills::parties::ListOutput>(),
+            ),
+        ),
+        (
+            "parties.get",
+            (
+                schema_of::<ledgers_bills::parties::GetInput>(),
+                schema_of::<ledgers_bills::parties::GetOutput>(),
+            ),
+        ),
+        (
+            "parties.validate",
+            (
+                schema_of::<ledgers_bills::parties::ValidateInput>(),
+                schema_of::<ledgers_bills::parties::ValidateOutput>(),
+            ),
+        ),
+        (
+            "parties.balances",
+            (
+                schema_of::<ledgers_bank::party_balances::PartyBalancesInput>(),
+                schema_of::<ledgers_bank::party_balances::PartyBalancesOutput>(),
             ),
         ),
         (

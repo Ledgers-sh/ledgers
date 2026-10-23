@@ -29,7 +29,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
-quick-xml = "=0.41.0"
+quick-xml = { workspace = true }
 
 [dev-dependencies]
 pollster = { workspace = true }

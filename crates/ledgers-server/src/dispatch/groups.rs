@@ -141,6 +141,7 @@ impl ServerDispatch {
             document_key: self.document_key.clone(),
             model: self.model.clone(),
             vies_enabled: self.vies_enabled,
+            connect_key: self.connect_key.clone(),
         }
     }
 
