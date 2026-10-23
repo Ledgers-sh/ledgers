@@ -1126,6 +1126,74 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
   .unit-card-figures .unit-figure .num { font-size: 13px; }
 }
 
+/* Customers and vendors (issue #44). Logical properties throughout, so Arabic lays out right to left. */
+.party-filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(2, minmax(150px, 1fr)); gap: 12px 16px; align-items: end; margin-block: 16px; }
+.party-filters .field > label { font-size: 14px; font-weight: 600; color: var(--text-2); }
+.parties-table td.num-col, .parties-table th.num-col { text-align: end; }
+.party-name { color: var(--text); font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
+.party-name:hover { color: var(--agent); text-decoration: underline; }
+.party-role { font-family: var(--sans); color: var(--text-2); }
+.party-vat { font-family: var(--sans); }
+.party-vat.vat-valid { color: var(--good); border-color: var(--good); }
+.party-vat.vat-invalid { color: var(--danger); border-color: var(--danger-line); }
+.party-vat.vat-unchecked, .party-vat.vat-none { color: var(--muted); }
+.party-money { display: block; }
+.party-pager { display: flex; align-items: center; gap: 12px; justify-content: flex-end; flex-wrap: wrap; margin-block: 12px; }
+.party-head-meta { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.party-page-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.party-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-block: 16px; align-items: start; }
+.party-section { padding: 16px 18px; }
+.party-section h2 { font-size: 17px; margin: 0 0 12px; }
+.party-subhead { font-size: 14px; font-weight: 600; color: var(--text-2); margin: 16px 0 8px; }
+.party-facts { display: grid; gap: 10px; margin: 0; }
+.party-value { display: grid; grid-template-columns: minmax(120px, 0.8fr) 1fr; gap: 12px; }
+.party-value dt { color: var(--muted); font-size: 14px; }
+.party-value dd { margin: 0; overflow-wrap: anywhere; }
+.party-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.party-cards > li { border-block-start: 1px solid var(--rule-soft); padding-block-start: 10px; }
+.party-cards address { font-style: normal; margin-block-start: 4px; }
+.party-vat-check { margin-block-start: 12px; display: grid; gap: 8px; justify-items: start; }
+.party-history { padding-inline-start: 18px; margin: 0; display: grid; gap: 10px; }
+.party-history time { color: var(--muted); font-size: 14px; }
+.party-form { display: grid; gap: 16px; max-width: 920px; }
+.party-group { border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 14px 16px 16px; margin: 0; min-width: 0; display: grid; gap: 12px; }
+.party-group > legend { font-weight: 600; padding-inline: 4px; }
+.party-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.party-span { grid-column: 1 / -1; }
+.party-field { min-width: 0; }
+.party-item { display: grid; gap: 10px; border-block-start: 1px dashed var(--rule-soft); padding-block-start: 10px; }
+.party-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.party-item-title { font-weight: 600; color: var(--text-2); }
+.party-check { display: flex; gap: 8px; align-items: center; }
+.field-hint { font-size: 13px; color: var(--muted); }
+.field-error { font-size: 13px; color: var(--danger); }
+.party-field.invalid .input { border-color: var(--danger-line); }
+.required { color: var(--danger); }
+.ltr-text { direction: ltr; text-align: start; }
+.party-bank-warning { border: 1px solid var(--danger-line); background: var(--danger-bg); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 6px; }
+.party-bank-warning p { margin: 0; }
+.party-bank-form { display: grid; gap: 12px; margin-block-start: 12px; }
+.party-merge-preview { border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px 14px; margin-block-start: 12px; display: grid; gap: 8px; }
+.party-merge-preview h3 { font-size: 15px; margin: 0; }
+.party-merge-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 6px; }
+.party-picker { display: grid; gap: 6px; position: relative; min-width: 0; }
+.party-picker-label { font-size: 14px; font-weight: 600; color: var(--text-2); }
+.party-picker-current { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: var(--radius); padding: 8px 10px; }
+.party-picker-name { font-weight: 500; overflow-wrap: anywhere; }
+.party-picker-list { position: absolute; inset-inline: 0; inset-block-start: 100%; z-index: 20; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); max-height: 320px; overflow: auto; }
+.party-picker-option { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.party-picker-option.active, .party-picker-option:hover { background: var(--raised); }
+.party-picker-option.create { color: var(--agent); justify-content: flex-start; }
+.party-picker-vat { font-family: var(--mono); font-size: 13px; }
+.party-picker-empty { padding: 8px 10px; }
+.party-bill-note { font-size: 13px; margin: 0; }
+.bank-party { display: block; margin-block-start: 4px; font-size: 14px; }
+@media (max-width: 640px) {
+  .party-filters { grid-template-columns: 1fr; }
+  .party-value { grid-template-columns: 1fr; gap: 2px; }
+  .party-columns { grid-template-columns: 1fr; }
+  .parties-table th.num-col, .parties-table td.num-col { text-align: start; }
+}
 /* Connected sources (issue #142): Settings → Integrations and the costs panel. */
 .integrations { display: flex; flex-direction: column; gap: 24px; }
 .integrations-section { display: flex; flex-direction: column; gap: 12px; }

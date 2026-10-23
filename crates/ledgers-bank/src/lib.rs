@@ -22,6 +22,7 @@ pub mod model;
 pub mod module;
 pub mod money;
 pub mod parse;
+pub mod party_balances;
 pub mod rules;
 pub mod statement;
 pub mod store;

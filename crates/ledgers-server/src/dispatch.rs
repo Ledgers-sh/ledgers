@@ -34,12 +34,13 @@ use ledgers_approvals::{
 };
 use ledgers_audit::{Actor, AuditContext};
 use ledgers_auth::AgentKeys;
+use ledgers_bank::party_balances::PartiesBalances;
 use ledgers_bills::commands::{
     BillsConfirm, BillsCreate, BillsDiscard, BillsGet, BillsList, BillsPost, BillsUpdate,
 };
 use ledgers_bills::parties::{
-    HttpVies, PartiesCheckVat, PartiesCreate, PartiesList, PartiesMerge, PartiesSetBank,
-    PartiesUpdate, ViesPort,
+    HttpVies, PartiesCheckVat, PartiesCreate, PartiesGet, PartiesList, PartiesMerge,
+    PartiesSetBank, PartiesUpdate, PartiesValidate, ViesPort,
 };
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
@@ -947,6 +948,24 @@ impl Dispatch for ServerDispatch {
             }
             "parties.list" => {
                 self.execute(deps, &PartiesList, presented, request_id, input)
+                    .await
+            }
+            "parties.get" => {
+                self.execute(
+                    deps,
+                    &PartiesGet::new(self.vies_enabled),
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
+            "parties.validate" => {
+                self.execute(deps, &PartiesValidate, presented, request_id, input)
+                    .await
+            }
+            "parties.balances" => {
+                self.execute(deps, &PartiesBalances, presented, request_id, input)
                     .await
             }
             "parties.create" => {
@@ -2307,6 +2326,27 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::parties::ListInput>(),
                 schema_of::<ledgers_bills::parties::ListOutput>(),
+            ),
+        ),
+        (
+            "parties.get",
+            (
+                schema_of::<ledgers_bills::parties::GetInput>(),
+                schema_of::<ledgers_bills::parties::GetOutput>(),
+            ),
+        ),
+        (
+            "parties.validate",
+            (
+                schema_of::<ledgers_bills::parties::ValidateInput>(),
+                schema_of::<ledgers_bills::parties::ValidateOutput>(),
+            ),
+        ),
+        (
+            "parties.balances",
+            (
+                schema_of::<ledgers_bank::party_balances::PartyBalancesInput>(),
+                schema_of::<ledgers_bank::party_balances::PartyBalancesOutput>(),
             ),
         ),
         (

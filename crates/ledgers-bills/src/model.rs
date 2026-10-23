@@ -81,6 +81,11 @@ pub struct BillInput {
     pub id: String,
     /// The document the bill is for (create only).
     pub document_id: String,
+    /// The party the bill is for, picked by a person. When set it is used as
+    /// is (it must be an unmerged party of the company); otherwise the vendor
+    /// is matched by VAT id, then by name.
+    #[serde(default)]
+    pub vendor_id: Option<String>,
     /// The vendor's name.
     pub vendor_name: Option<String>,
     /// The vendor's VAT id.

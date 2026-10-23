@@ -73,49 +73,62 @@ fn integration_class(command: &str) -> Option<Class> {
     })
 }
 
+/// Commands that only read: the Read class (listed apart so `class_of` stays short).
+const READ_COMMANDS: &[&str] = &[
+    "company.get",
+    "company.profile",
+    "bank.accounts.list",
+    "bank.accounts.get",
+    "bank.transactions.list",
+    "bank.rules.list",
+    "reports.units_summary",
+    "tax.user_rates",
+    "units.list",
+    "accounts.get",
+    "accounts.list",
+    "entries.get",
+    "entries.list",
+    "reports.trial_balance",
+    "reports.profit_and_loss",
+    "reports.balance_sheet",
+    "reports.account_balance_by_dimension",
+    "reports.trends",
+    "documents.get",
+    "documents.list",
+    "documents.download_url",
+    "documents.anchors",
+    "bills.get",
+    "bills.list",
+    "fiscal_years.list",
+    "numbering.list",
+    "tax_settings.get",
+    "parties.list",
+    "parties.get",
+    "parties.validate",
+    "parties.balances",
+    "groups.list",
+    "agreements.list",
+    "agreements.get",
+    "reports.intercompany_reconciliation",
+    "reports.group_view",
+    "test.read",
+];
+
 /// The class of a command, by its registry name. `None` for a name nobody
 /// has classified: the matrix refuses it for every role.
 #[must_use]
 pub fn class_of(command: &str) -> Option<Class> {
-    integration_class(command).or_else(|| books_class(command))
+    if let Some(class) = integration_class(command) {
+        return Some(class);
+    }
+    if READ_COMMANDS.contains(&command) {
+        return Some(Class::Read);
+    }
+    books_class(command)
 }
 
 fn books_class(command: &str) -> Option<Class> {
     Some(match command {
-        "company.get"
-        | "company.profile"
-        | "bank.accounts.list"
-        | "bank.accounts.get"
-        | "bank.transactions.list"
-        | "bank.rules.list"
-        | "reports.units_summary"
-        | "tax.user_rates"
-        | "units.list"
-        | "accounts.get"
-        | "accounts.list"
-        | "entries.get"
-        | "entries.list"
-        | "reports.trial_balance"
-        | "reports.profit_and_loss"
-        | "reports.balance_sheet"
-        | "reports.account_balance_by_dimension"
-        | "reports.trends"
-        | "documents.get"
-        | "documents.list"
-        | "documents.download_url"
-        | "documents.anchors"
-        | "bills.get"
-        | "bills.list"
-        | "fiscal_years.list"
-        | "numbering.list"
-        | "tax_settings.get"
-        | "parties.list"
-        | "groups.list"
-        | "agreements.list"
-        | "agreements.get"
-        | "reports.intercompany_reconciliation"
-        | "reports.group_view"
-        | "test.read" => Class::Read,
         "company.update"
         | "units.create"
         | "units.rename"
@@ -322,6 +335,9 @@ mod tests {
         ("fiscal_years.create", Class::Close),
         ("fiscal_years.close", Class::Close),
         ("parties.list", Class::Read),
+        ("parties.get", Class::Read),
+        ("parties.validate", Class::Read),
+        ("parties.balances", Class::Read),
         ("parties.create", Class::Post),
         ("parties.update", Class::Post),
         ("parties.check_vat", Class::Post),

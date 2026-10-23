@@ -668,3 +668,71 @@ fn a_scanned_pdf_no_reader_takes_is_flagged_for_a_photo_and_not_left_as_a_silent
     );
     assert_eq!(read.json()["bill"]["reader"], "unread-scan");
 }
+
+#[test]
+fn a_person_picks_the_party_a_bill_is_for_on_create_and_on_update() {
+    let fx = person_fixture();
+    let (_, upload) = upload_pdf(&fx, &fx.keys.draft, &invoice("RE-2026-0200", "1.190,00"));
+    let doc = doc_id_of(&upload);
+    let created = extract(&fx, &fx.keys.full, &doc);
+    let bill_id = created.body["bill"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_owned();
+
+    let party = fx.send(
+        Method::POST,
+        "/v1/parties",
+        &fx.keys.draft,
+        Some(
+            &json!({"id": "party-picked", "name": "Picked Supplier GmbH", "roles": "vendor"})
+                .to_string(),
+        ),
+    );
+    assert_eq!(
+        party.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(party.body().as_ref())
+    );
+
+    let mut fields = complete_fields("RE-2026-0200");
+    fields["vendor_id"] = json!("party-picked");
+    let updated = fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/update"),
+        &fx.keys.draft,
+        Some(&fields.to_string()),
+    );
+    assert_eq!(
+        updated.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(updated.body().as_ref())
+    );
+    assert_eq!(updated.json()["bill"]["vendor"]["id"], "party-picked");
+    assert_eq!(
+        updated.json()["bill"]["vendor"]["name"],
+        "Picked Supplier GmbH"
+    );
+
+    let mut unknown = complete_fields("RE-2026-0200");
+    unknown["vendor_id"] = json!("party-does-not-exist");
+    let refused = fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/update"),
+        &fx.keys.draft,
+        Some(&unknown.to_string()),
+    );
+    assert_eq!(
+        refused.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        String::from_utf8_lossy(refused.body().as_ref())
+    );
+    assert!(
+        String::from_utf8_lossy(refused.body().as_ref()).contains("unmerged parties"),
+        "{}",
+        String::from_utf8_lossy(refused.body().as_ref())
+    );
+}
