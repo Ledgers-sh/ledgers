@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+  <ID>INV-001
+  </Date>
+</Invoice>

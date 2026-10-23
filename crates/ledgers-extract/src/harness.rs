@@ -10,6 +10,7 @@
 //! Two-tier extraction: Fast tier on first try; if any field confidence is
 //! below the low-confidence threshold, Strong tier on just those fields.
 
+use crate::einvoice;
 use crate::guard::neutralise_markup;
 use crate::llm::SYSTEM_PROMPT;
 use crate::schema::ExtractedInvoice;
@@ -101,6 +102,15 @@ impl<M: TextModel + ?Sized> Extractor for HarnessExtractor<M> {
     }
 
     async fn extract(&self, document: &DocumentInput<'_>) -> Result<Extraction, ExtractError> {
+        // E-invoices: parse deterministically without calling the model.
+        if let Ok(e) = einvoice::parse(document.bytes) {
+            return Ok(Extraction {
+                invoice: e.invoice,
+                source: Source::Rules,
+                reader: Reader::Rules,
+            });
+        }
+
         // Build the user message with text and/or image parts.
         let user_parts = if let Some(text) = document.text_layer {
             // Text layer available: send text only (harness doesn't support document blocks).
@@ -421,6 +431,45 @@ mod tests {
             m.prompts().len(),
             0,
             "Model should not be called for scanned PDF"
+        );
+    }
+
+    #[tokio::test]
+    async fn einvoice_does_not_call_model() {
+        // A minimal UBL Invoice XML.
+        let ubl_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+    <ID>INV-001</ID>
+    <IssueDate>2026-10-22</IssueDate>
+    <DocumentCurrencyCode>EUR</DocumentCurrencyCode>
+</Invoice>"#;
+
+        let doc = DocumentInput {
+            bytes: ubl_xml,
+            mime: "application/xml",
+            text_layer: None,
+        };
+
+        let mut confidence = std::collections::BTreeMap::new();
+        confidence.insert("vendor_name".into(), 95);
+        let reply = ExtractedInvoice {
+            vendor_name: Some("Acme".into()),
+            confidence,
+            ..ExtractedInvoice::default()
+        };
+
+        let m = MockModel::new(reply);
+        let ext = HarnessExtractor::new(std::sync::Arc::new(m.clone()), Reader::Anthropic);
+        let result = ext.extract(&doc).await;
+
+        // Should succeed without calling the model.
+        assert!(result.is_ok(), "E-invoice should parse successfully");
+        let extraction = result.unwrap();
+        assert_eq!(extraction.source, Source::Rules);
+        assert_eq!(
+            m.prompts().len(),
+            0,
+            "Model should not be called for e-invoices"
         );
     }
 }

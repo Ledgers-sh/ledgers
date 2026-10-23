@@ -24,6 +24,7 @@
 //! needs review.
 
 pub mod checks;
+pub mod einvoice;
 pub mod fixture;
 pub mod guard;
 pub mod harness;
