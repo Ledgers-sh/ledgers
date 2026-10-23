@@ -62,6 +62,11 @@ export interface ClientConfig {
   apiKey?: string;
   /** Injected for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
+  /**
+   * The company this one call acts for, when it is not the page's company (a group
+   * screen reads each side's chart). Absent: the page's company.
+   */
+  company?: string;
 }
 
 export interface RequestSpec {
@@ -139,7 +144,8 @@ async function readProblem(response: Response): Promise<Problem> {
 
 /** The init for one request: a key as bearer auth, or the person's cookie, and the company it acts for. */
 export function requestInit(config: ClientConfig, method: string, headers: Record<string, string>): RequestInit {
-  if (activeCompany) headers[COMPANY_HEADER] = activeCompany;
+  const company = config.company ?? activeCompany;
+  if (company) headers[COMPANY_HEADER] = company;
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
     return { method, headers, cache: 'no-store' };

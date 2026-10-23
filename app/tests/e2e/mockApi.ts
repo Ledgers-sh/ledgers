@@ -14,6 +14,7 @@ import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
+import { groupsMock, handleGroups, resetGroups } from './mockGroups';
 
 /** Port of the fake API. LEDGERS_MOCK_PORT moves it when another local server holds 3000. */
 const PORT = Number(process.env.LEDGERS_MOCK_PORT ?? 3000);
@@ -68,6 +69,8 @@ export interface MockOptions {
   companies?: 'none' | 'one' | 'many';
   /** Seed the bank: one account with its statement lines, a rule to enable, and a chart tagged bank. */
   bank?: boolean;
+  /** Seed the group world (groups, intercompany agreements, reports): see mockGroups.ts. */
+  groups?: boolean;
 }
 
 export const PERSON = {
@@ -986,6 +989,7 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
   resetPeople();
   resetUnits(options.units ?? false);
   resetCompanies(options.companies ?? 'none');
+  resetGroups(options.groups === true);
   nextNumber = state.entries.length + 1;
   if (!server) {
     server = http.createServer((req, res) => {
@@ -1043,6 +1047,25 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           res.writeHead(403, { ...headers, 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify(problem(403, 'Forbidden').body));
           return;
+        }
+        // Groups, agreements and their reports, and the per-company settings and chart they read.
+        if (
+          groupsMock.enabled &&
+          (path.startsWith('/v1/groups') || path.startsWith('/v1/agreements') || path === '/v1/company' || path === '/v1/accounts' || path === '/v1/units')
+        ) {
+          const company = String(req.headers['x-ledgers-company'] ?? '') || 'FZIP01';
+          const groupsReply = handleGroups(
+            req.method ?? 'GET',
+            new URL(req.url ?? '/', API_ORIGIN),
+            text,
+            company,
+            req.headers.authorization === `Bearer ${API_KEY}`,
+          );
+          if (groupsReply) {
+            res.writeHead(groupsReply.status, { ...headers, 'Content-Type': groupsReply.problem ? 'application/problem+json' : 'application/json' });
+            res.end(JSON.stringify(groupsReply.body));
+            return;
+          }
         }
         // Companies a person belongs to, and creating one (an agent key is not a person).
         const companiesReply = handleCompanies(req.method ?? 'GET', new URL(req.url ?? '/', API_ORIGIN), text);
