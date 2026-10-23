@@ -97,7 +97,13 @@ fn line(account: &str, side: &str, minor: i64, currency: &str) -> SerializableLi
 
 /// A royalty line: a P&L line, so it carries the side's business unit when
 /// the company has units.
-fn royalty_line(account: &str, side: &str, minor: i64, currency: &str, unit: Option<&str>) -> SerializableLine {
+fn royalty_line(
+    account: &str,
+    side: &str,
+    minor: i64,
+    currency: &str,
+    unit: Option<&str>,
+) -> SerializableLine {
     let mut out = line(account, side, minor, currency);
     if let Some(code) = unit {
         out.dimensions.insert("unit".to_owned(), code.to_owned());

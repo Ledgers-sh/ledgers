@@ -42,8 +42,10 @@ fn the_group_demo_posts_a_year_settles_eleven_months_and_is_idempotent() {
     )))
     .expect("the home owner");
     let book = factory_zero::book(2026);
-    pollster::block_on(ledgers_server::demo::seed_company_book(&fx.deps, FZ_COMPANY, &book))
-        .expect("the operating book loads");
+    pollster::block_on(ledgers_server::demo::seed_company_book(
+        &fx.deps, FZ_COMPANY, &book,
+    ))
+    .expect("the operating book loads");
 
     let first = pollster::block_on(demo_group::seed(
         &fx.deps,
@@ -97,6 +99,9 @@ fn the_group_demo_posts_a_year_settles_eleven_months_and_is_idempotent() {
     assert_eq!(pair.income_difference_minor, 0, "{pair:?}");
     assert_eq!(pair.status, "balanced");
     assert_eq!(pair.open_periods, vec!["2026-12".to_owned()], "{pair:?}");
-    assert!(pair.receivable_minor > 0, "the open month is still owed: {pair:?}");
+    assert!(
+        pair.receivable_minor > 0,
+        "the open month is still owed: {pair:?}"
+    );
     assert_eq!(pair.receivable_minor, pair.payable_minor);
 }

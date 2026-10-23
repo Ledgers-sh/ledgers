@@ -1172,7 +1172,11 @@ fn an_agreement_names_accounts_of_the_right_type_and_only_live_postable_ones() {
             let err = run(db, OPS, &AgreementsCreate, "wrong-type", &wrong_type)
                 .await
                 .expect_err("refused");
-            assert!(err.to_string().contains("must be a expense account") || err.to_string().contains("expense"), "{err}");
+            assert!(
+                err.to_string().contains("must be a expense account")
+                    || err.to_string().contains("expense"),
+                "{err}"
+            );
 
             // An account the chart does not have.
             let mut missing = licence_input("01ICAGREEMENT00000000000G");

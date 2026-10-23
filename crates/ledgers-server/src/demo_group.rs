@@ -58,7 +58,12 @@ pub struct GroupSeedReport {
 }
 
 /// Runs one command as the demo owner and returns its output.
-async fn output_as_owner<C>(deps: &Deps, company_id: &str, command: &C, input: &C::Input) -> Result<C::Output, String>
+async fn output_as_owner<C>(
+    deps: &Deps,
+    company_id: &str,
+    command: &C,
+    input: &C::Input,
+) -> Result<C::Output, String>
 where
     C: ledgers_commands::Command + Sync,
     C::Input: Sync,
@@ -97,11 +102,17 @@ struct DemoSides<'a> {
 #[async_trait]
 impl SideExecutor for DemoSides<'_> {
     async fn post(&self, company_id: &str, input: &PostEntryInput) -> Result<String, String> {
-        let out: PostEntryOutput = output_as_owner(self.deps, company_id, &PostEntry, input).await?;
+        let out: PostEntryOutput =
+            output_as_owner(self.deps, company_id, &PostEntry, input).await?;
         Ok(out.entry.entry_id)
     }
 
-    async fn reverse(&self, company_id: &str, external_id: &str, posting_date: &str) -> Result<(), String> {
+    async fn reverse(
+        &self,
+        company_id: &str,
+        external_id: &str,
+        posting_date: &str,
+    ) -> Result<(), String> {
         let input = crate::dispatch::EntriesReverseInput {
             external_id: external_id.to_owned(),
             posting_date: Some(posting_date.to_owned()),
@@ -239,7 +250,9 @@ pub async fn seed(
             fixed_minor: None,
             currency: "SGD".to_owned(),
             treaty_override_bp: None,
-            notes: Some("Demo licence: 5% of the operating company's revenue (invented)".to_owned()),
+            notes: Some(
+                "Demo licence: 5% of the operating company's revenue (invented)".to_owned(),
+            ),
             licensor: AccountsInput {
                 royalty_account: "4060".to_owned(),
                 ic_account: "1080".to_owned(),
@@ -304,7 +317,10 @@ pub async fn seed(
         let docs = store::docs_for_period(db, LICENCE_ID, period)
             .await
             .map_err(|err| err.to_string())?;
-        if docs.iter().all(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted) {
+        if docs
+            .iter()
+            .all(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
+        {
             orchestrate::settle_period(db, &sides, LICENCE_ID, period, &call, &now)
                 .await
                 .map_err(|err| format!("settle {period}: {err}"))?;
@@ -315,7 +331,10 @@ pub async fn seed(
         let docs = store::docs_for_period(db, LICENCE_ID, last)
             .await
             .map_err(|err| err.to_string())?;
-        if docs.iter().any(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted) {
+        if docs
+            .iter()
+            .any(|doc| doc.view.status == ledgers_group::model::DocStatus::Posted)
+        {
             report.open_period = Some(last.clone());
         }
     }
