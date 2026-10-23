@@ -142,13 +142,6 @@ async fn ensure_accounts(deps: &Deps, company_id: &str) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let template = ledgers_ledger::generic_sme_template().map_err(|err| err.to_string())?;
     let stamp = dispatch::rfc3339_utc(deps.clock.now());
-    let audit = AuditContext::new(
-        Actor::Person {
-            person_id: DEMO_OWNER_ID.to_owned(),
-        },
-        deps.id_gen.ulid(),
-        deps.id_gen.ulid(),
-    );
     for number in GROUP_ACCOUNTS {
         if existing.iter().any(|entry| entry.account.number == number) {
             continue;
@@ -168,6 +161,14 @@ async fn ensure_accounts(deps: &Deps, company_id: &str) -> Result<(), String> {
             tags: chart.tags.clone(),
             display_name: None,
         };
+        // One audit event per account: each change is keyed by its event id.
+        let audit = AuditContext::new(
+            Actor::Person {
+                person_id: DEMO_OWNER_ID.to_owned(),
+            },
+            deps.id_gen.ulid(),
+            deps.id_gen.ulid(),
+        );
         create_account(db, company_id, draft, stamp.clone(), &audit)
             .await
             .map_err(|err| format!("add account {number}: {err}"))?;
