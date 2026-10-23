@@ -12,6 +12,8 @@ import { ErrorBanner, Empty, PageHead, Skeleton } from '../common';
 import { Select, type SelectOption } from '../Select';
 import { useGroupContext, type GroupContext } from './context';
 import { CompanyName, GroupTabs, KindChip, RoleNotice } from './shared';
+import { Avatar } from '../Avatar';
+import { LogoField } from '../LogoField';
 
 const KINDS: GroupKind[] = ['holding', 'ip_holding', 'operating'];
 const KIND_LABEL: Record<GroupKind, MessageKey> = {
@@ -104,7 +106,12 @@ export function GroupPage() {
                 />
               </div>
             ) : (
-              <h2 id="group-name-heading" class="grow">
+              <h2 id="group-name-heading" class="grow group-title">
+                <Avatar
+                  name={group.name}
+                  logo={group.logo_document_id ? { documentId: group.logo_document_id, companyId: group.logo_company_id ?? undefined } : null}
+                  size="md"
+                />
                 {group.name}
               </h2>
             )}
@@ -134,7 +141,7 @@ export function GroupPage() {
                     {group.members.map((member) => (
                       <tr key={member.company_id}>
                         <td>
-                          <CompanyName name={member.company_name} />
+                          <CompanyName name={member.company_name} companyId={member.company_id} />
                         </td>
                         <td>
                           <KindChip kind={member.kind} />
@@ -234,6 +241,8 @@ function GroupEditor({
   const update = (key: number, patch: Partial<MemberRow>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
+  const [logo, setLogo] = useState<string | null>(group?.logo_document_id ?? null);
+  const [logoChanged, setLogoChanged] = useState(false);
   const save = async () => {
     setProblem(null);
     const ids = rows.map((row) => row.companyId).filter((id) => id !== '');
@@ -255,7 +264,11 @@ function GroupEditor({
     setBusy(true);
     try {
       const saved = group
-        ? await groupsUpdate(ctx.client, group.id, { name: name.trim(), members })
+        ? await groupsUpdate(ctx.client, group.id, {
+            name: name.trim(),
+            members,
+            ...(logoChanged ? (logo ? { logo_document_id: logo } : { clear_logo: true }) : {}),
+          })
         : await groupsCreate(ctx.client, { name: name.trim(), members });
       onSaved(saved);
     } catch (caught) {
@@ -275,6 +288,17 @@ function GroupEditor({
       }}
     >
       <h2 id="group-editor-title">{group ? t('groups.edit_title') : t('groups.new_title')}</h2>
+      {group && (
+        <LogoField
+          labelId="group-logo-label"
+          name={name || group.name}
+          logo={logo ? { documentId: logo, companyId: group.logo_company_id ?? undefined } : null}
+          onChange={(next) => {
+            setLogo(next);
+            setLogoChanged(true);
+          }}
+        />
+      )}
       <div class="field">
         <span id="group-name-label">{t('groups.name')}</span>
         <input

@@ -62,11 +62,28 @@ test('the overview compares the units side by side and a card switches the scope
   const section = page.locator('.units-summary');
   await expect(section.getByRole('heading', { name: 'By business unit' })).toBeVisible();
   await expect(section.locator('.unit-card')).toHaveCount(3);
+  // Each unit's share of company revenue is at most 100%, and the shares add up to 100%.
+  const shares = (await section.locator('.unit-share-label .num').allTextContents()).map((text) => parseFloat(text));
+  expect(shares).toHaveLength(3);
+  for (const share of shares) expect(share).toBeLessThanOrEqual(100);
+  expect(shares.reduce((sum, share) => sum + share, 0)).toBeGreaterThan(99.5);
+  expect(shares.reduce((sum, share) => sum + share, 0)).toBeLessThan(100.5);
   await expect(section).toContainText('Recharges between units are removed from company totals');
   await expect(section.locator('.unit-card').first()).toContainText('FZ');
   await section.locator('.unit-card', { hasText: 'LDG' }).click();
   await expect(page).toHaveURL(/#\/overview\?unit=LDG$/);
   await expect(page.locator('.units-summary')).toHaveCount(0);
+});
+
+test('a unit card shows the unit logo in place of the code badge, and a unit without one keeps the badge', async ({ page }) => {
+  await mockApi({ units: true, person: true });
+  unitState.units[1] = { ...unitState.units[1], logo_document_id: 'DOCLDG' } as (typeof unitState.units)[number];
+  await openUnits(page);
+  const withLogo = page.locator('.unit-card', { hasText: 'Ledgers' });
+  await expect(withLogo.locator('.unit-card-code')).toHaveCount(0);
+  await expect(withLogo.locator('.avatar')).toHaveCount(1);
+  const without = page.locator('.unit-card', { hasText: 'Factory Zero' });
+  await expect(without.locator('.unit-card-code')).toHaveText('FZ');
 });
 
 test('the units screen adds, renames and archives a unit, and the switcher follows', async ({ page }) => {

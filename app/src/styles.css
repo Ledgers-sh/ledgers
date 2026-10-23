@@ -385,6 +385,33 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
   border: 1px solid var(--rule);
   color: var(--agent);
   font: 600 13px var(--mono);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+/* Logos and initials share one avatar: a logo fills the circle with its own background. */
+.avatar-xs { width: 20px; height: 20px; font-size: 10px; }
+.avatar-sm { width: 24px; height: 24px; font-size: 11px; }
+.avatar-md { width: 28px; height: 28px; }
+.avatar-lg { width: 44px; height: 44px; font-size: 16px; border-radius: 10px; }
+img.avatar { display: inline-block; object-fit: contain; background: var(--surface, transparent); border-color: transparent; border-radius: 6px; }
+img.avatar.avatar-xs, img.avatar.avatar-sm { border-radius: 4px; }
+.group-card-head { align-items: center; }
+.group-card-head .avatar { margin-right: 12px; }
+.group-card-members { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.group-card-members li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.directory-list { display: grid; gap: 16px; }
+.group-title { display: flex; align-items: center; gap: 10px; }
+.member-units-heading { font-size: 13px; margin: 16px 0 8px; color: var(--text-2); }
+.unit-figures { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.unit-figure { display: grid; gap: 6px; min-width: 0; }
+.unit-figure-name { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.unit-figure-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; font-size: 13px; }
+.unit-figure-values dt { color: var(--text-2); font-size: 12px; }
+.unit-figure-values dd { margin: 0; }
+.logo-field-block { display: grid; gap: 6px; }
+.logo-hint { font-size: 12px; }
+@media (max-width: 600px) {
+  .unit-figure-values { grid-template-columns: minmax(0, 1fr); }
 }
 .connect-title { font: 600 20px var(--sans); margin: 0; color: var(--text); }
 .explainer summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
@@ -1057,6 +1084,8 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
 .company-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .company-switch-label { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .company-switch .sel { min-width: 200px; max-width: 260px; }
+/* The trigger's avatar and name share the width: the name truncates rather than running under the next control. */
+.company-switch .sel-value { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .company-switch .sel.compact .sel-popup { width: 300px; }
 .sel-option .role-badge { margin-inline-start: 8px; }
 .create-company-dialog .create-company-form { display: flex; flex-direction: column; gap: 14px; }
@@ -1083,6 +1112,7 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
 .unit-card:hover { border-color: var(--rule); text-decoration: none; }
 .unit-card-head { display: flex; align-items: center; min-width: 0; }
 .unit-card-code { font-weight: 600; margin-inline-end: 8px; }
+.unit-card-head .avatar { margin-inline-end: 8px; }
 .unit-card-name { color: var(--muted); overflow-wrap: anywhere; }
 .unit-card-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .unit-figure { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

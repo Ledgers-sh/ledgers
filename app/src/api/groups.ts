@@ -30,6 +30,9 @@ export interface MemberView {
 export interface GroupView {
   id: string;
   name: string;
+  /** The group's logo document, and the company whose documents hold it. */
+  logo_document_id?: string | null;
+  logo_company_id?: string | null;
   members: MemberView[];
   has_hidden_members: boolean;
   created_by: string;
@@ -196,6 +199,21 @@ export function groupsList(client: ClientConfig): Promise<GroupView[]> {
   return request<{ groups: GroupView[] }>(client, { method: 'GET', path: '/v1/groups' }).then((body) => body.groups);
 }
 
+/**
+ * Every group the person may see across the given companies: each group once.
+ * The server answers each company's list with the groups that company belongs
+ * to, filtered to the companies the person may see, so this adds no access.
+ * A company whose list fails contributes nothing.
+ */
+export async function groupsAcrossCompanies(client: ClientConfig, companyIds: readonly string[]): Promise<GroupView[]> {
+  const lists = await Promise.all(
+    companyIds.map((company) => groupsList({ ...client, company }).catch((): GroupView[] => [])),
+  );
+  const byId = new Map<string, GroupView>();
+  for (const list of lists) for (const group of list) if (!byId.has(group.id)) byId.set(group.id, group);
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
 export function groupsCreate(client: ClientConfig, input: { name: string; members: MemberInput[] }): Promise<GroupView> {
   return request<GroupView>(client, { method: 'POST', path: '/v1/groups', body: input });
 }
@@ -203,7 +221,7 @@ export function groupsCreate(client: ClientConfig, input: { name: string; member
 export function groupsUpdate(
   client: ClientConfig,
   id: string,
-  input: { name?: string; members?: MemberInput[] },
+  input: { name?: string; members?: MemberInput[]; logo_document_id?: string; clear_logo?: boolean },
 ): Promise<GroupView> {
   return request<GroupView>(client, { method: 'POST', path: `/v1/groups/${encodeURIComponent(id)}/update`, body: input });
 }

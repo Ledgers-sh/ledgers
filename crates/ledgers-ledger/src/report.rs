@@ -1189,6 +1189,11 @@ pub struct UnitSummaryRow {
     /// The cumulative balance of the unit's cash and bank accounts through
     /// the period (debit positive). Zero when the unit has none.
     pub cash: Amount,
+    /// Income from outside the group: the unit's income in entries with no
+    /// intercompany line (recharges excluded), as the consolidated view counts
+    /// it. The units' external revenues add up to the consolidated revenue,
+    /// so a unit's share of the company's revenue divides this by it.
+    pub external_revenue: Amount,
 }
 
 /// The side-by-side view of every business unit for one period, with the
@@ -1236,12 +1241,16 @@ pub async fn units_summary(
     let consolidated_pnl =
         profit_and_loss_scoped(db, company_id, period, &UnitScope::Consolidated).await?;
 
-    let row = |unit: Option<String>, revenue: i128, expenses: i128, cash: i128| UnitSummaryRow {
-        unit,
-        revenue: Amount::new(revenue, currency),
-        expenses: Amount::new(expenses, currency),
-        result: Amount::new(revenue - expenses, currency),
-        cash: Amount::new(cash, currency),
+    let external_by_unit = unit_external_revenue(db, company_id, period).await?;
+    let row = |unit: Option<String>, revenue: i128, expenses: i128, cash: i128, external: i128| {
+        UnitSummaryRow {
+            unit,
+            revenue: Amount::new(revenue, currency),
+            expenses: Amount::new(expenses, currency),
+            result: Amount::new(revenue - expenses, currency),
+            cash: Amount::new(cash, currency),
+            external_revenue: Amount::new(external, currency),
+        }
     };
     let mut rows = Vec::new();
     for unit in &units {
@@ -1250,13 +1259,21 @@ pub async fn units_summary(
         if unit.archived && revenue == 0 && expenses == 0 && cash == 0 {
             continue;
         }
-        rows.push(row(Some(unit.code.clone()), revenue, expenses, cash));
+        let external = external_by_unit.get(&unit.code).copied().unwrap_or(0);
+        rows.push(row(
+            Some(unit.code.clone()),
+            revenue,
+            expenses,
+            cash,
+            external,
+        ));
     }
     let consolidated = row(
         None,
         consolidated_pnl.revenue.minor(),
         consolidated_pnl.expenses.minor(),
         consolidated_cash,
+        consolidated_pnl.revenue.minor(),
     );
     let sum = |field: fn(&UnitSummaryRow) -> i128| -> i128 { rows.iter().map(field).sum() };
     let eliminations = row(
@@ -1264,6 +1281,7 @@ pub async fn units_summary(
         consolidated.revenue.minor() - sum(|r| r.revenue.minor()),
         consolidated.expenses.minor() - sum(|r| r.expenses.minor()),
         consolidated.cash.minor() - sum(|r| r.cash.minor()),
+        consolidated.external_revenue.minor() - sum(|r| r.external_revenue.minor()),
     );
     Ok(UnitsSummary {
         period: period.to_owned(),
@@ -1271,6 +1289,42 @@ pub async fn units_summary(
         consolidated,
         eliminations,
     })
+}
+
+/// External income per unit (positive minor units): each unit's income in the
+/// entries the consolidated view keeps, so an entry with an intercompany line
+/// (a recharge) is left out, exactly as [`UnitScope::Consolidated`] leaves it out.
+async fn unit_external_revenue(
+    db: &dyn Database,
+    company_id: &str,
+    period: &str,
+) -> Result<BTreeMap<String, i128>, JournalError> {
+    let (intercompany_filter, _) = UnitScope::Consolidated.line_filter();
+    let sql = format!(
+        r"SELECT jld.value AS unit, CAST(COALESCE(SUM(jl.base_minor), 0) AS BIGINT) AS total
+              FROM journal_line jl
+              JOIN journal_entry je ON jl.entry_id = je.id
+              JOIN account a ON jl.account_number = a.number AND je.company_id = a.company_id
+              JOIN journal_line_dimension jld
+                ON jld.company_id = je.company_id AND jld.entry_id = jl.entry_id
+               AND jld.line_no = jl.line_no AND jld.kind = 'unit'
+              WHERE je.company_id = ? AND je.vat_period = ? AND a.account_type = 'income'{intercompany_filter}
+              GROUP BY jld.value"
+    );
+    let rows = db
+        .query(&Statement::with_values(
+            sql,
+            vec![SeaValue::from(company_id), SeaValue::from(period)],
+        ))
+        .await?;
+    let mut external = BTreeMap::new();
+    for row in &rows.rows {
+        let unit: String = row.get("unit").ok_or_else(|| required_column("unit"))?;
+        let total: i64 = row.get("total").ok_or_else(|| required_column("total"))?;
+        // Income is credit-normal: negate to get the positive revenue.
+        external.insert(unit, -i128::from(total));
+    }
+    Ok(external)
 }
 
 /// Income and expense per unit (`(income, expense)` in minor units) and the

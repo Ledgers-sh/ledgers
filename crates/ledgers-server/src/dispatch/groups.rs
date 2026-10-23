@@ -362,6 +362,9 @@ impl ServerDispatch {
             .person_id(deps, presented.clone(), request_id, None)
             .await?;
         let parsed: GroupsUpdateInput = parse(&input, request_id)?;
+        if let Some(doc) = parsed.logo_document_id.as_deref() {
+            self.check_logo_document(deps, doc, request_id).await?;
+        }
         let mut companies: BTreeSet<String> = gstore::members_of(deps.db.as_ref(), &parsed.id)
             .await
             .map_err(|err| database(err, request_id))?
@@ -384,6 +387,27 @@ impl ServerDispatch {
             input,
         )
         .await
+    }
+
+    /// Checks that `doc` is a PNG or JPEG this company stores, within the logo
+    /// size limit. The command's own guard then proves it again in the batch.
+    async fn check_logo_document(
+        &self,
+        deps: &Deps,
+        doc: &str,
+        request_id: &str,
+    ) -> Result<(), Problem> {
+        let stored = ledgers_documents::store::get(deps.db.as_ref(), &self.company_id, doc)
+            .await
+            .map_err(|err| database(err, request_id))?;
+        let Some(stored) = stored else {
+            return Err(invalid(
+                "the logo must be a document this company has stored",
+                request_id,
+            ));
+        };
+        ledgers_documents::logo::check_logo(&stored.mime, stored.size_bytes)
+            .map_err(|err| invalid(err.to_string(), request_id))
     }
 
     /// `agreements.create`: the request's company is a party, and the person

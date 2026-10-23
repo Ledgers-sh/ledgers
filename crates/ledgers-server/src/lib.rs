@@ -7,6 +7,7 @@ pub mod config;
 pub mod demo;
 pub mod demo_bank;
 pub mod demo_group;
+pub mod demo_logos;
 pub mod dispatch;
 pub mod documents;
 pub mod mcp;

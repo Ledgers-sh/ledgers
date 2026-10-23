@@ -8,6 +8,7 @@ import type { Unit } from '../api/types';
 import { t } from '../i18n';
 import { colourOf } from '../lib/units';
 import { Select, type SelectOption } from './Select';
+import { Avatar } from './Avatar';
 
 export function UnitSwitcher({
   units,
@@ -21,7 +22,20 @@ export function UnitSwitcher({
   if (units.length === 0) return null;
   const options: SelectOption[] = [
     { value: 'all', label: t('units.all'), trigger: t('units.all_short') },
-    ...units.map((unit) => ({ value: unit.code, label: unit.code, hint: unit.name, swatch: colourOf(unit) })),
+    ...units.map((unit) => ({
+      value: unit.code,
+      label: unit.code,
+      hint: unit.name,
+      swatch: colourOf(unit),
+      leading: (
+        <Avatar
+          name={unit.name}
+          colour={colourOf(unit)}
+          logo={unit.logo_document_id ? { documentId: unit.logo_document_id } : null}
+          size="xs"
+        />
+      ),
+    })),
   ];
   return (
     <div class="unit-switch">

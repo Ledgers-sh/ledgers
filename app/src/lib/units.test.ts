@@ -88,3 +88,23 @@ describe('units in the app', () => {
     expect(shareBps(5n, 0n)).toBe(0);
   });
 });
+
+describe('shareBps of company revenue', () => {
+  it('shares of parts that add up to the total never add up to more than 100%', () => {
+    const parts = [1200n, 3100n, 900n];
+    const total = parts.reduce((sum, part) => sum + part, 0n);
+    const shares = parts.map((part) => shareBps(part, total));
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeLessThanOrEqual(10_000);
+    expect(Math.max(...shares)).toBeLessThanOrEqual(10_000);
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeGreaterThanOrEqual(9_997);
+  });
+
+  it('a unit whose recharges are counted in revenue would exceed the total: the external figure does not', () => {
+    // The bug: Factory Zero's 5,200 (4,000 of it recharges) over the company's 5,200 is 100%+ of the rest.
+    expect(shareBps(5200n, 5200n) + shareBps(3100n, 5200n) + shareBps(900n, 5200n)).toBeGreaterThan(10_000);
+    // Truncated to basis points, the external shares add up to within 3 basis points of 100%.
+    const external = shareBps(1200n, 5200n) + shareBps(3100n, 5200n) + shareBps(900n, 5200n);
+    expect(external).toBeLessThanOrEqual(10_000);
+    expect(external).toBeGreaterThanOrEqual(9_997);
+  });
+});

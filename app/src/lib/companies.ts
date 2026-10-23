@@ -38,8 +38,8 @@ export function searchWithCompany(search: string, id: string | null): string {
  * company in the query, and the overview route with no unit scope. The unit
  * and period are the defaults again, so nothing of the old company is carried.
  */
-export function companyHref(pathname: string, id: string): string {
-  return `${pathname}${searchWithCompany('', id)}#/overview`;
+export function companyHref(pathname: string, id: string, hash = '#/overview'): string {
+  return `${pathname}${searchWithCompany('', id)}${hash}`;
 }
 
 /** The roles a company membership can carry, as the server names them. */

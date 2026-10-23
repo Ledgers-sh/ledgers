@@ -10,6 +10,7 @@ import { formatPeriod, intlLocale, t } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { formatMinor } from '../lib/money';
 import { colourOf, hashWithUnit, shareBps } from '../lib/units';
+import { Avatar } from './Avatar';
 import { ErrorBanner, Skeleton } from './common';
 
 function Figure({ label, amount }: { label: string; amount: Amount }) {
@@ -74,7 +75,9 @@ export function UnitsComparison({
           {rows.map((row) => {
             const unit = byCode.get(row.unit as string) as Unit;
             const colour = colourOf(unit);
-            const share = shareBps(BigInt(row.revenue.minor), total);
+            // A unit's share of company revenue: its external revenue (recharges excluded) over the company's.
+            // Recharge income is in the unit's own books but not in company revenue, so it is not counted here.
+            const share = shareBps(BigInt(row.external_revenue.minor), total);
             const shareText = new Intl.NumberFormat(intlLocale(), { style: 'percent', maximumFractionDigits: 1 }).format(share / 10_000);
             const label = t('units.card_label', {
               name: unit.name,
@@ -86,8 +89,14 @@ export function UnitsComparison({
               <li key={unit.code}>
                 <a class="unit-card" href={`#/${hashWithUnit('overview', unit.code)}`} aria-label={`${unit.code}: ${unit.name}. ${label}`}>
                   <span class="unit-card-head">
-                    <span class="unit-dot" style={{ background: colour }} aria-hidden="true" />
-                    <span class="mono unit-card-code">{unit.code}</span>
+                    {unit.logo_document_id ? (
+                      <Avatar name={unit.name} colour={colour} logo={{ documentId: unit.logo_document_id }} size="md" />
+                    ) : (
+                      <>
+                        <span class="unit-dot" style={{ background: colour }} aria-hidden="true" />
+                        <span class="mono unit-card-code">{unit.code}</span>
+                      </>
+                    )}
                     <span class="unit-card-name">{unit.name}</span>
                   </span>
                   <span class="unit-card-figures">

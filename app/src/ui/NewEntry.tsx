@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'preact/hooks';
+import { unitSelectOption } from './UnitOption';
 import { entriesPost, accountsList } from '../api/commands';
 import { ApiError } from '../api/client';
 import { checkBalance } from '../lib/balance';
@@ -7,7 +8,7 @@ import { formatMinor, parseMajorToMinor } from '../lib/money';
 import { todayIso, yearOf } from '../lib/period';
 import { useAsync } from '../hooks';
 import { loadCurrency, saveCurrency, useSession } from '../session';
-import { accountNeedsUnit, colourOf } from '../lib/units';
+import { accountNeedsUnit } from '../lib/units';
 import { Empty, ErrorBanner, PageHead, Skeleton } from './common';
 import { accountName, intlLocale, t, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
@@ -252,7 +253,7 @@ export function NewEntry() {
                         value={line.unit}
                         placeholder={t('units.choose_unit')}
                         invalid={unitErrors[index] !== null}
-                        options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                        options={units.map((item) => (unitSelectOption(item)))}
                         searchable={false}
                         onChange={(value) => update(index, { unit: value })}
                       />

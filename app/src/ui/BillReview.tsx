@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { unitSelectOption } from './UnitOption';
 import {
   absoluteUrl,
   billConfirm,
@@ -18,7 +19,6 @@ import {
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { parseMajorToMinor, toPlainMajor } from '../lib/money';
-import { colourOf } from '../lib/units';
 import { accountNameFromCatalogue } from '../i18n/chart';
 import { ConfirmDialog, ErrorBanner, Money, PageHead, Skeleton, useToasts, Toasts } from './common';
 import { Select } from './Select';
@@ -342,7 +342,7 @@ export function BillReview({ billId }: { billId: string }) {
                     placeholder={t('units.choose_unit')}
                     invalid={formError === 'units.err_bill' && draft.unit === ''}
                     describedBy={formError === 'units.err_bill' && draft.unit === '' ? 'bill-unit-error' : 'bill-unit-hint'}
-                    options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                    options={units.map((item) => (unitSelectOption(item)))}
                     searchable={false}
                     onChange={(value) => update({ unit: value })}
                   />

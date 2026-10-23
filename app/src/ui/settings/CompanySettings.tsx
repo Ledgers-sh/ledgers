@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { LogoField } from '../LogoField';
 import { companyGet, companyUpdate, type CompanyProfile, type CompanyView } from '../../api/settings';
 import { CreateCompanyDialog } from '../CreateCompany';
 import { useAsync } from '../../hooks';
@@ -129,6 +130,12 @@ export function CompanySettings() {
       <SettingsPanel id="company-profile-title" title={t('settings.company_profile')}>
         <form class="settings-form" onSubmit={submit} noValidate aria-labelledby="company-profile-title">
           <FormProblem error={error} />
+          <LogoField
+            labelId="company-logo-label"
+            name={form.name || view.name}
+            logo={form.logo_document_id ? { documentId: form.logo_document_id } : null}
+            onChange={(id) => setForm({ ...form, logo_document_id: id ?? '' })}
+          />
           <div class="field-row">
             {field('name', 'settings.company_name', { required: true, maxLength: 120, autoComplete: 'organization' })}
             {field('legal_form', 'settings.legal_form', { maxLength: 80, hint: 'settings.legal_form_hint' })}

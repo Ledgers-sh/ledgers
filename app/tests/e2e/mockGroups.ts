@@ -9,7 +9,36 @@
  * rules (both sides post or neither, a failed side fails both, retry starts
  * again).
  */
+import { readFileSync } from 'node:fs';
 import { companyState, type MockCompany } from './mockCompanies';
+
+/**
+ * The logos of the fake companies, groups and units: document id to the PNG the
+ * fake serves (the Factory Zero marks in fixtures/demo/logos). A logo has no
+ * document in the bills fake, so these are served here.
+ */
+const LOGO_FILES: Record<string, string> = {
+  DOCFZIP: 'fz-favicon.png',
+  DOCFZ: 'fz-favicon.png',
+  DOCLDG: 'ledgers.png',
+};
+
+/** The served bytes of a logo document, for GET /v1/documents/{id}/file. */
+export function logoFile(path: string): { mime: string; bytes: Buffer } | null {
+  const match = /^\/v1\/documents\/([^/]+)\/file/.exec(path);
+  const name = match ? LOGO_FILES[decodeURIComponent(match[1] ?? '')] : undefined;
+  if (!name) return null;
+  return { mime: 'image/png', bytes: readFileSync(new URL(`../../../fixtures/demo/logos/${name}`, import.meta.url)) };
+}
+
+/** The business units of each group company, with their logos. */
+const GROUP_UNITS: Record<string, { code: string; name: string; colour: string; logo_document_id: string | null }[]> = {
+  FZIP01: [{ code: 'FZ', name: 'Factory Zero', colour: '#3D5A80', logo_document_id: 'DOCFZ' }],
+  PTOP01: [
+    { code: 'LDG', name: 'Ledgers', colour: '#7FA6C9', logo_document_id: 'DOCLDG' },
+    { code: 'SQZ', name: 'Sqeezin', colour: '#E9B44C', logo_document_id: null },
+  ],
+};
 
 type Reply = { status: number; body: unknown; problem?: boolean };
 
@@ -23,6 +52,8 @@ interface GroupRecord {
   id: string;
   name: string;
   members: Member[];
+  logo_document_id?: string | null;
+  logo_company_id?: string | null;
 }
 
 interface Docs {
@@ -76,12 +107,15 @@ export const groupsMock: {
   agreements: AgreementRecord[];
   /** The next post of this period fails on the licensee side (the test sets it). */
   failNextPost: string | null;
+  /** Business units with logos for the group companies (off by default: the agreement form asks for a unit when a company has any). */
+  unitsEnabled: boolean;
   /** Added to the licensee's payable in the reconciliation, to show a difference. */
   reconDifference: number;
   writes: string[];
   counter: number;
 } = {
   enabled: false,
+  unitsEnabled: false,
   groups: [],
   agreements: [],
   failNextPost: null,
@@ -104,6 +138,7 @@ const CHART: { number: string; name: string; type: string; postable: boolean; ta
 export function resetGroups(enabled: boolean): void {
   groupsMock.enabled = enabled;
   groupsMock.failNextPost = null;
+  groupsMock.unitsEnabled = false;
   groupsMock.reconDifference = 0;
   groupsMock.writes = [];
   groupsMock.counter = 0;
@@ -196,6 +231,8 @@ function groupView(group: GroupRecord) {
   return {
     id: group.id,
     name: group.name,
+    logo_document_id: group.logo_document_id ?? null,
+    logo_company_id: group.logo_company_id ?? null,
     members: visible.map((member) => ({
       company_id: member.company_id,
       company_name: GROUP_COMPANIES[member.company_id]?.name ?? member.company_id,
@@ -331,14 +368,39 @@ export function handleGroups(method: string, url: URL, bodyText: string, company
       })),
     });
   }
-  if (path === '/v1/units' && method === 'GET') return reply(200, { units: [] });
+  if (path === '/v1/units' && method === 'GET') {
+    const units = groupsMock.unitsEnabled ? (GROUP_UNITS[company] ?? []).map((unit) => ({ ...unit, archived: false })) : [];
+    return reply(200, { units });
+  }
+  if (path === '/v1/reports/units-summary' && method === 'GET') {
+    const row = (unit: string | null, minor: number) => ({
+      unit,
+      revenue: { minor: String(minor), currency: 'EUR' },
+      expenses: { minor: String(Math.round(minor / 2)), currency: 'EUR' },
+      result: { minor: String(minor - Math.round(minor / 2)), currency: 'EUR' },
+      cash: { minor: '0', currency: 'EUR' },
+      external_revenue: { minor: String(minor), currency: 'EUR' },
+    });
+    const units = groupsMock.unitsEnabled ? (GROUP_UNITS[company] ?? []).map((unit, index) => row(unit.code, 1_200_000 - index * 300_000)) : [];
+    return reply(200, { period: url.searchParams.get('period') ?? '', units, consolidated: row(null, 1_500_000), eliminations: row(null, 0) });
+  }
+  // A logo's signed link: the same shape the server returns for a stored document.
+  const logoLink = /^\/v1\/documents\/([^/]+)\/url$/.exec(path);
+  if (logoLink && method === 'GET' && LOGO_FILES[decodeURIComponent(logoLink[1] ?? '')]) {
+    const expires = Math.floor(Date.now() / 1000) + 300;
+    return reply(200, { url: `/v1/documents/${logoLink[1]}/file?company=${company}&expires=${expires}&signature=mock`, expires_at: expires });
+  }
 
   if (agentKey) {
     return problem(403, 'human-only', 'Human-only', 'this command is human-only');
   }
 
   if (path === '/v1/groups' && method === 'GET') {
-    return reply(200, { groups: groupsMock.groups.filter((group) => group.members.some((m) => companyRole(m.company_id) !== null)).map(groupView) });
+    // The groups this company belongs to, among those whose members the person may see.
+    const groups = groupsMock.groups.filter(
+      (group) => group.members.some((m) => m.company_id === company) && group.members.some((m) => companyRole(m.company_id) !== null),
+    );
+    return reply(200, { groups: groups.map(groupView) });
   }
   if (path === '/v1/groups' && method === 'POST') {
     const members = (body.members as Member[] | undefined) ?? [];

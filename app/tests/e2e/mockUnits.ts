@@ -52,16 +52,20 @@ const COLOUR = /^#[0-9A-Fa-f]{6}$/;
 
 /** The units summary for a month: the fixture figures, eliminations by the same rule as the server (consolidated minus units). */
 function summary(period: string) {
-  const row = (unit: string | null, revenue: number, expenses: number, cash: number) => ({
+  // `external` is the revenue from outside the group (recharges excluded): the units' external
+  // revenues add up to the consolidated revenue, so each share of company revenue is at most 100%.
+  const row = (unit: string | null, revenue: number, expenses: number, cash: number, external = revenue) => ({
     unit,
     revenue: { minor: String(revenue * 100), currency: 'SGD' },
     expenses: { minor: String(expenses * 100), currency: 'SGD' },
     result: { minor: String((revenue - expenses) * 100), currency: 'SGD' },
     cash: { minor: String(cash * 100), currency: 'SGD' },
+    external_revenue: { minor: String(external * 100), currency: 'SGD' },
   });
-  const units = [row('FZ', 5200, 3100, 22000), row('LDG', 3100, 1900, 9400), row('SQZ', 900, 1250, -1800)];
-  const eliminations = row(null, -600, -600, 0);
-  const consolidated = row(null, 5200 + 3100 + 900 - 600, 3100 + 1900 + 1250 - 600, 29600);
+  // FZ's 5,200 includes 4,000 of recharges to the other units, so its external revenue is 1,200.
+  const units = [row('FZ', 5200, 3100, 22000, 1200), row('LDG', 3100, 1900, 9400), row('SQZ', 900, 1250, -1800)];
+  const eliminations = row(null, 5200 - (5200 + 3100 + 900), -600, 0, 0);
+  const consolidated = row(null, 5200, 3100 + 1900 + 1250 - 600, 29600);
   return { period, units, consolidated, eliminations };
 }
 

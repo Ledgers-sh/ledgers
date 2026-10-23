@@ -11,6 +11,8 @@ export interface CompanySummary {
   name: string;
   baseCurrency: string;
   role: string;
+  /** The company's logo document (its own documents hold it), or null. */
+  logo_document_id?: string | null;
 }
 
 /** A bundled country pack: the defaults a new company starts from. */

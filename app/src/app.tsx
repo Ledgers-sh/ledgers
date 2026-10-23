@@ -55,7 +55,8 @@ import type { Unit } from './api/types';
 import { UnitSwitcher } from './ui/UnitSwitcher';
 import { Units } from './ui/Units';
 import { GroupRoute } from './ui/groups';
-import { groupsList, type GroupView } from './api/groups';
+import { groupsAcrossCompanies, groupsList, type GroupView } from './api/groups';
+import { CompaniesProvider } from './ui/Avatar';
 import { groupNavVisible } from './lib/groups';
 import { normaliseRange, type MonthRange } from './lib/trends';
 import { PeriodPicker } from './ui/PeriodPicker';
@@ -279,6 +280,20 @@ function Shell({
       live = false;
     };
   }, [baseUrl, personId, companyList.length]);
+  // Every group the person may see, through any of their companies (the Group screens list them when this company has none).
+  const [groupsElsewhere, setGroupsElsewhere] = useState<GroupView[]>([]);
+  const companyIdsKey = companyList.map((company) => company.id).join(',');
+  useEffect(() => {
+    if (!personId || companyIdsKey === '') return;
+    let live = true;
+    groupsAcrossCompanies({ baseUrl }, companyIdsKey.split(',')).then(
+      (list) => live && setGroupsElsewhere(list),
+      () => live && setGroupsElsewhere([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [baseUrl, personId, companyIdsKey]);
   // The company in the URL, or the deployment's own company when the URL names none.
   const companyId = companyFromSearch(window.location.search) ?? person?.companyId ?? '';
   const units = activeUnits(unitList);
@@ -317,7 +332,8 @@ function Shell({
     return { status: 'ready', commands: paletteCommands(openApi) };
   }, [openApi]);
 
-  const groupNav = person !== undefined && groupNavVisible(groupList, companyList);
+  // The Group nav shows when the company is in a group, or the person may see a group through another company.
+  const groupNav = person !== undefined && (groupNavVisible(groupList, companyList) || groupsElsewhere.length > 0);
   const nav = NAV.filter(
     (item) => (item.hash !== 'approvals' || !apiKey) && (item.hash !== 'group' || groupNav),
   );
@@ -398,6 +414,7 @@ function Shell({
 
   return (
     <SessionContext.Provider value={session}>
+      <CompaniesProvider companies={companyList}>
       <a class="skip" href="#main">
         {t('shell.skip')}
       </a>
@@ -510,6 +527,7 @@ function Shell({
         }}
       />
       <Toasts items={items} dismiss={dismiss} />
+      </CompaniesProvider>
     </SessionContext.Provider>
   );
 }

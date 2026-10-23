@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Colonizer"><style>*{animation-play-state:paused!important;animation-delay:-1.35s!important}</style>
+  <title>Colonizer</title>
+  <desc>The outpost mark. A settler leaves each corner in turn and comes back, while the outpost holds.</desc>
+  <style>
+    /* Each settler is out for half the cycle and they launch a second apart,
+       so three are always in flight: the mark reads as alive at 30px. Scaling
+       about the centre moves a corner dot straight out along its own ray. */
+    .s { fill: #E7E9EF; opacity: 0; transform-origin: 60px 60px; transform-box: view-box; animation: settle 6s ease-in-out infinite; }
+    .core { fill: #FF7B2C; animation: core 6s ease-in-out infinite; }
+    .s2 { animation-delay: -5s } .s3 { animation-delay: -4s } .s4 { animation-delay: -3s }
+    .s5 { animation-delay: -2s } .s6 { animation-delay: -1s }
+    @keyframes settle { 0%, 50%, 100% { opacity: 0; transform: scale(1) } 12%, 38% { opacity: 1 } 25% { opacity: 1; transform: scale(1.32) } }
+    @keyframes core   { 0%, 100% { opacity: 1 } 50% { opacity: .7 } }
+    /* with motion reduced the settlers stay home and the mark is the static one */
+    @media (prefers-reduced-motion: reduce) { .s, .core { animation: none } }
+  </style>
+  <polygon points="60,22.6 94,41.3 94,78.7 60,97.4 26,78.7 26,41.3" fill="none" stroke="#FF7B2C" stroke-width="6.8"/>
+  <circle class="core" cx="60" cy="60" r="10.2"/>
+  <circle class="s s1" cx="60" cy="22.6" r="5"/>
+  <circle class="s s2" cx="94" cy="41.3" r="5"/>
+  <circle class="s s3" cx="94" cy="78.7" r="5"/>
+  <circle class="s s4" cx="60" cy="97.4" r="5"/>
+  <circle class="s s5" cx="26" cy="78.7" r="5"/>
+  <circle class="s s6" cx="26" cy="41.3" r="5"/>
+</svg>

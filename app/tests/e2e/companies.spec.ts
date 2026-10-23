@@ -62,7 +62,12 @@ test('every request after a switch carries the company header', async ({ page })
   await page.goto('/?company=FZDEMO02#/journal');
   await expect(page.locator('.kpis, table, .empty, h1').first()).toBeVisible();
   await expect.poll(() => seen.length).toBeGreaterThan(2);
-  const wrong = seen.filter((call) => call.company !== 'FZDEMO02');
+  // The group list is read per company, to find the groups the person sees through each of their
+  // companies: those reads name their own company, and must name one the person belongs to.
+  const groupReads = seen.filter((call) => call.path === '/v1/groups');
+  const memberOf = new Set(['HALDEN01', 'FZDEMO02']);
+  for (const call of groupReads) expect(memberOf.has(call.company ?? '')).toBe(true);
+  const wrong = seen.filter((call) => call.path !== '/v1/groups' && call.company !== 'FZDEMO02');
   expect(wrong).toEqual([]);
 });
 

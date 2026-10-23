@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Cratefield"><style>*{animation-play-state:paused!important;animation-delay:-1.35s!important}</style>
+  <title>Cratefield</title>
+  <desc>A field of nine crates. A build sweeps across it in reading order and the core holds.</desc>
+  <style>
+    .c { fill: #EDEBE6; opacity: .22; animation: fill 6s ease-in-out infinite; }
+    .core { fill: #4C6FFF; opacity: .95; animation: core 6s ease-in-out infinite; }
+    .c1 { animation-delay: 0s }    .c2 { animation-delay: .28s }  .c3 { animation-delay: .56s }
+    .c4 { animation-delay: .84s }  .c6 { animation-delay: 1.4s }
+    .c7 { animation-delay: 1.68s } .c8 { animation-delay: 1.96s } .c9 { animation-delay: 2.24s }
+    @keyframes fill { 0%, 46%, 100% { opacity: .22 } 12%, 30% { opacity: 1 } }
+    @keyframes core { 0%, 100% { opacity: .95 } 50% { opacity: .55 } }
+    @media (prefers-reduced-motion: reduce) { .c, .core { animation: none } }
+  </style>
+  <rect class="c c1" x="5"  y="5"  width="30" height="30"/>
+  <rect class="c c2" x="45" y="5"  width="30" height="30"/>
+  <rect class="c c3" x="85" y="5"  width="30" height="30"/>
+  <rect class="c c4" x="5"  y="45" width="30" height="30"/>
+  <rect class="core" x="45" y="45" width="30" height="30"/>
+  <rect class="c c6" x="85" y="45" width="30" height="30"/>
+  <rect class="c c7" x="5"  y="85" width="30" height="30"/>
+  <rect class="c c8" x="45" y="85" width="30" height="30"/>
+  <rect class="c c9" x="85" y="85" width="30" height="30"/>
+</svg>

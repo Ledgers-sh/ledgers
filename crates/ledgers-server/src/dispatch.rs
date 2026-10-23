@@ -15,7 +15,7 @@ mod bank;
 mod bills;
 mod connect;
 mod groups;
-mod settings;
+pub(crate) mod settings;
 mod settings_rules;
 mod units;
 

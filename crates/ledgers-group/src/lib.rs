@@ -29,20 +29,32 @@ pub mod store;
 pub use module::GroupModule;
 
 /// The group schema migrations, in apply order.
-pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "groups",
         include_str!("../migrations/sqlite/0001_groups.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "group_logo",
+        include_str!("../migrations/sqlite/0002_group_logo.sql"),
+    ),
+];
 
 /// The Postgres set: the same portable DDL as SQLite.
-pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "groups",
         include_str!("../migrations/postgres/0001_groups.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "group_logo",
+        include_str!("../migrations/postgres/0002_group_logo.sql"),
+    ),
+];
 
 const _: () = cratefield_core::assert_migration_set(SQLITE_MIGRATIONS);
 const _: () = cratefield_core::assert_migration_set(POSTGRES_MIGRATIONS);

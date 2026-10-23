@@ -336,6 +336,8 @@ export interface UnitSummaryRow {
   expenses: Amount;
   result: Amount;
   cash: Amount;
+  /** Income from outside the group (recharges excluded). The units' values add up to the consolidated revenue. */
+  external_revenue: Amount;
 }
 
 export interface UnitsSummaryOutput {

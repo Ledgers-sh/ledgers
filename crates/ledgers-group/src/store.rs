@@ -21,6 +21,10 @@ pub struct GroupRow {
     pub created_at: String,
     /// When last changed.
     pub updated_at: String,
+    /// The logo document, when the group has one.
+    pub logo_document_id: Option<String>,
+    /// The company whose documents hold the logo.
+    pub logo_company_id: Option<String>,
 }
 
 /// One member of a group, as its own company's row holds it.
@@ -188,7 +192,7 @@ pub async fn groups_of_company(
     company_id: &str,
 ) -> Result<Vec<GroupRow>, DbError> {
     let stmt = Statement::with_values(
-        "SELECT g.id, g.name, g.created_by, g.created_at, g.updated_at FROM company_group g \
+        "SELECT g.id, g.name, g.created_by, g.created_at, g.updated_at, g.logo_document_id, g.logo_company_id FROM company_group g \
          JOIN company_group_member m ON m.group_id = g.id \
          WHERE m.company_id = ? ORDER BY g.name, g.id"
             .to_owned(),
@@ -204,6 +208,8 @@ pub async fn groups_of_company(
                 created_by: text(row, "created_by")?,
                 created_at: text(row, "created_at")?,
                 updated_at: text(row, "updated_at")?,
+                logo_document_id: optional(row, "logo_document_id"),
+                logo_company_id: optional(row, "logo_company_id"),
             })
         })
         .collect()
@@ -215,7 +221,7 @@ pub async fn groups_of_company(
 /// A database error.
 pub async fn group_by_id(db: &dyn Database, group_id: &str) -> Result<Option<GroupRow>, DbError> {
     let stmt = Statement::with_values(
-        "SELECT id, name, created_by, created_at, updated_at FROM company_group WHERE id = ?"
+        "SELECT id, name, created_by, created_at, updated_at, logo_document_id, logo_company_id FROM company_group WHERE id = ?"
             .to_owned(),
         vec![Value::from(group_id)],
     );
@@ -229,6 +235,8 @@ pub async fn group_by_id(db: &dyn Database, group_id: &str) -> Result<Option<Gro
                 created_by: text(row, "created_by")?,
                 created_at: text(row, "created_at")?,
                 updated_at: text(row, "updated_at")?,
+                logo_document_id: optional(row, "logo_document_id"),
+                logo_company_id: optional(row, "logo_company_id"),
             })
         })
         .transpose()

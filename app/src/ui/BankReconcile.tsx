@@ -6,6 +6,7 @@ import { Ltr } from '../i18n/Ltr';
  * line, Ignore leaves the line out on purpose. The remittance is shown as text
  * and never acted on.
  */
+import { unitSelectOption } from './UnitOption';
 import { useState } from 'preact/hooks';
 import {
   bankRulesList,
@@ -26,7 +27,7 @@ import { ErrorBanner, Money } from './common';
 import { chartLabel, counterpartAccounts, accountOptions, SignedAmount, StatusChip, useChart } from './BankShared';
 import { Icon } from './icons';
 import { Select } from './Select';
-import { accountNeedsUnit, colourOf } from '../lib/units';
+import { accountNeedsUnit } from '../lib/units';
 
 type Choice = { kind: 'suggestion'; index: number } | { kind: 'manual' };
 type Notice = { kind: 'ok' | 'warn'; text: string; href?: string; hrefLabel?: string };
@@ -360,7 +361,7 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
                 value={matchUnit}
                 placeholder={t('units.choose_unit')}
                 invalid={unitProblem && matchMissingUnit}
-                options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                options={units.map((item) => (unitSelectOption(item)))}
                 searchable={false}
                 onChange={(value) => {
                   setMatchUnit(value);
@@ -476,7 +477,7 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
                     value={ruleUnit}
                     placeholder={t('units.choose_unit')}
                     invalid={ruleProblem === 'units.err_line' && ruleMissingUnit}
-                    options={units.map((item) => ({ value: item.code, label: item.code, hint: item.name, swatch: colourOf(item) }))}
+                    options={units.map((item) => (unitSelectOption(item)))}
                     searchable={false}
                     onChange={setRuleUnit}
                   />

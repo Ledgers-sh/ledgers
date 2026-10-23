@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { unitSelectOption } from './UnitOption';
 import { keysCreate } from '../api/commands';
 import type { KeysCreateOutput } from '../api/types';
 import { limitRowError, limitsPayload, TIERS, type LimitProblem, type LimitRow, type TierValue } from '../lib/agentKeys';
@@ -7,7 +8,6 @@ import { t, type MessageKey } from '../i18n';
 import { ErrorBanner } from './common';
 import { UsageSnippets } from './UsageSnippets';
 import { Select } from './Select';
-import { colourOf } from '../lib/units';
 
 const NAME_MAX = 80;
 
@@ -150,7 +150,7 @@ export function AgentKeyCreate({
               value={unitPin}
               options={[
                 { value: '', label: t('units.all_company') },
-                ...units.map((unit) => ({ value: unit.code, label: unit.code, hint: unit.name, swatch: colourOf(unit) })),
+                ...units.map((unit) => (unitSelectOption(unit))),
               ]}
               searchable={false}
               onChange={setUnitPin}
