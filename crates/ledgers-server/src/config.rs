@@ -2,6 +2,7 @@
 
 use ledgers_approvals::ApprovalRules;
 use ledgers_auth::IdentityProvider;
+use ledgers_bills::close::FlaggedExtractionCloseCheck;
 use ledgers_ext::{
     BankFeed, DocumentIntake, EInvoiceTransport, Filing, UsageMeter,
     scope::{CompanyId, EntityScope},
@@ -36,6 +37,7 @@ impl LedgersConfig {
 
         let mut close_checks = CloseCheckRegistry::new();
         close_checks.register(Box::new(ledgers_ledger::close::DraftEntriesCloseCheck));
+        close_checks.register(Box::new(FlaggedExtractionCloseCheck));
 
         LedgersConfig {
             scope: Arc::new(SingleCompany::new(company)),

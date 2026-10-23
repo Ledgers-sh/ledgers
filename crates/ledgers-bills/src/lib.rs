@@ -10,6 +10,7 @@
 //! nothing is open, `posted` once the entry exists. A bill never posts from
 //! an extraction on its own: posting is always a command.
 
+pub mod close;
 pub mod commands;
 pub mod iban;
 pub mod model;
