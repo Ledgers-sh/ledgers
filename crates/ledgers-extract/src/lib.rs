@@ -26,6 +26,7 @@
 pub mod checks;
 pub mod fixture;
 pub mod guard;
+pub mod harness;
 pub mod llm;
 pub mod minimax;
 pub mod money;
@@ -35,6 +36,11 @@ pub mod rules;
 pub mod schema;
 
 pub use schema::{ExtractedInvoice, ExtractedLine};
+
+/// Low-confidence threshold (0-100) for extraction fields. Fields below this
+/// trigger a second pass on the stronger model tier, and bills with any field
+/// below this remain flagged during period close.
+pub const LOW_CONFIDENCE_THRESHOLD: u8 = 60;
 
 /// Which reader produced the fields, as the review screen names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

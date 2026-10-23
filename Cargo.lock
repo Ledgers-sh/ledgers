@@ -2245,6 +2245,7 @@ dependencies = [
  "cratefield-core",
  "cratefield-testing",
  "cratefield-text-guard",
+ "ledgers-audit",
  "ledgers-commands",
  "ledgers-db",
  "ledgers-documents",
@@ -2367,7 +2368,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "cratefield-core",
  "cratefield-text-guard",
+ "futures-util",
  "ledgers-money",
  "lopdf",
  "pollster",
@@ -2377,6 +2380,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "time",
+ "tokio",
 ]
 
 [[package]]
