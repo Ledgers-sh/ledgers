@@ -2580,6 +2580,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-matching"
+version = "0.1.0"
+dependencies = [
+ "ledgers-money",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "ledgers-money"
 version = "0.1.0"
 dependencies = [

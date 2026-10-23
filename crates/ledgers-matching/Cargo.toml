@@ -1,0 +1,15 @@
+[package]
+name = "ledgers-matching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+ledgers-money = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true
