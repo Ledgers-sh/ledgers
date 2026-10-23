@@ -7,6 +7,18 @@ use ledgers_bank::money::{Decimal, parse_minor};
 use ledgers_bank::parse::{self, CsvMapping};
 use ledgers_bank::statement::Format;
 use proptest::prelude::*;
+use proptest::test_runner::RngSeed;
+
+/// Fixed seed and a wide case count: the same inputs run on every CI run, so a
+/// failure reproduces and never depends on the luck of a random draw.
+fn config() -> ProptestConfig {
+    ProptestConfig {
+        cases: 4096,
+        rng_seed: RngSeed::Fixed(0x6c65_6467_6572_7321),
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    }
+}
 
 fn mapping() -> CsvMapping {
     CsvMapping {
@@ -29,7 +41,7 @@ fn mapping() -> CsvMapping {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    #![proptest_config(config())]
 
     #[test]
     fn arbitrary_bytes_never_panic_any_reader(bytes in proptest::collection::vec(any::<u8>(), 0..2048)) {
@@ -44,6 +56,15 @@ proptest! {
         let _ = parse::parse(Format::Mt940, text.as_bytes(), None, "EUR");
         let _ = parse::parse(Format::Camt053, text.as_bytes(), None, "EUR");
         let _ = parse::parse(Format::Csv, text.as_bytes(), Some(&mapping()), "EUR");
+    }
+
+    /// MT940-shaped text: tags, `:61:`/`:86:` lines and balance marks mixed
+    /// with multibyte characters, so the tag and field positions get hit.
+    #[test]
+    fn mt940_shaped_text_never_panics(
+        text in "(:[0-9Aé€ü]{0,3}:|:61:|:86:|:60F:C|:62F:|\\?|[0-9é€ü DCRNTF,?\n]){0,60}"
+    ) {
+        let _ = parse::parse(Format::Mt940, text.as_bytes(), None, "EUR");
     }
 
     #[test]
