@@ -651,6 +651,78 @@ fn the_units_summary_adds_up_and_names_the_eliminations() {
 }
 
 #[test]
+fn the_external_revenue_of_the_units_adds_up_to_the_company_revenue() {
+    for kit in harness_kits() {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            unit_chart(db, COMPANY_ID).await;
+            create_unit(db, COMPANY_ID, "FAC", "Factory").await;
+            create_unit(db, COMPANY_ID, "LED", "Ledgers").await;
+            // Factory recharges 40,000 to Ledgers: recharge income on FAC, which
+            // is intercompany and not company revenue.
+            post_transfer(
+                db,
+                COMPANY_ID,
+                &transfer("FAC", "LED", 40_000),
+                "01HQZX9K3M7VN2P4R6T8W1S050",
+            )
+            .await;
+            // Ledgers sells 70,000 to a customer: the only external revenue.
+            post(
+                db,
+                COMPANY_ID,
+                draft(
+                    vec![
+                        line("1010", Side::Debit, 70_000, Some("LED")),
+                        line("4000", Side::Credit, 70_000, Some("LED")),
+                    ],
+                    "Customer sale",
+                ),
+                "01HQZX9K3M7VN2P4R6T8W1S051",
+            )
+            .await
+            .expect("the sale posts");
+
+            let summary = report::units_summary(db, COMPANY_ID, PERIOD).await.unwrap();
+            let external = |code: &str| {
+                summary
+                    .units
+                    .iter()
+                    .find(|row| row.unit.as_deref() == Some(code))
+                    .unwrap_or_else(|| panic!("a row for {code}"))
+                    .external_revenue
+                    .minor()
+            };
+            // Factory's own books still show its recharge income...
+            assert_eq!(
+                summary
+                    .units
+                    .iter()
+                    .find(|row| row.unit.as_deref() == Some("FAC"))
+                    .unwrap()
+                    .revenue
+                    .minor(),
+                40_000
+            );
+            // ...but it has no external revenue, so its share is zero.
+            assert_eq!(external("FAC"), 0);
+            assert_eq!(external("LED"), 70_000);
+            assert_eq!(summary.consolidated.revenue.minor(), 70_000);
+            let sum: i128 = summary
+                .units
+                .iter()
+                .map(|row| row.external_revenue.minor())
+                .sum();
+            assert_eq!(
+                sum,
+                summary.consolidated.revenue.minor(),
+                "the shares add up to 100%"
+            );
+        });
+    }
+}
+
+#[test]
 fn an_intercompany_entry_must_net_its_profit_and_loss_to_zero() {
     for kit in harness_kits() {
         pollster::block_on(async {

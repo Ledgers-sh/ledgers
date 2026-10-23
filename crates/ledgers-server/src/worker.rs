@@ -9,6 +9,7 @@ use crate::Composed;
 use crate::compose;
 use crate::demo::{self, SeedGate};
 use crate::demo_group;
+use crate::demo_logos;
 use crate::dispatch::{self, BootstrapError, CompanyBootstrap, Deps};
 use crate::members;
 use crate::people::{allowed_origin, credentialed_cors_headers};
@@ -279,12 +280,15 @@ async fn seed_demo_route(
     if demo_name == "factory-zero-group" {
         return seed_group_step_route(env, runtime, param("step").as_deref()).await;
     }
+    if demo_name == "factory-zero-logos" {
+        return seed_logo_step_route(env, runtime, param("step").as_deref()).await;
+    }
     let (company_var, factory_zero) = match demo_name.as_str() {
         "halden" => ("LEDGERS_COMPANY_ID", false),
         "factory-zero" => ("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID", true),
         _ => {
             return Response::error(
-                "demo must be halden, factory-zero or factory-zero-group",
+                "demo must be halden, factory-zero, factory-zero-group or factory-zero-logos",
                 400,
             );
         }
@@ -443,6 +447,85 @@ async fn seed_group_step_route(
         Err(err) => {
             // The error names a period, not an entry; it is safe to log.
             console_error!("group demo step {} failed: {}", step, err);
+            Response::error("Demo seeding failed; see the Worker logs", 500)?
+        }
+    };
+    response.headers_mut().set("cache-control", "no-store")?;
+    Ok(response)
+}
+
+/// `POST /admin/seed-demo?demo=factory-zero-logos&step=<n>` (the group demo must
+/// already be loaded). Runs step `n` of the Factory Zero logo seed
+/// (`demo_logos::seed_step`) and answers `{"step", "done", "next", "attached",
+/// "db_calls"}`. Call steps 0 and 1 in order, one request each; each step is
+/// idempotent, so a repeated or interrupted call is safe.
+async fn seed_logo_step_route(
+    env: &Env,
+    runtime: &Cloudflare,
+    step: Option<&str>,
+) -> worker::Result<Response> {
+    let step = match demo_logos::parse_step(step) {
+        Ok(step) => step,
+        Err(message) => return Response::error(message, 400),
+    };
+    let ops = env
+        .var("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let ip = env
+        .var("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    for (name, value) in [
+        ("LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID", &ops),
+        ("LEDGERS_DEMO_FACTORY_ZERO_IP_COMPANY_ID", &ip),
+    ] {
+        if value.is_empty() {
+            return Response::error(format!("{name} is not set"), 500);
+        }
+    }
+    let ports = runtime.ports(env, Arc::new(NoopDefer));
+    let Some(mut deps) = Deps::from_ports(&ports) else {
+        return Response::error("Storage is not bound", 503);
+    };
+    let db_timing = count_db_calls(&mut deps);
+
+    match demo_group::operating_book_present(&deps, &ops).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Response::error(
+                "The operating company has no book yet; run demo=factory-zero first",
+                409,
+            );
+        }
+        Err(err) => {
+            console_error!("logo demo: {}", err);
+            return Response::error("Demo seeding failed; see the Worker logs", 500);
+        }
+    }
+
+    let outcome = demo_logos::seed_step(&deps, &ops, &ip, step).await;
+    let snap = db_timing.snapshot();
+    let mut response = match outcome {
+        Ok(logos) => {
+            console_log!(
+                "logo demo step {}: attached {}, done {}, round trips {}",
+                logos.step,
+                logos.attached,
+                logos.done,
+                snap.calls
+            );
+            Response::from_json(&json!({
+                "step": logos.step,
+                "done": logos.done,
+                "next": logos.next,
+                "attached": logos.attached,
+                "db_calls": snap.calls,
+            }))?
+        }
+        Err(err) => {
+            // The error names a step or a record kind, never a secret.
+            console_error!("logo demo step {} failed: {}", step, err);
             Response::error("Demo seeding failed; see the Worker logs", 500)?
         }
     };

@@ -18,6 +18,7 @@ use crate::store::{self, AgreementRow, GroupRow, MemberRow};
 use cratefield_core::{Database, Statement};
 use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
+use ledgers_db::guard;
 use ledgers_ledger::account::AccountType;
 use ledgers_ledger::commands::list_accounts;
 use schemars::JsonSchema;
@@ -73,6 +74,13 @@ pub struct GroupView {
     pub created_at: String,
     /// When last changed.
     pub updated_at: String,
+    /// The logo document, when the group has one.
+    #[serde(default)]
+    pub logo_document_id: Option<String>,
+    /// The company whose documents hold the logo: a member reads it with this
+    /// company as the request's company.
+    #[serde(default)]
+    pub logo_company_id: Option<String>,
 }
 
 /// Input of `groups.create`.
@@ -120,6 +128,13 @@ pub struct GroupsUpdateInput {
     pub name: Option<String>,
     /// The new member list, replacing the old one; at least two companies.
     pub members: Option<Vec<MemberInput>>,
+    /// A stored image document (PNG or JPEG, at most 2 MiB) to use as the logo.
+    /// The server checks it before the command runs.
+    #[serde(default)]
+    pub logo_document_id: Option<String>,
+    /// True to remove the logo.
+    #[serde(default)]
+    pub clear_logo: bool,
 }
 
 /// `groups.update`.
@@ -415,6 +430,8 @@ fn group_view(
         created_by: group.created_by.clone(),
         created_at: group.created_at.clone(),
         updated_at: group.updated_at.clone(),
+        logo_document_id: group.logo_document_id.clone(),
+        logo_company_id: group.logo_company_id.clone(),
     })
 }
 
@@ -468,6 +485,8 @@ impl Command for GroupsCreate {
             created_by: input.created_by.clone(),
             created_at: ctx.now.clone(),
             updated_at: ctx.now.clone(),
+            logo_document_id: None,
+            logo_company_id: None,
         };
         let members: Vec<MemberRow> = input
             .members
@@ -540,6 +559,30 @@ impl Command for GroupsList {
     }
 }
 
+/// A logo names a stored document by its id: ASCII letters and digits, at most
+/// 64 characters. Anything else is refused before the batch is built.
+fn check_logo_id(id: &str) -> Result<(), CommandError> {
+    if id.len() <= 64 && !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(())
+    } else {
+        Err(invalid("a logo must name a stored document"))
+    }
+}
+
+/// The probe pair that proves a group logo names a document of this company:
+/// an assert and its release, in the same batch (the units rule).
+fn logo_guards(company_id: &str, doc: &str) -> Vec<Statement> {
+    let key = guard::guard_key(&["group-logo", doc]);
+    vec![
+        guard::assert_statement(
+            key.clone(),
+            "(SELECT COUNT(*) FROM document WHERE company_id = ? AND id = ?) = 1",
+            vec![Value::from(company_id), Value::from(doc)],
+        ),
+        guard::release_statement(key),
+    ]
+}
+
 #[async_trait::async_trait]
 impl Command for GroupsUpdate {
     const NAME: &'static str = "groups.update";
@@ -587,10 +630,27 @@ impl Command for GroupsUpdate {
             ));
             statements.extend(member_statements(&input.id, members, &ctx.now));
         }
+        let (logo, logo_company) = if input.clear_logo {
+            (None, None)
+        } else if let Some(doc) = &input.logo_document_id {
+            check_logo_id(doc)?;
+            // The probe proves the document is this company's, in this batch.
+            statements.extend(logo_guards(&ctx.company_id, doc));
+            (Some(doc.clone()), Some(ctx.company_id.clone()))
+        } else {
+            (
+                group.logo_document_id.clone(),
+                group.logo_company_id.clone(),
+            )
+        };
         statements.push(Statement::with_values(
-            "UPDATE company_group SET name = ?, updated_at = ? WHERE id = ?".to_owned(),
+            "UPDATE company_group SET name = ?, logo_document_id = ?, logo_company_id = ?, \
+             updated_at = ? WHERE id = ?"
+                .to_owned(),
             vec![
                 Value::from(name.as_str()),
+                Value::from(logo.clone()),
+                Value::from(logo_company.clone()),
                 Value::from(ctx.now.as_str()),
                 Value::from(input.id.as_str()),
             ],
@@ -610,6 +670,8 @@ impl Command for GroupsUpdate {
         let updated = GroupRow {
             name,
             updated_at: ctx.now.clone(),
+            logo_document_id: logo,
+            logo_company_id: logo_company,
             ..group
         };
         let companies: Vec<String> = members.iter().map(|m| m.company_id.clone()).collect();

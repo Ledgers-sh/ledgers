@@ -78,6 +78,10 @@ pub struct CompanyProfile {
     /// The address for invoices and notices from the company.
     #[serde(default)]
     pub contact_email: String,
+    /// The company logo: the id of a stored PNG or JPEG of at most 2 MiB, in
+    /// this company's documents. Empty when the company has no logo.
+    #[serde(default)]
+    pub logo_document_id: String,
 }
 
 /// The output of `company.get`.
@@ -656,12 +660,48 @@ pub fn clean_company(input: &CompanyUpdateInput) -> Result<(String, CompanyProfi
         city: rules::text_field("City", &p.city, rules::MAX_CITY_CHARS, false).map_err(invalid)?,
         country,
         contact_email: rules::email_field(&p.contact_email).map_err(invalid)?,
+        logo_document_id: clean_logo_id(&p.logo_document_id).map_err(invalid)?,
     };
     Ok((name, profile))
 }
 
 /// Refuses a country change once the company has an entry: like the base
 /// currency, the country (and so its tax pack) is fixed from the first entry.
+/// A logo names a stored document by id: empty, or ASCII letters and digits up
+/// to 64 characters.
+fn clean_logo_id(raw: &str) -> Result<String, String> {
+    let id = raw.trim();
+    if id.is_empty() {
+        return Ok(String::new());
+    }
+    if id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(id.to_owned())
+    } else {
+        Err("The logo must be an uploaded image.".to_owned())
+    }
+}
+
+/// Refuses a company logo that is not an image this company stores within the
+/// logo size limit. An empty logo is always allowed.
+async fn ensure_company_logo(
+    db: &dyn Database,
+    company_id: &str,
+    logo: &str,
+) -> Result<(), CommandError> {
+    if logo.is_empty() {
+        return Ok(());
+    }
+    let stored = ledgers_documents::store::get(db, company_id, logo)
+        .await?
+        .ok_or_else(|| {
+            CommandError::InvalidInput(
+                "The logo must be an image this company has uploaded.".to_owned(),
+            )
+        })?;
+    ledgers_documents::logo::check_logo(&stored.mime, stored.size_bytes)
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))
+}
+
 async fn ensure_country_change_allowed(
     db: &dyn Database,
     company_id: &str,
@@ -729,6 +769,7 @@ impl Command for CompanyUpdate {
     ) -> Result<JournalPreview, CommandError> {
         let (_, profile) = clean_company(input)?;
         ensure_country_change_allowed(db, &ctx.company_id, &profile.country).await?;
+        ensure_company_logo(db, &ctx.company_id, &profile.logo_document_id).await?;
         Ok(JournalPreview::empty())
     }
 
@@ -741,6 +782,7 @@ impl Command for CompanyUpdate {
     ) -> Result<Plan<Self::Output>, CommandError> {
         let (name, profile) = clean_company(input)?;
         ensure_country_change_allowed(db, &ctx.company_id, &profile.country).await?;
+        ensure_company_logo(db, &ctx.company_id, &profile.logo_document_id).await?;
         let stored = serde_json::to_string(&profile)
             .map_err(|err| CommandError::InvalidInput(err.to_string()))?;
         let statements = vec![

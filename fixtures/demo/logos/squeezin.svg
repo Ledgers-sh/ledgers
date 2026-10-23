@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Squeezin"><style>*{animation-play-state:paused!important;animation-delay:-1.35s!important}</style>
+  <title>Squeezin</title>
+  <desc>Two white jaws in a deep indigo tile squeeze a glowing violet dot: the dot stretches wide, the jaws close in and squash it tall, then everything springs back.</desc>
+  <defs>
+    <filter id="sq-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+  <style>
+    /* One 6s cycle: rest, the dot stretches wide, the jaws squeeze it tall, spring back. */
+    .jl, .jr, .dot { transform-box: fill-box; transform-origin: center; animation: 6s cubic-bezier(.65,0,.35,1) infinite; }
+    .jl  { animation-name: jl; }
+    .jr  { animation-name: jr; }
+    .dot { animation-name: dot; }
+    @keyframes jl {
+      0%, 8%   { transform: translateX(0) }
+      14%, 18% { transform: translateX(-5.3px) }
+      28%, 31% { transform: translateX(7.3px) }
+      37%      { transform: translateX(-1.3px) }
+      42%, 100% { transform: translateX(0) }
+    }
+    @keyframes jr {
+      0%, 8%   { transform: translateX(0) }
+      14%, 18% { transform: translateX(5.3px) }
+      28%, 31% { transform: translateX(-7.3px) }
+      37%      { transform: translateX(1.3px) }
+      42%, 100% { transform: translateX(0) }
+    }
+    @keyframes dot {
+      0%, 8%   { transform: scale(1, 1); opacity: 1 }
+      14%, 18% { transform: scale(2.2, 1); opacity: .6 }
+      28%, 31% { transform: scale(.45, 1.6); opacity: 1 }
+      37%      { transform: scale(1.18, .9) }
+      42%, 100% { transform: scale(1, 1); opacity: 1 }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .jl, .jr, .dot { animation: none }
+    }
+  </style>
+  <rect x="10" y="10" width="100" height="100" rx="26.7" fill="#17164A"/>
+  <g class="dot">
+    <circle cx="60" cy="60" r="13.3" fill="#7A5CFF" opacity=".9" filter="url(#sq-glow)"/>
+    <circle cx="60" cy="60" r="13.3" fill="#7A5CFF"/>
+  </g>
+  <rect class="jl" x="26.7" y="30" width="10" height="60" rx="6.7" fill="#FFFFFF"/>
+  <rect class="jr" x="83.3" y="30" width="10" height="60" rx="6.7" fill="#FFFFFF"/>
+</svg>

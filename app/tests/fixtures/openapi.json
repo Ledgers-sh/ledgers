@@ -6814,6 +6814,22 @@
                     "updated_at": {
                       "description": "When last changed.",
                       "type": "string"
+                    },
+                    "logo_document_id": {
+                      "description": "The logo document, when the group has one.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    },
+                    "logo_company_id": {
+                      "description": "The company whose documents hold the logo: a member reads it with this\ncompany as the request's company.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
                     }
                   },
                   "required": [
@@ -6979,6 +6995,19 @@
                     "items": {
                       "$ref": "#/components/schemas/MemberInput"
                     }
+                  },
+                  "logo_document_id": {
+                    "description": "A stored image document (PNG or JPEG, at most 2 MiB) to use as the logo.\nThe server checks it before the command runs.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "clear_logo": {
+                    "description": "True to remove the logo.",
+                    "type": "boolean",
+                    "default": false
                   }
                 },
                 "required": [
@@ -7029,6 +7058,22 @@
                     "updated_at": {
                       "description": "When last changed.",
                       "type": "string"
+                    },
+                    "logo_document_id": {
+                      "description": "The logo document, when the group has one.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    },
+                    "logo_company_id": {
+                      "description": "The company whose documents hold the logo: a member reads it with this\ncompany as the request's company.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
                     }
                   },
                   "required": [
@@ -11199,6 +11244,11 @@
             "description": "The address for invoices and notices from the company.",
             "type": "string",
             "default": ""
+          },
+          "logo_document_id": {
+            "description": "The company logo: the id of a stored PNG or JPEG of at most 2 MiB, in\nthis company's documents. Empty when the company has no logo.",
+            "type": "string",
+            "default": ""
           }
         }
       },
@@ -11768,6 +11818,22 @@
           "updated_at": {
             "description": "When last changed.",
             "type": "string"
+          },
+          "logo_document_id": {
+            "description": "The logo document, when the group has one.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "logo_company_id": {
+            "description": "The company whose documents hold the logo: a member reads it with this\ncompany as the request's company.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "required": [
@@ -12450,13 +12516,18 @@
           "cash": {
             "description": "Cash and bank balance through the period (debit positive).",
             "$ref": "#/components/schemas/SerializableAmount"
+          },
+          "external_revenue": {
+            "description": "Income from outside the group (recharges excluded): the units' figures\nof this add up to the consolidated revenue. A unit's share is this over it.",
+            "$ref": "#/components/schemas/SerializableAmount"
           }
         },
         "required": [
           "revenue",
           "expenses",
           "result",
-          "cash"
+          "cash",
+          "external_revenue"
         ]
       },
       "TaxRateView": {

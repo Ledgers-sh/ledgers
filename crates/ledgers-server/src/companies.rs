@@ -164,6 +164,9 @@ pub struct CompanySummary {
     pub name: String,
     pub base_currency: String,
     pub role: String,
+    /// The company's logo document, when it has one. The company's own
+    /// documents hold it, so the company is the request's company to read it.
+    pub logo_document_id: Option<String>,
 }
 
 /// The body of `POST /v1/companies`.
@@ -214,6 +217,15 @@ async fn session_person(deps: &Deps, headers: &HeaderMap) -> Result<String, Prob
         .ok_or_else(|| Problem::new(&SESSION_NEEDED))
 }
 
+/// The logo document id in a stored company profile, when it names one.
+fn logo_of_profile(profile: Option<String>) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(&profile?).ok()?;
+    value["logo_document_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
 /// The companies `person_id` holds a membership in, by name.
 ///
 /// # Errors
@@ -224,8 +236,9 @@ pub async fn companies_of(
 ) -> Result<Vec<CompanySummary>, cratefield_core::DbError> {
     let rows = db
         .query(&Statement::with_values(
-            "SELECT c.id, c.name, c.base_currency, m.role FROM company c \
+            "SELECT c.id, c.name, c.base_currency, m.role, s.value AS profile FROM company c \
              JOIN org_members m ON m.org_id = c.id \
+             LEFT JOIN company_setting s ON s.company_id = c.id AND s.key = 'company.profile' \
              WHERE m.user_sub = ? ORDER BY c.name, c.id"
                 .to_owned(),
             vec![Value::from(person_id.to_owned())],
@@ -240,6 +253,7 @@ pub async fn companies_of(
                 name: row.get("name")?,
                 base_currency: row.get("base_currency")?,
                 role: row.get("role")?,
+                logo_document_id: logo_of_profile(row.get::<Option<String>>("profile").flatten()),
             })
         })
         .collect())
@@ -454,6 +468,7 @@ pub async fn create(
         name,
         base_currency: input.base_currency.clone(),
         role: "owner".to_owned(),
+        logo_document_id: None,
     })
 }
 

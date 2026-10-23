@@ -13,7 +13,8 @@ import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { t, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
-import { quickCheck } from '../lib/documents';
+import { logoProblem } from '../lib/logos';
+import { Avatar } from './Avatar';
 import { colourOf, UNIT_CODE, UNIT_COLOUR } from '../lib/units';
 import { ConfirmDialog, Empty, ErrorBanner, PageHead, Skeleton } from './common';
 import { Icon } from './icons';
@@ -95,7 +96,7 @@ export function UnitsPanel() {
               {all.map((unit) => (
                 <tr key={unit.code}>
                   <td data-label={t('units.code')} class="mono">
-                    <span class="unit-dot" style={{ background: colourOf(unit) }} aria-hidden="true" />
+                    <Avatar name={unit.name} colour={colourOf(unit)} logo={unit.logo_document_id ? { documentId: unit.logo_document_id } : null} size="sm" />
                     <Ltr>{unit.code}</Ltr>
                   </td>
                   <td data-label={t('units.name')}>{unit.name}</td>
@@ -195,7 +196,7 @@ function UnitDialog({ unit, onClose, onSaved }: { unit: Unit | null; onClose: ()
   const pickLogo = async (file: File | undefined) => {
     if (!file) return;
     setLogoError(null);
-    const problem = quickCheck(file);
+    const problem = logoProblem(file);
     if (problem) {
       setLogoError(problem === 'too-large' ? 'units.logo_too_large' : 'units.logo_unsupported');
       return;
@@ -314,7 +315,7 @@ function UnitDialog({ unit, onClose, onSaved }: { unit: Unit | null; onClose: ()
             <input
               class="input"
               type="file"
-              accept="image/png,image/jpeg,image/heic,image/heif,application/pdf"
+              accept="image/png,image/jpeg"
               aria-labelledby="unit-logo-label"
               onChange={(event) => void pickLogo((event.target as HTMLInputElement).files?.[0])}
               disabled={uploading}

@@ -13,6 +13,7 @@ postgres = ["cratefield-testing/postgres"]
 [dependencies]
 cratefield-core = { workspace = true }
 ledgers-commands = { workspace = true }
+ledgers-db = { workspace = true }
 ledgers-ledger = { workspace = true }
 ledgers-money = { workspace = true }
 ledgers-tax = { workspace = true }

@@ -14,7 +14,7 @@ mod approvals;
 mod bank;
 mod bills;
 mod groups;
-mod settings;
+pub(crate) mod settings;
 mod settings_rules;
 mod units;
 

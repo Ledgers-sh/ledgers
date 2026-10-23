@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Living Brain"><style>*{animation-play-state:paused!important;animation-delay:-1.35s!important}</style>
+  <title>Living Brain</title>
+  <desc>The Living Brain mark: a ring around one glowing green node, on a dark square, with four smaller nodes linked to it. A pulse travels along one edge into the centre, the node glows brighter, and a second pulse follows from the opposite corner.</desc>
+  <style>
+    /* One 4s cycle. The mark (ring and node) is always drawn, so the first
+       frame and any static grab show it whole: a pulse runs in from the top
+       left, the centre node brightens as it lands, then one runs in from the
+       bottom right. */
+    .p1 { animation: in1 4s cubic-bezier(.5,0,.5,1) infinite; opacity: 0; }
+    .p2 { animation: in2 4s cubic-bezier(.5,0,.5,1) infinite; opacity: 0; }
+    .glow { transform-box: fill-box; transform-origin: center; animation: glow 4s ease-out infinite; }
+    .ring { transform-box: fill-box; transform-origin: center; animation: ring 4s ease-out infinite; }
+    @keyframes in1 { 0% { transform: translate(0,0); opacity: 0 } 6% { opacity: 1 } 36% { transform: translate(32px,26px); opacity: 1 } 40%, 100% { transform: translate(32px,26px); opacity: 0 } }
+    @keyframes in2 { 0%, 50% { transform: translate(0,0); opacity: 0 } 56% { opacity: 1 } 86% { transform: translate(-32px,-26px); opacity: 1 } 90%, 100% { transform: translate(-32px,-26px); opacity: 0 } }
+    @keyframes glow { 0%, 34%, 50%, 84%, 100% { transform: scale(1); opacity: .45 } 40%, 90% { transform: scale(1.6); opacity: .9 } }
+    @keyframes ring { 0%, 36%, 50%, 86%, 100% { transform: scale(1) } 42%, 92% { transform: scale(1.06) } }
+    /* with motion reduced the mark is static: no pulses, the node at rest */
+    @media (prefers-reduced-motion: reduce) { .p1, .p2, .glow, .ring { animation: none } .p1, .p2 { display: none } }
+  </style>
+  <defs>
+    <filter id="lb-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <rect x="10" y="10" width="100" height="100" rx="30" fill="#0E1719"/>
+  <g stroke="#E8EFF0" stroke-opacity=".22" stroke-width="1.5">
+    <line x1="28" y1="34" x2="60" y2="60"/>
+    <line x1="91" y1="31" x2="60" y2="60"/>
+    <line x1="27" y1="88" x2="60" y2="60"/>
+    <line x1="92" y1="86" x2="60" y2="60"/>
+    <line x1="28" y1="34" x2="91" y2="31" stroke-opacity=".1"/>
+  </g>
+  <g fill="#E8EFF0">
+    <circle cx="28" cy="34" r="4"/>
+    <circle cx="91" cy="31" r="3.2"/>
+    <circle cx="27" cy="88" r="3.2"/>
+    <circle cx="92" cy="86" r="4"/>
+  </g>
+  <circle class="p1" cx="28" cy="34" r="3" fill="#4BE3A9"/>
+  <circle class="p2" cx="92" cy="86" r="3" fill="#4BE3A9"/>
+  <circle cx="60" cy="60" r="18" fill="#0E1719"/>
+  <circle class="glow" cx="60" cy="60" r="9" fill="#4BE3A9" filter="url(#lb-blur)" opacity=".45"/>
+  <circle class="ring" cx="60" cy="60" r="18" fill="none" stroke="#4BE3A9" stroke-width="3"/>
+  <circle cx="60" cy="60" r="7" fill="#4BE3A9"/>
+</svg>

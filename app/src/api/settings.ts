@@ -15,6 +15,8 @@ export interface CompanyProfile {
   city: string;
   country: string;
   contact_email: string;
+  /** The stored logo (a PNG or JPEG in this company's documents), or empty for none. */
+  logo_document_id: string;
 }
 
 export interface CompanyView {

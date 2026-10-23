@@ -2,6 +2,7 @@
 import type { ComponentChildren } from 'preact';
 import { t, type MessageKey } from '../../i18n';
 import { Ltr } from '../../i18n/Ltr';
+import { CompanyAvatar } from '../Avatar';
 import type { GroupKind } from '../../api/groups';
 
 export type GroupSection = 'companies' | 'agreements' | 'reconciliation' | 'view';
@@ -43,24 +44,14 @@ export function KindChip({ kind }: { kind: GroupKind }) {
   return <span class={`chip group-kind kind-${kind}`}>{t(KIND_KEY[kind])}</span>;
 }
 
-/** A company's avatar: its initial in a round badge, decorative (the name is read beside it). */
-export function CompanyAvatar({ name }: { name: string }) {
-  const initial = name.trim().charAt(0).toUpperCase() || '?';
-  return (
-    <span class="avatar company-avatar" aria-hidden="true">
-      <Ltr>{initial}</Ltr>
-    </span>
-  );
-}
-
 /** A company name with its avatar, for parties and member lists. */
-export function CompanyName({ name, hidden }: { name: string | null; hidden?: boolean }) {
+export function CompanyName({ name, companyId, hidden }: { name: string | null; companyId?: string; hidden?: boolean }) {
   if (hidden || name === null) {
     return <span class="company-name muted">{t('groups.hidden_company')}</span>;
   }
   return (
     <span class="company-name">
-      <CompanyAvatar name={name} />
+      <CompanyAvatar companyId={companyId ?? ''} name={name} size="sm" />
       <Ltr>{name}</Ltr>
     </span>
   );

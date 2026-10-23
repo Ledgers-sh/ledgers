@@ -12,6 +12,7 @@
 
 pub mod anchor;
 pub mod commands;
+pub mod logo;
 pub mod module;
 pub mod sign;
 pub mod sniff;

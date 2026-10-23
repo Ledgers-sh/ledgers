@@ -328,6 +328,9 @@ pub struct UnitSummaryRowView {
     pub result: SerializableAmount,
     /// Cash and bank balance through the period (debit positive).
     pub cash: SerializableAmount,
+    /// Income from outside the group (recharges excluded): the units' figures
+    /// of this add up to the consolidated revenue. A unit's share is this over it.
+    pub external_revenue: SerializableAmount,
 }
 
 impl From<UnitSummaryRow> for UnitSummaryRowView {
@@ -338,6 +341,7 @@ impl From<UnitSummaryRow> for UnitSummaryRowView {
             expenses: SerializableAmount::from(row.expenses),
             result: SerializableAmount::from(row.result),
             cash: SerializableAmount::from(row.cash),
+            external_revenue: SerializableAmount::from(row.external_revenue),
         }
     }
 }
@@ -437,6 +441,19 @@ pub(crate) async fn resolve_scope(
     Ok(scope)
 }
 
+/// Refuses a unit logo that is not a PNG or JPEG this company stores within the
+/// logo size limit. The unit's own guard proves the document exists in the batch.
+async fn check_unit_logo(db: &dyn Database, company: &str, doc: &str) -> Result<(), CommandError> {
+    let stored = ledgers_documents::store::get(db, company, doc)
+        .await
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))?
+        .ok_or_else(|| {
+            CommandError::InvalidInput("the logo must be an uploaded image".to_owned())
+        })?;
+    ledgers_documents::logo::check_logo(&stored.mime, stored.size_bytes)
+        .map_err(|err| CommandError::InvalidInput(err.to_string()))
+}
+
 impl ServerDispatch {
     /// The three unit writes: a person only. The caller is authenticated
     /// first; an agent key is refused with a 403 and one `denied` event.
@@ -461,6 +478,9 @@ impl ServerDispatch {
             "units.create" => {
                 let body: UnitsCreateInput = serde_json::from_value(input)
                     .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+                if let Some(doc) = body.logo_document_id.as_deref() {
+                    check_unit_logo(db, company, doc).await.map_err(&fail)?;
+                }
                 units::create_unit(
                     db,
                     company,
@@ -479,6 +499,9 @@ impl ServerDispatch {
             "units.rename" => {
                 let body: UnitsRenameInput = serde_json::from_value(input)
                     .map_err(|err| fail(CommandError::InvalidInput(err.to_string())))?;
+                if let Some(doc) = body.logo_document_id.as_deref() {
+                    check_unit_logo(db, company, doc).await.map_err(&fail)?;
+                }
                 let logo = if body.clear_logo {
                     Some(None)
                 } else {

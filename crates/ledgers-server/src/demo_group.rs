@@ -61,7 +61,7 @@ pub struct GroupSeedReport {
 }
 
 /// Runs one command as the demo owner and returns its output.
-async fn output_as_owner<C>(
+pub(crate) async fn output_as_owner<C>(
     deps: &Deps,
     company_id: &str,
     command: &C,

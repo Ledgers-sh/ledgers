@@ -1,4 +1,4 @@
-import { Fragment } from 'preact';
+import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { t } from '../i18n';
 import { Icon } from './icons';
@@ -18,6 +18,8 @@ export interface SelectOption {
   dir?: 'ltr' | 'rtl';
   /** A colour dot shown before the label (a business unit's colour, for example). Decorative. */
   swatch?: string;
+  /** A node shown before the label instead of the swatch (an avatar, for example). Decorative. */
+  leading?: ComponentChildren;
   /** The shorter text the trigger shows once chosen, when the label is too long for a compact control. */
   trigger?: string;
   /** A small badge after the label (a role, for example). Decorative: its text is read with the label. */
@@ -217,7 +219,8 @@ export function Select(props: SelectProps) {
         onBlur={onBlur}
       >
         <span class="sel-value" lang={selected?.lang} dir={selected?.dir}>
-          {selected?.swatch && <span class="sel-swatch" style={{ background: selected.swatch }} aria-hidden="true" />}
+          {selected?.leading}
+          {selected?.swatch && !selected.leading && <span class="sel-swatch" style={{ background: selected.swatch }} aria-hidden="true" />}
           {showValue}
         </span>
         <span class="sel-caret" aria-hidden="true">
@@ -277,7 +280,8 @@ export function Select(props: SelectProps) {
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => choose(option)}
                   >
-                    {option.swatch && <span class="sel-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
+                    {option.leading}
+                    {option.swatch && !option.leading && <span class="sel-swatch" style={{ background: option.swatch }} aria-hidden="true" />}
                     <span class="sel-label" lang={option.lang} dir={option.dir}>
                       {option.label}
                     </span>

@@ -14,7 +14,7 @@ import { handleCompanies, resetCompanies } from './mockCompanies';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
-import { groupsMock, handleGroups, resetGroups } from './mockGroups';
+import { groupsMock, handleGroups, logoFile, resetGroups } from './mockGroups';
 
 /** Port of the fake API. LEDGERS_MOCK_PORT moves it when another local server holds 3000. */
 const PORT = Number(process.env.LEDGERS_MOCK_PORT ?? 3000);
@@ -1011,7 +1011,8 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
           return;
         }
         // A signed document link serves its file without a credential: the signature is the credential.
-        const served = req.method === 'GET' ? servedFile(new URL(req.url ?? '/', API_ORIGIN).pathname) : null;
+        const servedPath = new URL(req.url ?? '/', API_ORIGIN).pathname;
+        const served = req.method === 'GET' ? (servedFile(servedPath) ?? logoFile(servedPath)) : null;
         if (served) {
           res.writeHead(200, { ...headers, 'Content-Type': served.mime, 'Cache-Control': 'no-store' });
           res.end(served.bytes);
@@ -1051,7 +1052,13 @@ export async function mockApi(options: MockOptions = {}): Promise<MockApi> {
         // Groups, agreements and their reports, and the per-company settings and chart they read.
         if (
           groupsMock.enabled &&
-          (path.startsWith('/v1/groups') || path.startsWith('/v1/agreements') || path === '/v1/company' || path === '/v1/accounts' || path === '/v1/units')
+          (path.startsWith('/v1/groups') ||
+            path.startsWith('/v1/agreements') ||
+            path === '/v1/company' ||
+            path === '/v1/accounts' ||
+            path === '/v1/units' ||
+            path === '/v1/reports/units-summary' ||
+            /^\/v1\/documents\/[^/]+\/url$/.test(path))
         ) {
           const company = String(req.headers['x-ledgers-company'] ?? '') || 'FZIP01';
           const groupsReply = handleGroups(

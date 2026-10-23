@@ -5,7 +5,7 @@
  * server decides again on every command.
  */
 import { companiesList, type CompanySummary } from '../../api/companies';
-import { groupsList, type GroupView } from '../../api/groups';
+import { groupsAcrossCompanies, groupsList, type GroupView } from '../../api/groups';
 import type { ClientConfig } from '../../api/client';
 import { useAsync } from '../../hooks';
 import { companyFromSearch } from '../../lib/companies';
@@ -15,6 +15,11 @@ export interface GroupContext {
   client: ClientConfig;
   companies: CompanySummary[] | undefined;
   groups: GroupView[] | undefined;
+  /**
+   * Every group the person may see, across all their companies. When the
+   * company the page is in is in no group, the screens list these instead.
+   */
+  visibleGroups: GroupView[] | undefined;
   /** The first error of the two reads, if any. */
   error: unknown;
   reload: () => void;
@@ -32,6 +37,11 @@ export function useGroupContext(): GroupContext {
   const person = session.person;
   const companies = useAsync(() => companiesList(client), [client.baseUrl]);
   const groups = useAsync(() => groupsList(client), [client.baseUrl]);
+  const companyIds = (companies.data ?? []).map((company) => company.id).join(',');
+  const visible = useAsync(
+    () => (companies.data ? groupsAcrossCompanies(client, companyIds === '' ? [] : companyIds.split(',')) : Promise.resolve(undefined)),
+    [client.baseUrl, companyIds, companies.data !== undefined],
+  );
   const currentCompany = companyFromSearch(window.location.search) ?? person?.companyId ?? '';
   const role = companies.data?.find((company) => company.id === currentCompany)?.role ?? person?.role ?? '';
   const list = companies.data ?? [];
@@ -39,6 +49,7 @@ export function useGroupContext(): GroupContext {
     client,
     companies: companies.data,
     groups: groups.data,
+    visibleGroups: visible.data,
     error: companies.error ?? groups.error,
     reload: () => {
       companies.reload();

@@ -17,6 +17,7 @@ import { entryRef } from './Journal';
 import { formatMinor, parseMajorToMinor } from '../lib/money';
 import { todayIso } from '../lib/period';
 import { buildTransferInput, validateTransfer, type TransferDraft, type TransferField } from '../lib/transfer';
+import { unitSelectOption } from './UnitOption';
 import { colourOf } from '../lib/units';
 import { ErrorBanner, Skeleton } from './common';
 import { Select, type SelectOption } from './Select';
@@ -125,7 +126,7 @@ function TransferForm({ units, onClose, onPosted }: { units: readonly Unit[]; on
     value: item.code,
     label: item.code,
     hint: item.name,
-    swatch: colourOf(item),
+    leading: unitSelectOption(item).leading,
   }));
   const accountOptions = (list: Account[]): SelectOption[] =>
     list.map((account) => ({ value: account.number, label: accountName(account.name_key), hint: account.number }));

@@ -10,6 +10,7 @@ import { t, type MessageKey } from '../i18n';
 import { companyHref, roleBadgeClass } from '../lib/companies';
 import { resetScope } from '../session';
 import { Select, type SelectOption } from './Select';
+import { CompanyAvatar } from './Avatar';
 
 export function CompanySwitcher({
   companies,
@@ -25,6 +26,7 @@ export function CompanySwitcher({
     value: company.id,
     label: company.name,
     badge: { label: t(`people.role.${company.role}` as MessageKey), className: roleBadgeClass(company.role) },
+    leading: <CompanyAvatar companyId={company.id} name={company.name} size="xs" />,
   }));
   return (
     <div class="company-switch">
