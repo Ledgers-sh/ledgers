@@ -27,7 +27,6 @@ Sources are official provider docs unless marked otherwise. Checked 2026-10-23. 
 | **Fireworks AI** | None found (`/billing/summary` lists rated dollar line items by category) | Yes: `POST /v1/accounts/{account_id}/usageCosts:query` (dollars, `groupBy` incl. `API_KEY`, `DAY`, `MODEL`). `GET /v1/accounts/{account_id}/billing/summary` (dollars, daily buckets, categories) | Yes: `API_KEY` group. `usageCosts:query` with `ACCOUNT` scope requires account administrator; `SELF` scope returns only the caller | Fireworks API key (admin for account-wide cost) | Usage quantities endpoint (`billingUsage`) works with any key on the account but has no dollars | Max 31-day window per request | **Connect** (admin key) |
 | **Cohere** | None found | None documented (per-response `meta.billed_units`; dashboard Billing and Usage page) | None documented | — | — | — | **Invoice import only** |
 | **Perplexity** | None found | None documented (per-response usage cost is third-party only, **unverified**) | None documented | — | — | — | **Invoice import only** |
-| **Cerebras, Hyperbolic etc.** | Not in scope of this list | — | — | — | — | — | Out of scope |
 
 ## Per-provider notes
 
