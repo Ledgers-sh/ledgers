@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "date": "2026-10-23",
+      "label": "recorded set v1",
+      "model_ids": "claude-haiku-4-5",
+      "overall_accuracy_bp": 9238,
+      "ece_bp": 1183,
+      "case_count": 12
+    }
+  ]
+}

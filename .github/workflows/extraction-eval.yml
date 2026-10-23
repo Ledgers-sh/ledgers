@@ -1,0 +1,71 @@
+# Extraction evaluation: live model testing and cost tracking (manual run).
+#
+# Runs the extraction evaluation suite against a real model, scores the corpus,
+# generates an accuracy report with token usage and cost, and optionally re-records
+# the model responses.
+#
+# Trigger: workflow_dispatch with inputs for provider choice and record flag.
+# Cost: real API calls; uses repository vars for pricing (not secrets).
+
+name: extraction-eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider"
+        required: true
+        type: choice
+        options:
+          - anthropic
+          - minimax
+      record:
+        description: "Record replies for corpus (dangerous; review before commit)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run extraction evaluation
+        env:
+          LEDGERS_EXTRACT_PROVIDER: ${{ inputs.provider }}
+          LEDGERS_EXTRACT_API_KEY: ${{ secrets.LEDGERS_EXTRACT_API_KEY }}
+          LEDGERS_MINIMAX_API_KEY: ${{ secrets.LEDGERS_MINIMAX_API_KEY }}
+          LEDGERS_MINIMAX_MODEL: ${{ vars.LEDGERS_MINIMAX_MODEL }}
+          LEDGERS_EVAL_PRICE_IN_UUSD_PER_MTOK: ${{ vars.LEDGERS_EVAL_PRICE_IN_UUSD_PER_MTOK }}
+          LEDGERS_EVAL_PRICE_OUT_UUSD_PER_MTOK: ${{ vars.LEDGERS_EVAL_PRICE_OUT_UUSD_PER_MTOK }}
+          LEDGERS_EVAL_OUT: ${{ runner.temp }}/extraction-eval.md
+          LEDGERS_EVAL_RECORD: ${{ inputs.record && '1' || '' }}
+        run: >-
+          cargo test --locked -p ledgers-extract --test eval
+          -- --ignored live_eval --nocapture
+
+      - name: Append report to summary
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/extraction-eval.md" ]; then
+            cat "${{ runner.temp }}/extraction-eval.md" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraction-eval-report
+          path: |
+            ${{ runner.temp }}/extraction-eval.md
+            ${{ runner.temp }}/extraction-eval.md.recorded.json
+          if-no-files-found: ignore
+          retention-days: 30
