@@ -121,6 +121,12 @@ cratefield-text-guard = "=0.1.0"
 # Base64 for the PDF and image blocks of the Messages API request (issue #21).
 base64 = "=0.22.1"
 
+# XML parsing for e-invoice formats (UBL, CII, ZUGFeRD/Factur-X; issue #45).
+quick-xml = "=0.41.0"
+
+# Decompression for FlateDecode streams in PDF e-invoices (issue #45).
+flate2 = "=1.1.10"
+
 # SHA-256: ledgers-audit (#9) owns audit hashing and verification with
 # this; ledgers-ledger's interim period hashes still stamp with it.
 sha2 = "0.10"
