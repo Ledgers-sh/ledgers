@@ -537,6 +537,7 @@ dialog.key-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100v
 .detail-meta dd { font-family: var(--sans); font-size: 16px; }
 .detail-meta dd.mono-value { font-family: var(--mono); font-size: 14px; }
 .detail-meta dd.amount-value { font-family: var(--mono); font-size: 20px; font-weight: 500; }
+.detail-meta dd.amount-value .muted { font-family: var(--sans); font-size: 16px; font-weight: 400; }
 .detail-sub { display: block; font-size: 13px; margin-top: 2px; }
 .decision-form { display: flex; flex-direction: column; gap: 14px; }
 .decision-form textarea.input { min-height: 88px; resize: vertical; font-family: var(--sans); }
@@ -730,7 +731,7 @@ button.legend-item:hover { border-color: var(--rule); }
   min-height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 14px;
 }
 .dimension-switch button[aria-pressed='true'] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--rule); }
-.stack { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px; margin: 4px 0 12px; }
+.stack-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px; margin: 4px 0 12px; }
 .stack-seg { flex: 1 1 0; min-width: 4px; border-radius: 3px; }
 .stack-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
 .stack-legend li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; font-size: 14px; }
