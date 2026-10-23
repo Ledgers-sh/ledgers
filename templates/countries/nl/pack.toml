@@ -138,3 +138,11 @@ input_tag = "vat-input"
 id = "generic"
 label = "BTW-aangifte (generic)"
 kind = "generic"
+
+# Advisory notes (not tax advice). The innovation box is a corporate income
+# tax regime, not a withholding rate, so it is recorded as a note.
+[[notes]]
+topic = "innovatiebox"
+text = "Qualifying income from self-developed intangible assets (such as software and patents) can be taxed at an effective 9% under the innovatiebox. Eligibility depends on the R&D and qualifying-asset rules, which are not modelled here."
+source = "Belastingdienst, Innovatiebox, https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/vennootschapsbelasting/innovatiebox"
+verified = true

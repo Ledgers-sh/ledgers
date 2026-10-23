@@ -13,6 +13,7 @@ mod accounts;
 mod approvals;
 mod bank;
 mod bills;
+mod groups;
 mod settings;
 mod settings_rules;
 mod units;
@@ -897,6 +898,22 @@ impl Dispatch for ServerDispatch {
                 self.bank_command(deps, presented, request_id, command, input)
                     .await
             }
+            "groups.create"
+            | "groups.list"
+            | "groups.update"
+            | "agreements.create"
+            | "agreements.list"
+            | "agreements.get"
+            | "agreements.update"
+            | "agreements.terminate"
+            | "agreements.run_period"
+            | "agreements.post_period"
+            | "agreements.settle_period"
+            | "reports.intercompany_reconciliation"
+            | "reports.group_view" => {
+                self.group_command(deps, presented, request_id, command, input)
+                    .await
+            }
             "keys.list" => self.keys_list(deps, presented, request_id).await,
             "keys.create" => self.keys_create(deps, presented, request_id, input).await,
             "keys.revoke" => self.keys_revoke(deps, presented, request_id, input).await,
@@ -1675,6 +1692,97 @@ fn is_guard_refusal(err: &cratefield_core::DbError) -> bool {
 #[allow(clippy::too_many_lines)]
 pub fn registry() -> Registry {
     let schemas: BTreeMap<&str, (Value, Value)> = BTreeMap::from([
+        (
+            "groups.create",
+            (
+                schema_of::<ledgers_group::commands::GroupsCreateInput>(),
+                schema_of::<ledgers_group::commands::GroupView>(),
+            ),
+        ),
+        (
+            "groups.list",
+            (
+                schema_of::<ledgers_group::commands::GroupsListInput>(),
+                schema_of::<ledgers_group::commands::GroupsListOutput>(),
+            ),
+        ),
+        (
+            "groups.update",
+            (
+                schema_of::<ledgers_group::commands::GroupsUpdateInput>(),
+                schema_of::<ledgers_group::commands::GroupView>(),
+            ),
+        ),
+        (
+            "agreements.create",
+            (
+                schema_of::<ledgers_group::commands::AgreementsCreateInput>(),
+                schema_of::<ledgers_group::commands::AgreementsCreateOutput>(),
+            ),
+        ),
+        (
+            "agreements.list",
+            (
+                schema_of::<ledgers_group::commands::AgreementsListInput>(),
+                schema_of::<ledgers_group::commands::AgreementsListOutput>(),
+            ),
+        ),
+        (
+            "agreements.get",
+            (
+                schema_of::<ledgers_group::commands::AgreementIdInput>(),
+                schema_of::<ledgers_group::commands::AgreementsGetOutput>(),
+            ),
+        ),
+        (
+            "agreements.update",
+            (
+                schema_of::<ledgers_group::commands::AgreementsUpdateInput>(),
+                schema_of::<ledgers_group::model::AgreementView>(),
+            ),
+        ),
+        (
+            "agreements.terminate",
+            (
+                schema_of::<ledgers_group::commands::AgreementIdInput>(),
+                schema_of::<ledgers_group::model::AgreementView>(),
+            ),
+        ),
+        (
+            "agreements.run_period",
+            (
+                schema_of::<ledgers_group::commands::RunPeriodInput>(),
+                schema_of::<ledgers_group::commands::RunPeriodOutput>(),
+            ),
+        ),
+        (
+            "agreements.post_period",
+            (
+                schema_of::<ledgers_group::commands::PeriodsInput>(),
+                schema_of::<ledgers_group::commands::PeriodsOutput>(),
+            ),
+        ),
+        (
+            "agreements.settle_period",
+            (
+                schema_of::<ledgers_group::commands::PeriodsInput>(),
+                schema_of::<ledgers_group::commands::PeriodsOutput>(),
+            ),
+        ),
+        (
+            "reports.intercompany_reconciliation",
+            (
+                schema_of::<ledgers_group::commands::ReconciliationInput>(),
+                schema_of::<ledgers_group::reports::ReconciliationOutput>(),
+            ),
+        ),
+        (
+            "reports.group_view",
+            (
+                schema_of::<ledgers_group::commands::GroupViewInput>(),
+                schema_of::<ledgers_group::reports::GroupViewOutput>(),
+            ),
+        ),
         (
             "bank.accounts.list",
             (

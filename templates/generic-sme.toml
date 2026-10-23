@@ -63,6 +63,18 @@ type = "asset"
 parent = "1000"
 tags = ["inter-unit-due-from"]
 
+[[accounts]]
+number = "1080"
+name = "account.generic_sme.intercompany_receivable"
+type = "asset"
+parent = "1000"
+
+[[accounts]]
+number = "1090"
+name = "account.generic_sme.withholding_receivable"
+type = "asset"
+parent = "1000"
+
 # --- Fixed assets -----------------------------------------------------------
 
 [[accounts]]
@@ -124,6 +136,18 @@ name = "account.generic_sme.inter_unit_payable"
 type = "liability"
 parent = "2000"
 tags = ["inter-unit-due-to"]
+
+[[accounts]]
+number = "2060"
+name = "account.generic_sme.intercompany_payable"
+type = "liability"
+parent = "2000"
+
+[[accounts]]
+number = "2070"
+name = "account.generic_sme.withholding_payable"
+type = "liability"
+parent = "2000"
 
 # --- Long-term liabilities --------------------------------------------------
 
@@ -209,6 +233,12 @@ type = "income"
 parent = "4000"
 tags = ["fx-gain"]
 
+[[accounts]]
+number = "4060"
+name = "account.generic_sme.royalty_income"
+type = "income"
+parent = "4000"
+
 # --- Expenses --------------------------------------------------------------------
 
 [[accounts]]
@@ -282,6 +312,12 @@ name = "account.generic_sme.fx_losses"
 type = "expense"
 parent = "5000"
 tags = ["fx-loss"]
+
+[[accounts]]
+number = "5120"
+name = "account.generic_sme.royalty_expense"
+type = "expense"
+parent = "5000"
 
 [[accounts]]
 number = "5950"

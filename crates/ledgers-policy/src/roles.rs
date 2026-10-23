@@ -88,6 +88,11 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "numbering.list"
         | "tax_settings.get"
         | "parties.list"
+        | "groups.list"
+        | "agreements.list"
+        | "agreements.get"
+        | "reports.intercompany_reconciliation"
+        | "reports.group_view"
         | "test.read" => Class::Read,
         "company.update"
         | "units.create"
@@ -100,7 +105,12 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "approval_settings.update"
         | "numbering.set_next"
         | "parties.set_bank"
-        | "parties.merge" => Class::Settings,
+        | "parties.merge"
+        | "groups.create"
+        | "groups.update"
+        | "agreements.create"
+        | "agreements.update"
+        | "agreements.terminate" => Class::Settings,
         "keys.create" | "keys.list" | "keys.revoke" | "policy.put_key" | "policy.revoke_key"
         | "policy.explain" => Class::Keys,
         "audit.list" => Class::Audit,
@@ -136,9 +146,11 @@ pub fn class_of(command: &str) -> Option<Class> {
         | "parties.create"
         | "parties.update"
         | "parties.check_vat"
+        | "agreements.run_period"
+        | "agreements.post_period"
         | "test.write"
         | "test.post" => Class::Post,
-        "bill.pay" => Class::MoneyOut,
+        "bill.pay" | "agreements.settle_period" => Class::MoneyOut,
         "periods.close"
         | "periods.reopen"
         | "fiscal_years.create"
@@ -284,6 +296,19 @@ mod tests {
         ("parties.check_vat", Class::Post),
         ("parties.set_bank", Class::Settings),
         ("parties.merge", Class::Settings),
+        ("groups.list", Class::Read),
+        ("groups.create", Class::Settings),
+        ("groups.update", Class::Settings),
+        ("agreements.list", Class::Read),
+        ("agreements.get", Class::Read),
+        ("agreements.create", Class::Settings),
+        ("agreements.update", Class::Settings),
+        ("agreements.terminate", Class::Settings),
+        ("agreements.run_period", Class::Post),
+        ("agreements.post_period", Class::Post),
+        ("agreements.settle_period", Class::MoneyOut),
+        ("reports.intercompany_reconciliation", Class::Read),
+        ("reports.group_view", Class::Read),
     ];
 
     /// The table, role by role: a role runs a command exactly when the matrix
@@ -351,6 +376,18 @@ mod tests {
             (Role::Approver, "parties.list", true),
             (Role::Approver, "parties.update", false),
             (Role::Viewer, "parties.merge", false),
+            (Role::Owner, "groups.create", true),
+            (Role::Admin, "groups.update", true),
+            (Role::Accountant, "groups.create", false),
+            (Role::Accountant, "agreements.create", false),
+            (Role::Accountant, "agreements.run_period", true),
+            (Role::Accountant, "agreements.post_period", true),
+            (Role::Accountant, "agreements.settle_period", false),
+            (Role::Admin, "agreements.settle_period", true),
+            (Role::Viewer, "groups.list", true),
+            (Role::Viewer, "reports.group_view", true),
+            (Role::Viewer, "agreements.post_period", false),
+            (Role::Auditor, "reports.intercompany_reconciliation", true),
         ];
         for (role, command, allowed) in cases {
             assert_eq!(check(*role, command).is_ok(), *allowed, "{role} {command}");
