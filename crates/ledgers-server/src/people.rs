@@ -710,7 +710,11 @@ async fn login(
         }
     };
     let verifier = random_token(48);
-    let reauthenticate = query.get("prompt").map(String::as_str) == Some("login");
+    // Every interactive sign-in shows the sign-in page, where a person with a
+    // passkey is asked for it: reusing the identity provider's session would let
+    // an old email-link sign-in open the books without the passkey. Only an
+    // explicit `prompt=none` asks for a silent sign-in.
+    let reauthenticate = query.get("prompt").map(String::as_str) != Some("none");
     let login = LoginState {
         state: random_token(32),
         nonce: random_token(32),

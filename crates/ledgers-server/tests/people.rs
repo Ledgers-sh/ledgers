@@ -318,6 +318,11 @@ fn start_login(fx: &Fixture) -> (String, String, String) {
     assert_eq!(query["code_challenge_method"], "S256");
     assert_eq!(query["redirect_uri"], format!("{API}/v1/auth/callback"));
     assert_eq!(query["client_id"], CLIENT);
+    assert_eq!(
+        query["prompt"], "login",
+        "every sign-in shows the sign-in page"
+    );
+    assert_eq!(query["max_age"], "0");
     let cookie = set_cookie(&headers, LOGIN_COOKIE).expect("login cookie set");
     (cookie, query["state"].clone(), query["nonce"].clone())
 }
