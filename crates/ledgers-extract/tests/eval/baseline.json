@@ -1,0 +1,16 @@
+{
+  "overall_accuracy_bp": 9238,
+  "ece_bp": 1183,
+  "field_accuracy_bp": {
+    "vendor_name": 7500,
+    "vendor_vat_id": 10000,
+    "vendor_iban": 7500,
+    "invoice_number": 10000,
+    "invoice_date": 9166,
+    "due_date": 10000,
+    "currency": 8333,
+    "net_minor": 9166,
+    "vat_minor": 10000,
+    "gross_minor": 10000
+  }
+}
