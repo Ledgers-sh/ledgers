@@ -373,4 +373,14 @@ the secret, but the call needs the value, so keep the token in a shell variable 
 Delete the secret as soon as the call has answered, so the route closes again. A second
 call with the secret still set answers `200` with `"posted": 0`.
 
+The Factory Zero demo has two parts. `?demo=factory-zero` loads its operating book into
+`LEDGERS_DEMO_FACTORY_ZERO_COMPANY_ID`. The group demo (the IP company, the group and the
+licence, with twelve months posted and eleven settled) runs as
+`?demo=factory-zero-group&step=<n>`, one bounded step per request. A single Worker request
+cannot finish it: each database call is a network round trip, and the group takes about
+1,240 of them (at most 80 in any one step). Call steps `0` to `23` in order, one request each, until the
+response's `"done"` is `true`; `"next"` names the step to call next. Every step is
+idempotent, so a repeated or interrupted call is safe. A step answers `409` until the
+operating book exists.
+
 `LEDGERS_DEMO=0` keeps a development company empty.
