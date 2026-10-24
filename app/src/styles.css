@@ -652,7 +652,7 @@ figure { margin: 0; }
 .spark-line { fill: none; stroke: var(--spark-color); stroke-width: 1.75; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .spark-area { fill: var(--spark-color); opacity: .12; }
 
-.grid-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.grid-main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .grid-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .grid-three > .panel, .grid-main > .panel { min-width: 0; }
 .chart-panel { padding: 16px; }
@@ -1404,3 +1404,47 @@ tr.open-month { background: var(--human-bg); }
 .receipt-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; overflow-wrap: anywhere; }
 .receipt-item-amounts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; min-width: 0; }
 .receipt-on-account { margin: 0; font-size: 14px; }
+
+/* --- Shared card rule -------------------------------------------------------
+   Every card in a grid or row is the same size. Cards in one grid share equal tracks (the grids
+   below use repeat(auto-fill|auto-fit, minmax(X, 1fr)) or equal columns), stretch to the row's
+   height, and push their actions to the foot. A new card joins by being a direct child of one of
+   these grids, or by using one of the card classes listed here. Long text is clamped, never allowed
+   to stretch a card: titles one line, descriptions two lines (the full text is in title=). Amounts
+   use tabular numbers and wrap inside the card. */
+.kpis > .kpi,
+.tiles > .tile,
+.unit-cards > li,
+.bank-accounts > li,
+.gallery > .gallery-card,
+.accounts-grid > *,
+.view-columns > .member-column,
+.grid-main > .panel,
+.grid-three > .panel,
+.figures > .figure,
+.recon-figures > .recon-figure {
+  height: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.kpis > .kpi, .tiles > .tile, .figures > .figure, .recon-figures > .recon-figure { display: flex; }
+.grid-main > .panel > :not(.panel-head), .grid-three > .panel > :not(.panel-head), .view-columns > .member-column > :not(.panel-head) {
+  flex: 1 1 auto;
+}
+.unit-cards > li > .unit-card, .bank-accounts > li > .bank-card { height: 100%; box-sizing: border-box; }
+.unit-cards > li > .unit-card > :last-child { margin-top: auto; }
+.gallery-card > .btn { margin-top: auto; }
+.gallery-card > .gallery-head { min-width: 0; }
+
+/* One-line titles, two-line descriptions. */
+.gallery-name, .bank-card-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.gallery-imports, .gallery-hosts, .unit-card-name, .bank-iban, .kpi-sub, .kpi-change {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+}
+.kpi-value, .unit-figure .num, .bank-balances dd, .tile .value, .figure .num {
+  font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere;
+}

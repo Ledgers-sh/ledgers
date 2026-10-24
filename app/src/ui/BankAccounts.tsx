@@ -74,7 +74,7 @@ function AccountCard({ account }: { account: AccountView }) {
     <li>
       <a class="bank-card" href={`#/bank/${encodeURIComponent(account.id)}`}>
         <span class="bank-card-head">
-          <strong class="bank-card-name">{account.name}</strong>
+          <strong class="bank-card-name" title={account.name}>{account.name}</strong>
           <span class="chip">{account.currency}</span>
         </span>
         <span class="bank-iban mono">{formatIban(account.iban)}</span>
