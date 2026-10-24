@@ -559,6 +559,20 @@ pub fn default_commands() -> Vec<CommandDescriptor> {
             "ledgers subledger reconcile",
         ),
         entry(
+            "invoices.issue",
+            "post-within-limits",
+            "POST",
+            "/v1/invoices",
+            "ledgers invoices issue",
+        ),
+        entry(
+            "invoices.credit",
+            "post-within-limits",
+            "POST",
+            "/v1/invoices/{id}/credit-notes",
+            "ledgers invoices credit",
+        ),
+        entry(
             "reports.trial_balance",
             "read",
             "GET",

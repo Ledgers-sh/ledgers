@@ -144,6 +144,8 @@ fints-rs = "=0.2.0"
 ledgers-group = { path = "crates/ledgers-group" }
 # Open items, AR/AP subledgers and control-account reconciliation (issue #47).
 ledgers-subledger = { path = "crates/ledgers-subledger" }
+# Sales invoices and credit notes (issue #24).
+ledgers-invoice = { path = "crates/ledgers-invoice" }
 # Dev dependencies for ledgers-commands (issue #10):
 insta = { version = "1", features = ["json"] }
 trybuild = "1"

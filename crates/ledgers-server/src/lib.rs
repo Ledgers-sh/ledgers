@@ -201,6 +201,8 @@ pub fn compose(
     let builder = builder.module(ledgers_bills::BillsModule);
     // Subledger: open items and allocations for AR/AP reconciliation, after bills.
     let builder = builder.module(ledgers_subledger::SubledgerModule);
+    // Invoices: sales invoices and credit notes, after subledger.
+    let builder = builder.module(ledgers_invoice::InvoiceModule);
     // Bank accounts, statements and reconciliation: after the documents and the
     // bills whose tables reconciliation reads.
     let builder = builder.module(ledgers_bank::BankModule);
