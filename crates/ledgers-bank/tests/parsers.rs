@@ -221,10 +221,55 @@ fn remittance_that_asks_for_an_action_is_kept_as_plain_text() {
 }
 
 #[test]
-fn camt052_intraday_reports_are_unsupported_not_misread() {
-    let text = br#"<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.08"><BkToCstmrAcctRpt></BkToCstmrAcctRpt></Document>"#;
-    let err = parse::parse(Format::Camt053, text, None, "EUR").unwrap_err();
-    assert!(err.to_string().contains("camt.052"), "{err}");
+fn camt052_reads_opening_and_closing_balances() {
+    let bytes = fixture("camt052_bank_a_intraday.xml");
+    assert_eq!(parse::detect(&bytes), Some(Format::Camt052));
+    let s = one(Format::Camt052, &bytes, None, "EUR");
+    assert_eq!(s.iban.as_deref(), Some(HALDEN));
+    assert_eq!(s.reference.as_deref(), Some("INTRA-2026-03-15-A"));
+    assert_eq!(s.opening.as_ref().unwrap().minor, 1_428_500);
+    assert_eq!(s.closing.as_ref().unwrap().minor, 1_405_050);
+    assert_eq!(s.lines.len(), 3);
+    assert_eq!(check_balances(&s), Ok(BalanceCheck::Checked));
+    // Verify duplicate fingerprints work
+    assert_eq!(s.lines[0].bank_reference.as_deref(), Some("INT260315001"));
+    assert_eq!(s.lines[2].bank_reference.as_deref(), Some("INT260315003"));
+}
+
+#[test]
+fn ofx_sgml_reads_bank_statement_with_closing_balance() {
+    let bytes = fixture("ofx_bank_d_march.ofx");
+    assert_eq!(parse::detect(&bytes), Some(Format::Ofx));
+    let s = one(Format::Ofx, &bytes, None, "EUR");
+    assert_eq!(s.iban.as_deref(), Some("DE64100200300400500600"));
+    assert_eq!(s.opening, None, "OFX carries no opening balance");
+    assert_eq!(s.closing.as_ref().unwrap().minor, 27_655);
+    assert_eq!(s.lines.len(), 3);
+    assert_eq!(check_balances(&s), Ok(BalanceCheck::NotAvailable));
+    assert_eq!(s.lines[0].minor, -12_345);
+    assert_eq!(
+        s.lines[0].counterparty_name.as_deref(),
+        Some("Halden Supplies GmbH")
+    );
+    assert_eq!(s.lines[0].bank_reference.as_deref(), Some("TXN001"));
+}
+
+#[test]
+fn qfx_xml_reads_bank_statement_with_intuit_marker() {
+    let bytes = fixture("qfx_bank_d_march.qfx");
+    assert_eq!(parse::detect(&bytes), Some(Format::Ofx));
+    let s = one(Format::Ofx, &bytes, None, "EUR");
+    assert_eq!(s.iban.as_deref(), Some("DE64100200300400500600"));
+    assert_eq!(s.opening, None);
+    assert_eq!(s.closing.as_ref().unwrap().minor, 132_450);
+    assert_eq!(s.lines.len(), 3);
+    assert_eq!(check_balances(&s), Ok(BalanceCheck::NotAvailable));
+    assert_eq!(s.lines[1].minor, 120_000);
+    assert_eq!(
+        s.lines[1].counterparty_name.as_deref(),
+        Some("Nordlicht Office GmbH")
+    );
+    assert_eq!(s.lines[2].minor, -7_550);
 }
 
 #[test]
@@ -240,4 +285,199 @@ fn a_tampered_closing_balance_is_refused() {
         check_balances(&s),
         Err(ledgers_bank::statement::ParseError::Balance(_))
     ));
+}
+
+#[test]
+fn camt052_without_opening_balance_inline_returns_not_available() {
+    // camt.052 without opening balance: only closing
+    let no_opening = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.08">
+  <BkToCstmrAcctRpt>
+    <Rpt>
+      <Id>INTRA-2026-03-15-B</Id>
+      <Acct>
+        <Id><IBAN>DE64100200300400500600</IBAN></Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>ITBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">100.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-03-15</Dt></Dt>
+      </Bal>
+      <Ntry>
+        <Amt Ccy="EUR">50.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-03-15</Dt></BookgDt>
+        <AcctSvcrRef>T001</AcctSvcrRef>
+        <NtryDtls><TxDtls><RmtInf><Ustrd>Test</Ustrd></RmtInf></TxDtls></NtryDtls>
+      </Ntry>
+    </Rpt>
+  </BkToCstmrAcctRpt>
+</Document>"#;
+    let s = one(Format::Camt052, no_opening, None, "EUR");
+    assert_eq!(s.opening, None);
+    assert_eq!(s.closing.as_ref().unwrap().minor, 10_050);
+    assert_eq!(
+        check_balances(&s),
+        Ok(BalanceCheck::NotAvailable),
+        "camt.052 without opening balance cannot verify balance consistency"
+    );
+}
+
+#[test]
+fn camt052_with_opening_and_tampered_closing_is_refused() {
+    let tampered = String::from_utf8(fixture("camt052_bank_a_intraday.xml"))
+        .unwrap()
+        .replace(
+            r#"<Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">14050.50</Amt>"#,
+            r#"<Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">14050.51</Amt>"#,
+        );
+    let s = one(Format::Camt052, tampered.as_bytes(), None, "EUR");
+    // With opening balance, a tampered closing should be detected
+    assert!(matches!(
+        check_balances(&s),
+        Err(ledgers_bank::statement::ParseError::Balance(_))
+    ));
+}
+
+#[test]
+fn camt052_balance_selection_is_order_independent() {
+    // Test that CLBD is chosen even when ITBD appears first, and OPBD when PRCD appears first
+    let bytes = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.02">
+  <BkToCstmrAcctRpt>
+    <Grp>
+      <GrpHdr>
+        <MsgId>TEST001</MsgId>
+        <CreDtTm>2026-03-15T12:00:00</CreDtTm>
+      </GrpHdr>
+      <Stmt>
+        <Acct>
+          <Id>DE64100200300400500600</Id>
+          <Ccy>EUR</Ccy>
+        </Acct>
+        <Bal>
+          <Tp>
+            <CdOrPrtry>
+              <Cd>ITBD</Cd>
+            </CdOrPrtry>
+          </Tp>
+          <Amt Ccy="EUR">100.00</Amt>
+          <CdtDbtInd>CRDT</CdtDbtInd>
+          <Dt>
+            <Dt>2026-03-15</Dt>
+          </Dt>
+        </Bal>
+        <Bal>
+          <Tp>
+            <CdOrPrtry>
+              <Cd>CLBD</Cd>
+            </CdOrPrtry>
+          </Tp>
+          <Amt Ccy="EUR">200.00</Amt>
+          <CdtDbtInd>CRDT</CdtDbtInd>
+          <Dt>
+            <Dt>2026-03-15</Dt>
+          </Dt>
+        </Bal>
+        <Bal>
+          <Tp>
+            <CdOrPrtry>
+              <Cd>PRCD</Cd>
+            </CdOrPrtry>
+          </Tp>
+          <Amt Ccy="EUR">300.00</Amt>
+          <CdtDbtInd>CRDT</CdtDbtInd>
+          <Dt>
+            <Dt>2026-03-15</Dt>
+          </Dt>
+        </Bal>
+        <Bal>
+          <Tp>
+            <CdOrPrtry>
+              <Cd>OPBD</Cd>
+            </CdOrPrtry>
+          </Tp>
+          <Amt Ccy="EUR">400.00</Amt>
+          <CdtDbtInd>CRDT</CdtDbtInd>
+          <Dt>
+            <Dt>2026-03-15</Dt>
+          </Dt>
+        </Bal>
+      </Stmt>
+    </Grp>
+  </BkToCstmrAcctRpt>
+</Document>"#;
+    let s = one(Format::Camt052, bytes, None, "EUR");
+    // OPBD should be chosen over PRCD even though PRCD appears first
+    assert_eq!(
+        s.opening.as_ref().unwrap().minor,
+        40_000,
+        "OPBD (400.00) chosen over PRCD (300.00)"
+    );
+    // CLBD should be chosen over ITBD even though ITBD appears first
+    assert_eq!(
+        s.closing.as_ref().unwrap().minor,
+        20_000,
+        "CLBD (200.00) chosen over ITBD (100.00)"
+    );
+}
+
+#[test]
+fn reimporting_the_same_files_adds_no_duplicates() {
+    // Test idempotency: importing the same file twice should not create duplicates
+    let formats_and_fixtures = vec![
+        (Format::Camt053, "camt053_bank_a_march_full.xml"),
+        (Format::Camt052, "camt052_bank_a_intraday.xml"),
+        (Format::Ofx, "ofx_bank_d_march.ofx"),
+    ];
+    let account = "acct-test";
+
+    for (format, fixture_name) in formats_and_fixtures {
+        let bytes = fixture(fixture_name);
+        let s = one(format, &bytes, None, "EUR");
+
+        // Extract group keys for duplicate detection
+        let groups = |stmt: &ParsedStatement| -> Vec<String> {
+            stmt.lines
+                .iter()
+                .map(|l| {
+                    group_key(
+                        account,
+                        &l.booking_date,
+                        l.minor,
+                        &l.currency,
+                        l.bank_reference.as_deref(),
+                        l.counterparty_iban.as_deref(),
+                        &l.remittance,
+                    )
+                })
+                .collect()
+        };
+
+        // First import: all lines are new
+        let mut stored: HashMap<String, u32> = HashMap::new();
+        let first_groups = groups(&s);
+        let first_occs = assign_occurrences(&first_groups, &stored);
+        assert!(
+            first_occs.iter().all(Option::is_some),
+            "first import of {fixture_name}: all lines should be new"
+        );
+
+        // Update stored state with first import
+        for g in &first_groups {
+            *stored.entry(g.clone()).or_insert(0) += 1;
+        }
+
+        // Second import: all lines should already exist
+        let second_occs = assign_occurrences(&first_groups, &stored);
+        assert!(
+            second_occs.iter().all(Option::is_none),
+            "re-import of {fixture_name}: all lines should be recognized as duplicates"
+        );
+    }
 }

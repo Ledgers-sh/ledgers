@@ -1,10 +1,12 @@
-//! ISO 20022 `camt.053` (bank-to-customer statement) reader.
+//! ISO 20022 `camt.053` (bank-to-customer statement) and `camt.052`
+//! (intraday account report) reader.
 //!
 //! Elements are matched by their path from the root, so the same local name
 //! inside a balance (`Bal/Amt`) and inside an entry (`Ntry/Amt`) is never
-//! confused. Entries whose status is pending (`PDNG`) are skipped: only
-//! booked lines are imported. Counterparty fields follow the sign: an
-//! outflow names the creditor, an inflow the debtor.
+//! confused. Entries whose status is pending (`PDNG`) or unbooked (`INFO`) are
+//! skipped: only booked lines are imported. Counterparty fields follow the
+//! sign: an outflow names the creditor, an inflow the debtor. camt.052 commonly
+//! carries no opening balance and uses interim (`ITBD`) as closing.
 
 use super::{finish_currency, indicator_sign};
 use crate::money::{Decimal, parse_minor};
@@ -12,23 +14,27 @@ use crate::statement::{BalanceRow, Format, ParseError, ParsedLine, ParsedStateme
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-/// Reads every `Stmt` of a camt.053 document.
+/// Reads every `Stmt` (camt.053) or `Rpt` (camt.052) of a document.
 ///
 /// # Errors
 /// [`ParseError::Malformed`] for broken XML or a missing amount, currency,
 /// sign or date; [`ParseError::Unsupported`] for other camt message types.
 pub fn parse(text: &str) -> Result<Vec<ParsedStatement>, ParseError> {
-    if !text.contains("camt.053") && !text.contains("BkToCstmrStmt") {
-        if text.contains("BkToCstmrAcctRpt") {
-            return Err(ParseError::Unsupported(
-                "camt.052 intraday reports are not imported yet".to_owned(),
-            ));
-        }
-        return Err(ParseError::Malformed("not a camt.053 document".to_owned()));
+    let is_053 = text.contains("camt.053") || text.contains("BkToCstmrStmt");
+    let is_052 = text.contains("camt.052") || text.contains("BkToCstmrAcctRpt");
+    if !is_053 && !is_052 {
+        return Err(ParseError::Malformed(
+            "not a camt.053 or camt.052 document".to_owned(),
+        ));
     }
+    let format = if is_052 {
+        Format::Camt052
+    } else {
+        Format::Camt053
+    };
     let mut reader = Reader::from_str(text);
     reader.config_mut().trim_text(false);
-    let mut walker = Walker::default();
+    let mut walker = Walker::new(format);
     let mut path: Vec<String> = Vec::new();
     let mut pending_ccy: Option<String> = None;
     // Text can arrive in pieces (around entity references such as `&amp;`),
@@ -40,7 +46,7 @@ pub fn parse(text: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                 flush(&mut walker, &path, &mut buffer, pending_ccy.as_deref());
                 let name = String::from_utf8_lossy(start.local_name().as_ref()).into_owned();
                 match name.as_str() {
-                    "Stmt" => walker.begin_statement(),
+                    "Stmt" | "Rpt" => walker.begin_statement(),
                     "Ntry" => walker.begin_entry(),
                     "Bal" => walker.begin_balance(),
                     "Amt" => pending_ccy = attribute(&start, "Ccy"),
@@ -54,7 +60,7 @@ pub fn parse(text: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                 match String::from_utf8_lossy(end.local_name().as_ref()).as_ref() {
                     "Ntry" => walker.end_entry()?,
                     "Bal" => walker.end_balance()?,
-                    "Stmt" => walker.end_statement()?,
+                    "Stmt" | "Rpt" => walker.end_statement()?,
                     _ => {}
                 }
             }
@@ -154,25 +160,46 @@ struct EntryBuilder {
     currency: Option<String>,
 }
 
-#[derive(Default)]
 struct Walker {
+    format: Format,
     statements: Vec<ParsedStatement>,
     statement_iban: Option<String>,
     statement_id: Option<String>,
     balance: Option<BalanceBuilder>,
     entry: Option<EntryBuilder>,
     opening: Option<BalanceRow>,
+    opening_kind: Option<String>,
     closing: Option<BalanceRow>,
+    closing_kind: Option<String>,
     currency: Option<String>,
     lines: Vec<ParsedLine>,
 }
 
 impl Walker {
+    fn new(format: Format) -> Self {
+        Walker {
+            format,
+            statements: Vec::new(),
+            statement_iban: None,
+            statement_id: None,
+            balance: None,
+            entry: None,
+            opening: None,
+            opening_kind: None,
+            closing: None,
+            closing_kind: None,
+            currency: None,
+            lines: Vec::new(),
+        }
+    }
+
     fn begin_statement(&mut self) {
         self.statement_iban = None;
         self.statement_id = None;
         self.opening = None;
+        self.opening_kind = None;
         self.closing = None;
+        self.closing_kind = None;
         self.currency = None;
         self.lines = Vec::new();
     }
@@ -237,7 +264,7 @@ impl Walker {
             }
             return;
         }
-        if ends(path, &["Stmt", "Id"]) {
+        if ends(path, &["Stmt", "Id"]) || ends(path, &["Rpt", "Id"]) {
             self.statement_id = Some(value.to_owned());
         } else if ends(path, &["Acct", "Id", "IBAN"]) && !inside(path, "Ntry") {
             self.statement_iban = Some(value.to_owned());
@@ -248,8 +275,8 @@ impl Walker {
         let Some(entry) = self.entry.take() else {
             return Ok(());
         };
-        // Pending entries are not booked yet: they are skipped, not refused.
-        if entry.status.as_deref() == Some("PDNG") {
+        // Pending and unbooked entries are not booked yet: they are skipped, not refused.
+        if matches!(entry.status.as_deref(), Some("PDNG" | "INFO")) {
             return Ok(());
         }
         let currency = entry
@@ -314,9 +341,28 @@ impl Walker {
             minor: sign * magnitude,
         };
         match kind.as_str() {
-            "OPBD" | "PRCD" => self.opening = Some(row),
-            "CLBD" => self.closing = Some(row),
-            // Available and intraday balances do not bound the statement.
+            "OPBD" => {
+                // OPBD has highest priority for opening balance
+                self.opening = Some(row);
+                self.opening_kind = Some(kind);
+            }
+            "PRCD" if self.opening_kind.as_deref() != Some("OPBD") => {
+                // PRCD is used only if we don't have OPBD
+                self.opening = Some(row);
+                self.opening_kind = Some(kind);
+            }
+            "CLBD" => {
+                // CLBD has highest priority for closing balance
+                self.closing = Some(row);
+                self.closing_kind = Some(kind);
+            }
+            "ITBD" if self.closing_kind.as_deref() != Some("CLBD") => {
+                // ITBD is used only if we don't have CLBD
+                self.closing = Some(row);
+                self.closing_kind = Some(kind);
+            }
+            // Available and other interim balances do not bound the statement,
+            // and PRCD/ITBD when we already have OPBD/CLBD are also ignored.
             _ => {}
         }
         self.note_currency(&currency)
@@ -328,7 +374,7 @@ impl Walker {
             .clone()
             .ok_or_else(|| ParseError::Malformed("the statement has no currency".to_owned()))?;
         let statement = ParsedStatement {
-            format: Format::Camt053,
+            format: self.format,
             iban: self
                 .statement_iban
                 .take()
