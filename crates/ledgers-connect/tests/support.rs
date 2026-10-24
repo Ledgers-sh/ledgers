@@ -28,6 +28,8 @@ pub struct Recorded {
     pub requests: Mutex<Vec<(String, String, String)>>,
     /// The body of each request, in order (empty for a GET).
     pub bodies: Mutex<Vec<String>>,
+    /// The headers of each request, in order, as (name, value) pairs.
+    pub header_log: Mutex<Vec<Vec<(String, String)>>>,
 }
 
 impl Recorded {
@@ -37,6 +39,7 @@ impl Recorded {
             queue: Mutex::new(VecDeque::new()),
             requests: Mutex::new(Vec::new()),
             bodies: Mutex::new(Vec::new()),
+            header_log: Mutex::new(Vec::new()),
         })
     }
 
@@ -53,6 +56,7 @@ impl Recorded {
             ),
             requests: Mutex::new(Vec::new()),
             bodies: Mutex::new(Vec::new()),
+            header_log: Mutex::new(Vec::new()),
         })
     }
 
@@ -81,6 +85,17 @@ impl HttpClient for Recorded {
             .unwrap()
             .push((request.method().to_string(), uri.clone(), auth));
         self.bodies.lock().unwrap().push(body.clone());
+        let headers = request
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_owned(),
+                    value.to_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        self.header_log.lock().unwrap().push(headers);
         if let Some((status, answer)) = self.queue.lock().unwrap().pop_front() {
             return Ok(response(status, answer));
         }

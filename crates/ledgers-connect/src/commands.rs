@@ -54,6 +54,7 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
         "gcp" => &["project", "dataset", "table"],
         "azure" => &["tenant_id", "client_id", "subscription_id"],
         "supabase" => &["organization"],
+        "twilio" => &["account_sid", "subaccount_sid"],
         _ => &[],
     }
 }
@@ -1876,6 +1877,32 @@ impl Command for ReportsCostsByUnit {
             .collect();
         Ok(Plan::with_output(CostsOutput { lines }))
     }
+}
+
+/// The input of `connections.renewals`: the connection whose domains are read.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct RenewalsInput {
+    /// The registrar connection (Spaceship).
+    pub connection_id: String,
+}
+
+/// The output of `connections.renewals`: the domains that expire within the
+/// window, read live from the registrar. Nothing is written. A registrar does not
+/// give the renewal price of a domain it already holds, so no amount is shown.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct RenewalsOutput {
+    /// Whether the registrar answered.
+    pub ok: bool,
+    /// Why the read failed, when it failed. No credential is in it.
+    pub error: Option<String>,
+    /// The day the window starts from, `YYYY-MM-DD`.
+    pub as_of: String,
+    /// The window in days, from `as_of`. A domain already past its expiry is listed.
+    pub window_days: i64,
+    /// The domains in the window, soonest first.
+    pub domains: Vec<crate::model::DomainRecord>,
+    /// What the registrar said, as sentences.
+    pub notes: Vec<String>,
 }
 
 /// The input of `connections.test`: the connection to try.

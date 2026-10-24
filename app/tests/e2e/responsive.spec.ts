@@ -185,3 +185,65 @@ test('the group view figures are two per row at 390px', async ({ page }) => {
   }
   for (const figure of rows.figures) expect(figure.count).toBe(6);
 });
+
+/** Every card in a grid or row is the same size: cards that share a row have equal height and width (within 1px). */
+const CARD_SELECTOR = [
+  '.kpis > .kpi',
+  '.tiles > .tile',
+  '.unit-cards > li',
+  '.bank-accounts > li',
+  '.gallery > .gallery-card',
+  '.view-columns > .member-column',
+  '.grid-main > .panel',
+  '.grid-three > .panel',
+  '.figures > .figure',
+].join(', ');
+const CARD_SCREENS = [
+  { name: 'overview', hash: '#/overview', company: undefined },
+  { name: 'connected sources', hash: '#/settings/integrations', company: undefined },
+  { name: 'group view', hash: '#/group/view', company: 'FZIP01' },
+  { name: 'business units', hash: '#/accounts/units', company: undefined },
+  { name: 'bank accounts', hash: '#/bank', company: undefined },
+];
+
+test('cards in the same row have equal height and width at 390, 768 and 1440', async ({ page }) => {
+  const failures: string[] = [];
+  await setTheme(page, 'light');
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const screen of CARD_SCREENS) {
+      await page.goto(`/${screen.company ? `?company=${screen.company}` : ''}${screen.hash}`);
+      await expect(page.locator('main')).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      // The cards arrive with the fake API's data: wait for the first one before measuring.
+      if (screen.name !== 'business units') await expect(page.locator(CARD_SELECTOR).first()).toBeVisible();
+      const result = await page.evaluate((selector) => {
+        const cards = Array.from(document.querySelectorAll<HTMLElement>(selector))
+          .filter((el) => el.getClientRects().length > 0)
+          .map((el) => ({ rect: el.getBoundingClientRect(), grid: el.parentElement?.className ?? '' }));
+        // Rows are cards whose tops sit within 2px of each other inside the same parent grid.
+        const rows = new Map<string, typeof cards>();
+        for (const card of cards) {
+          const key = `${card.grid}|${Math.round(card.rect.top / 2)}`;
+          const list = rows.get(key) ?? [];
+          list.push(card);
+          rows.set(key, list);
+        }
+        const mismatches: string[] = [];
+        for (const row of rows.values()) {
+          if (row.length < 2) continue;
+          const heights = row.map((c) => c.rect.height);
+          const widths = row.map((c) => c.rect.width);
+          const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+          if (spread(heights) > 1 || spread(widths) > 1) {
+            mismatches.push(`row of ${row.length} in .${row[0].grid.split(' ')[0]}: heights ${heights.map(Math.round).join('/')}, widths ${widths.map(Math.round).join('/')}`);
+          }
+        }
+        return { count: cards.length, mismatches };
+      }, CARD_SELECTOR);
+      if (screen.name !== 'business units' && result.count === 0) failures.push(`[${screen.name} ${width}px] no cards found`);
+      for (const mismatch of result.mismatches) failures.push(`[${screen.name} ${width}px] ${mismatch}`);
+    }
+  }
+  expect(failures, failures.join('\n')).toEqual([]);
+});

@@ -1,0 +1,54 @@
+{
+  "items": [
+    {
+      "name": "squeez.in",
+      "unicodeName": "squeez.in",
+      "isPremium": false,
+      "autoRenew": true,
+      "registrationDate": "2025-11-20T00:00:00Z",
+      "expirationDate": "2026-11-20T00:00:00Z",
+      "lifecycleStatus": "active",
+      "verificationStatus": "verified",
+      "eppStatuses": ["ok"],
+      "suspensions": [],
+      "privacyProtection": { "level": "high" },
+      "nameservers": { "provider": "basic", "hosts": [] },
+      "contacts": {}
+    },
+    {
+      "name": "factory0.ventures",
+      "unicodeName": "factory0.ventures",
+      "isPremium": false,
+      "autoRenew": false,
+      "registrationDate": "2024-08-01T00:00:00Z",
+      "expirationDate": "2027-08-01T00:00:00Z",
+      "lifecycleStatus": "active",
+      "verificationStatus": "verified",
+      "eppStatuses": ["ok"],
+      "suspensions": [],
+      "privacyProtection": { "level": "high" },
+      "nameservers": { "provider": "basic", "hosts": [] },
+      "contacts": {}
+    },
+    {
+      "name": "lapsed.example",
+      "unicodeName": "lapsed.example",
+      "isPremium": false,
+      "autoRenew": false,
+      "registrationDate": "2023-10-01T00:00:00Z",
+      "expirationDate": "2026-10-01T00:00:00Z",
+      "lifecycleStatus": "redemption",
+      "verificationStatus": "verified",
+      "eppStatuses": ["pendingDelete"],
+      "suspensions": [],
+      "privacyProtection": { "level": "public" },
+      "nameservers": { "provider": "basic", "hosts": [] },
+      "contacts": {}
+    },
+    {
+      "unicodeName": "no-name.in",
+      "autoRenew": true
+    }
+  ],
+  "total": 4
+}

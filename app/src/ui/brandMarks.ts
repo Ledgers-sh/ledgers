@@ -5,7 +5,7 @@
  * Simple Icons 16.35.0 (CC0-1.0, https://simpleicons.org): the icon artwork is
  * public domain; the trademarks stay with their owners and the marks only
  * identify the service. Simple Icons has no Amazon Web Services, Microsoft
- * Azure or OpenAI mark, so those use neutral glyphs that name the service and
+ * Azure, OpenAI or Twilio mark, so those use neutral glyphs that name the service and
  * are not the companies' logos. Each mark has a 24-unit viewBox and is drawn
  * inline: no external images are loaded.
  */
@@ -37,6 +37,14 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   gcp: {
     title: 'Google Cloud',
     path: 'M12.19 2.38a9.344 9.344 0 0 0-9.234 6.893c.053-.02-.055.013 0 0-3.875 2.551-3.922 8.11-.247 10.941l.006-.007-.007.03a6.717 6.717 0 0 0 4.077 1.356h5.173l.03.03h5.192c6.687.053 9.376-8.605 3.835-12.35a9.365 9.365 0 0 0-2.821-4.552l-.043.043.006-.05A9.344 9.344 0 0 0 12.19 2.38zm-.358 4.146c1.244-.04 2.518.368 3.486 1.15a5.186 5.186 0 0 1 1.862 4.078v.518c3.53-.07 3.53 5.262 0 5.193h-5.193l-.008.009v-.04H6.785a2.59 2.59 0 0 1-1.067-.23h.001a2.597 2.597 0 1 1 3.437-3.437l3.013-3.012A6.747 6.747 0 0 0 8.11 8.24c.018-.01.04-.026.054-.023a5.186 5.186 0 0 1 3.67-1.69z',
+  },
+  spaceship: {
+    title: 'Spaceship',
+    path: 'M11.9997 1.2529c1.0445 0 1.956.5689 2.441 1.4125l4.5883 7.9314 4.45 7.6915c.0466.074.2105.3585.27.4938.2216.4677.2505.9472.251 1.1595 0 1.5496-1.2587 2.8056-2.8116 2.8056-.2949 0-.579-.045-.8457-.129l-7.9011-2.6061a1.406 1.406 0 0 0-.4413-.0705 1.413 1.413 0 0 0-.442.0705L3.658 22.6183l-.1623.0456a2.8398 2.8398 0 0 1-.6838.0831c-1.5531 0-2.8119-1.256-2.8119-2.8056.002-.243.0234-.5533.168-.9578.0294-.0911.0743-.176.1115-.264.0712-.1487.1607-.2875.2411-.4313l4.4493-7.6916 4.5883-7.9313c.485-.8437 1.3971-1.4126 2.4416-1.4126z',
+  },
+  twilio: {
+    title: 'Twilio',
+    path: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
   },
   polar: {
     title: 'Polar',

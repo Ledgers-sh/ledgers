@@ -10,6 +10,7 @@ Commands:
   create           connections.create
   delete           connections.delete
   list             connections.list
+  renewals         connections.renewals
   runs             connections.runs
   suspense-rebook  connections.suspense_rebook
   sync-now         connections.sync_now

@@ -1,0 +1,37 @@
+{
+  "end": 1,
+  "first_page_uri": "/2010-04-01/Accounts/AC-fixture-account/Usage/Records/Monthly.json?PageSize=2&Page=0",
+  "next_page_uri": null,
+  "page": 1,
+  "page_size": 2,
+  "previous_page_uri": "/2010-04-01/Accounts/AC-fixture-account/Usage/Records/Monthly.json?PageSize=2&Page=0",
+  "start": 2,
+  "uri": "/2010-04-01/Accounts/AC-fixture-account/Usage/Records/Monthly.json?PageSize=2&Page=1&PageToken=PA-test-token",
+  "usage_records": [
+    {
+      "account_sid": "AC-fixture-account",
+      "category": "totalprice",
+      "count": null,
+      "description": "Total Price",
+      "end_date": "2026-09-30",
+      "price": "-14.04",
+      "price_unit": "USD",
+      "start_date": "2026-09-01",
+      "usage": "14.04",
+      "usage_unit": "usd"
+    },
+    {
+      "account_sid": "AC-fixture-account",
+      "category": "calls",
+      "count": "310",
+      "count_unit": "calls",
+      "description": "Voice - Total",
+      "end_date": "2026-09-30",
+      "price": "-3.10",
+      "price_unit": "USD",
+      "start_date": "2026-09-01",
+      "usage": "1500",
+      "usage_unit": "minutes"
+    }
+  ]
+}

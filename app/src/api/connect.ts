@@ -163,6 +163,32 @@ export function connectionsTest(config: ClientConfig, id: string): Promise<TestC
   });
 }
 
+/** One domain due for renewal, as the registrar lists it. Metadata only: no price. */
+export interface RenewalDomain {
+  name: string;
+  expires_on: string;
+  auto_renew: boolean;
+  status: string | null;
+}
+
+export interface RenewalsOutput {
+  ok: boolean;
+  error: string | null;
+  as_of: string;
+  window_days: number;
+  domains: RenewalDomain[];
+  notes: string[];
+}
+
+/** POST /v1/connections/{id}/renewals (connections.renewals). Reads the registrar's domains; writes nothing. A person only. */
+export function connectionRenewals(config: ClientConfig, id: string): Promise<RenewalsOutput> {
+  return request<RenewalsOutput>(config, {
+    method: 'POST',
+    path: `/v1/connections/${encodeURIComponent(id)}/renewals`,
+    body: {},
+  });
+}
+
 export function connectionsSyncNow(config: ClientConfig, id: string): Promise<RunView> {
   return request<RunView>(config, {
     method: 'POST',

@@ -206,3 +206,51 @@ test('Polar takes an organization access token and its clearing and revenue acco
   expect(saved?.config).toMatchObject({ clearing_account: '1045', revenue_account: '4010', expense_account: '5100' });
   expect(saved?.config).not.toHaveProperty('tax_account');
 });
+
+test('Spaceship asks for an API key and secret, says which permission to create, and lists the domains due for renewal', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Spaceship' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('domains:read');
+  await expect(form).toContainText('no billing');
+  await expect(form.getByLabel('API key')).toHaveAttribute('type', 'password');
+  await expect(form.getByLabel('API secret')).toHaveAttribute('type', 'password');
+  await form.getByLabel('Name').fill('Spaceship (test)');
+  await form.getByLabel('API key').fill('ss_key_TEST_0001');
+  await form.getByLabel('API secret').fill('ss_secret_TEST_0001');
+  await form.getByLabel('Expense account').fill('6100');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Spaceship (test) is connected' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Run a sync to read its domains' })).toBeVisible();
+  expect(connectState.credentialsReceived).toEqual([{ api_key: 'ss_key_TEST_0001', api_secret: 'ss_secret_TEST_0001' }]);
+  expect(await page.content()).not.toContain('ss_secret_TEST_0001');
+  await page.getByRole('button', { name: /Manage/ }).first().click();
+  const renewals = page.locator('.renewals');
+  await expect(renewals.getByRole('heading', { name: 'Upcoming renewals' })).toBeVisible();
+  await expect(renewals).toContainText('squeez.in');
+  await expect(renewals).toContainText('2026-11-20');
+  await expect(renewals).toContainText('past expiry');
+  await expect(renewals).not.toContainText('factory0');
+});
+
+test('Twilio takes an API key SID and secret with the account SID, and leaves an empty subaccount out', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Twilio' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('never the main auth token');
+  await form.getByLabel('Name').fill('Twilio (test)');
+  await form.getByLabel('Account SID (AC…)').fill('AC-test-account-0001');
+  await form.getByLabel('API key SID (starts with SK)').fill('SK-test-key-sid-0001');
+  await form.getByLabel('API key secret').fill('twilio_secret_TEST_0001');
+  await form.getByLabel('Expense account').fill('6100');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Twilio (test) is connected' })).toBeVisible();
+  expect(connectState.credentialsReceived.at(-1)).toEqual({ api_key_sid: 'SK-test-key-sid-0001', api_key_secret: 'twilio_secret_TEST_0001' });
+  const saved = connectState.connections.at(-1);
+  expect(saved?.config).toMatchObject({ account_sid: 'AC-test-account-0001', expense_account: '6100' });
+  expect(saved?.config).not.toHaveProperty('subaccount_sid');
+});
