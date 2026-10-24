@@ -45,6 +45,7 @@ async fn post_invoice(
         rate: rate.map(std::borrow::ToOwned::to_owned),
         counter_account: "4000".to_owned(),
         dimensions: Default::default(),
+        counter_lines: Vec::new(),
         description: "Test invoice".to_owned(),
         source_id: Some(format!("INV-{event_id}")),
     };
@@ -99,6 +100,7 @@ async fn post_credit_note(
         rate: rate.map(std::borrow::ToOwned::to_owned),
         counter_account: "4000".to_owned(),
         dimensions: Default::default(),
+        counter_lines: Vec::new(),
         description: "Test credit note".to_owned(),
         source_id: Some(format!("CN-{event_id}")),
     };

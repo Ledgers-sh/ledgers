@@ -322,6 +322,7 @@ async fn subledger_item(
         rate: None,
         counter_account: counter_account.to_owned(),
         dimensions,
+        counter_lines: Vec::new(),
         description: format!("trend {kind} {event_id}"),
         source_id: Some(format!("{kind}-{event_id}")),
     };

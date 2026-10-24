@@ -82,6 +82,21 @@ async fn load_chart(db: &dyn Database, company_id: &str) -> Result<Chart, Comman
     Ok(Chart::from_entries(&entries))
 }
 
+/// One counter line of a multi-line `subledger.post-item`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CounterLine {
+    /// The account the line posts to.
+    pub account_number: String,
+    /// Amount in base currency minor units (positive).
+    pub amount: i64,
+    /// Tax code on the line (e.g. a VAT code), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tax_code: Option<String>,
+    /// Dimension values on the line, in the entry's dimension kinds.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dimensions: BTreeMap<String, String>,
+}
+
 /// Input to the `subledger.post-item` command.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PostItemInput {
@@ -111,6 +126,12 @@ pub struct PostItemInput {
     /// expense), in the entry's dimension kinds.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dimensions: BTreeMap<String, String>,
+    /// Several counter lines (revenue or expense plus VAT), each with its own
+    /// account, amount, tax code and dimensions. When non-empty it replaces
+    /// `counter_account` and `dimensions`; the amounts must sum to `amount`,
+    /// and the currency must be the base currency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub counter_lines: Vec<CounterLine>,
     /// Description for the entry.
     pub description: String,
     /// Optional source reference (e.g., invoice number).
@@ -318,6 +339,10 @@ fn build_entry_input(
     let tx_minor = i128::from(input.amount);
     let tx_amount = Amount::new(tx_minor, currency);
 
+    if !input.counter_lines.is_empty() {
+        validate_counter_lines(input, kind, &input.currency)?;
+    }
+
     // Parse rate if provided
     let rate = if input.currency.to_uppercase() == "EUR" {
         // Assume EUR is base currency
@@ -352,14 +377,15 @@ fn build_entry_input(
                 rate,
                 currency,
             ));
-            lines.push(build_line(
-                &input.counter_account,
+            push_counter(
+                &mut lines,
+                input,
                 "credit",
                 tx_amount,
                 base_amount,
                 rate,
                 currency,
-            ));
+            );
         }
         (Ledger::Ar, ItemKind::CreditNote) => {
             // Cr control (receivables) / Dr counter (revenue)
@@ -371,25 +397,27 @@ fn build_entry_input(
                 rate,
                 currency,
             ));
-            lines.push(build_line(
-                &input.counter_account,
+            push_counter(
+                &mut lines,
+                input,
                 "debit",
                 tx_amount,
                 base_amount,
                 rate,
                 currency,
-            ));
+            );
         }
         (Ledger::Ap, ItemKind::Invoice | ItemKind::Bill) => {
             // Dr counter (expense) / Cr control (payables)
-            lines.push(build_line(
-                &input.counter_account,
+            push_counter(
+                &mut lines,
+                input,
                 "debit",
                 tx_amount,
                 base_amount,
                 rate,
                 currency,
-            ));
+            );
             lines.push(build_line(
                 control_account,
                 "credit",
@@ -401,14 +429,15 @@ fn build_entry_input(
         }
         (Ledger::Ap, ItemKind::CreditNote) => {
             // Reversed: Cr counter (expense) / Dr control (payables)
-            lines.push(build_line(
-                &input.counter_account,
+            push_counter(
+                &mut lines,
+                input,
                 "credit",
                 tx_amount,
                 base_amount,
                 rate,
                 currency,
-            ));
+            );
             lines.push(build_line(
                 control_account,
                 "debit",
@@ -437,14 +466,6 @@ fn build_entry_input(
         (Ledger::Ar, ItemKind::Bill) => unreachable!("Bill should only be in AP"),
     }
 
-    // The requested dimensions belong on the counter-account line only; the
-    // control line stays untagged, as the open item is per party.
-    for line in &mut lines {
-        if line.account_number == input.counter_account {
-            line.dimensions = input.dimensions.clone();
-        }
-    }
-
     let fiscal_year = input
         .posting_date
         .get(..4)
@@ -468,6 +489,85 @@ fn build_entry_input(
             lines,
         },
     })
+}
+
+/// Checks several counter lines: an invoice or bill only (on-account has no
+/// counter line), in base currency, positive, and summing to the amount.
+fn validate_counter_lines(
+    input: &PostItemInput,
+    kind: ItemKind,
+    currency_code: &str,
+) -> Result<(), CommandError> {
+    if matches!(kind, ItemKind::OnAccount) {
+        return Err(CommandError::InvalidInput(
+            "counter_lines do not apply to an on-account item".to_owned(),
+        ));
+    }
+    if currency_code.to_uppercase() != "EUR" {
+        return Err(CommandError::InvalidInput(
+            "counter_lines need the base currency (EUR)".to_owned(),
+        ));
+    }
+    let mut total: i64 = 0;
+    for line in &input.counter_lines {
+        if line.amount <= 0 {
+            return Err(CommandError::InvalidInput(format!(
+                "counter line on {} must be positive",
+                line.account_number
+            )));
+        }
+        total = total
+            .checked_add(line.amount)
+            .ok_or_else(|| CommandError::InvalidInput("counter lines overflow".to_owned()))?;
+    }
+    if total != input.amount {
+        return Err(CommandError::InvalidInput(format!(
+            "counter lines sum to {total}, not the item amount {}",
+            input.amount
+        )));
+    }
+    Ok(())
+}
+
+/// Pushes the counter side of an item: the single `counter_account` line (with
+/// the requested dimensions), or one line per `counter_lines` entry.
+#[allow(clippy::too_many_arguments)]
+fn push_counter(
+    lines: &mut Vec<SerializableLine>,
+    input: &PostItemInput,
+    side: &str,
+    tx_amount: Amount,
+    base_amount: Amount,
+    rate: Rate,
+    currency: Currency,
+) {
+    if input.counter_lines.is_empty() {
+        let mut line = build_line(
+            &input.counter_account,
+            side,
+            tx_amount,
+            base_amount,
+            rate,
+            currency,
+        );
+        line.dimensions = input.dimensions.clone();
+        lines.push(line);
+        return;
+    }
+    for counter in &input.counter_lines {
+        let amount = Amount::new(i128::from(counter.amount), currency);
+        let mut line = build_line(
+            &counter.account_number,
+            side,
+            amount,
+            amount,
+            Rate::ONE,
+            currency,
+        );
+        line.tax_code = counter.tax_code.clone();
+        line.dimensions = counter.dimensions.clone();
+        lines.push(line);
+    }
 }
 
 /// Builds a journal entry line.
