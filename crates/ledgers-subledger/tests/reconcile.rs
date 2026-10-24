@@ -612,9 +612,9 @@ fn subledger_reconciliation_check_detects_drift() {
         )
         .await;
 
-        // Create drift by directly reducing open_item base_remaining_minor
-        // This simulates data corruption where subledger balance differs from GL
-        let drift_sql = "UPDATE open_item SET base_remaining_minor = 30_00 \
+        // Create drift by overwriting the posted amount the subledger balance is built
+        // from (base_original_minor): the item now says 300 where the GL posted 1000.
+        let drift_sql = "UPDATE open_item SET base_original_minor = 30_00 \
                         WHERE company_id = ? AND ledger = ?";
         db.execute(&Statement::with_values(
             drift_sql.to_owned(),
