@@ -53,4 +53,59 @@ pub struct SyncOutput {
     pub usage: Vec<UsageRecord>,
     /// Things the sync could not read, as plain sentences for the run log.
     pub notes: Vec<String>,
+    /// Journal entries a ledger connector plans from its provider's transactions
+    /// (Stripe balance transactions). Each one balances; the server posts them.
+    #[serde(default)]
+    pub entries: Vec<PlannedEntry>,
+}
+
+/// One line of a planned journal entry. `credit` is `false` for a debit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlannedLine {
+    /// The ledger account number.
+    pub account: String,
+    /// Whether the line is a debit (`true`) or a credit (`false`).
+    pub debit: bool,
+    /// The amount in minor units of the entry's currency, positive.
+    pub minor: i64,
+    /// The resource the line is allocated by (a product, an account id); the
+    /// server maps it to a business unit through the connection's rules.
+    pub resource: Option<String>,
+}
+
+/// A journal entry a ledger connector plans from one provider transaction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlannedEntry {
+    /// The provider's id for the transaction. Idempotency key (per company).
+    pub provider_id: String,
+    /// The posting date, `YYYY-MM-DD`.
+    pub posting_date: String,
+    /// The settlement currency code (ISO 4217, upper case). Entries post in it only.
+    pub currency: String,
+    /// A sanitised one-line description, with the presentment currency and amount.
+    pub description: String,
+    /// The lines. Debits equal credits.
+    pub lines: Vec<PlannedLine>,
+    /// Whether the entry went to the suspense account because its category is not known.
+    pub suspense: bool,
+}
+
+impl PlannedEntry {
+    /// Whether the debits equal the credits, in minor units.
+    #[must_use]
+    pub fn balances(&self) -> bool {
+        let debits: i128 = self
+            .lines
+            .iter()
+            .filter(|l| l.debit)
+            .map(|l| i128::from(l.minor))
+            .sum();
+        let credits: i128 = self
+            .lines
+            .iter()
+            .filter(|l| !l.debit)
+            .map(|l| i128::from(l.minor))
+            .sum();
+        debits == credits
+    }
 }

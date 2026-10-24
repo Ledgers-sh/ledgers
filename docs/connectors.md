@@ -4,8 +4,9 @@ Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
 `planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
-`supabase`, and `openai` and `openrouter`. Supabase books no money; OpenRouter books
-one invoice per day with no allocation; the others book bills by month.
+`supabase`, `openai` and `openrouter`, and `stripe`. Supabase books no money;
+OpenRouter books one invoice per day with no allocation; Stripe posts journal entries
+(not bills); the others book bills by month.
 
 ## How a sync books money
 
@@ -196,6 +197,69 @@ Source: <https://openrouter.ai/docs/api/api-reference/analytics/get-user-activit
 - **Test connection.** Today is not a completed day, so the test reads yesterday's
   activity to prove the key, and books nothing.
 
+## Stripe (`stripe`): balance transactions as journal entries
+
+Stripe is a payment source, not a cost source. Its books are journal entries, not
+bills. The source of truth is the **balance transactions**:
+`GET https://api.stripe.com/v1/balance_transactions` with `limit=100`, `created[gte]`
+and `created[lt]` for the window, `expand[]=data.source` (so each row carries its
+charge or refund), paged by `starting_after` while `has_more`. Source:
+<https://docs.stripe.com/api/balance_transactions/list>
+
+Each balance transaction with amount `A`, fee `F` and net `N = A - F` becomes one
+balanced entry in its **settlement currency** (the balance transaction's currency):
+
+| reporting category | revenue account | fee expense | clearing account |
+|---|---|---|---|
+| `charge` | `A` credit | `F` debit | `N` debit |
+| `refund`, `dispute` | `A` (reverses revenue) | `F` debit | `N` (credit when negative) |
+| `fee` | none | `A` (the fee charged) | `A` credit |
+| anything else | suspense account | `F` debit | `N` debit |
+
+`payout` posts **no entry here**. A payout moves money from the clearing account to
+the bank, and it is booked when its bank line is matched, through the bank rule
+(`bank.transactions.post`). The clearing account reaches zero when the payout's bank
+side is booked, so a charge, then a refund, then a payout leaves it at zero. The
+server test `stripe_ledger.rs` checks exactly this, through the bank module's own
+suggestion and posting path.
+
+- **Presentment.** The presentment currency and amount (from `data.source`) go in the
+  entry's description, for example `presented as USD 11000 (minor units)`. No FX line
+  is booked: the books are in the settlement currency only.
+- **Allocation.** The line's resource is the charge's `product` (or `unit`) metadata. The
+  connection's allocation rules map it to a business unit; otherwise the default unit.
+- **Idempotency.** Each entry's id is `stripe-bt:{balance transaction id}`. The ledger
+  refuses a second entry with the same external id, the sync checks before it posts,
+  and the table `connector_ledger_line` records the link. A repeat sync posts nothing.
+- **Postings.** Entries are posted one at a time through `journal.post_entry` (exposed as
+  `entries.post`), because each posting numbers its entry from the counter it reads.
+  Refunds are their own entries, not reversals of the charge, because a Stripe refund is
+  a new event. `entries.transfer` is not used.
+- **Unknown categories.** Anything not in the table goes to the suspense account, with a
+  note in the run. It is never dropped. An approval item in the Approvals inbox is added
+  in the next release.
+- **Connect.** Set `stripe_account` to a connected account id (`acct_…`) to read that
+  account's balance transactions with the `Stripe-Account` header. Leave it empty for the
+  platform's own account.
+- **Limits and throttling.** A window of more than 20,000 transactions is read up to that
+  limit, with a note; a later sync reads the rest. A `429` is retried with backoff, up to
+  three attempts, then reported as a failed run.
+
+**Credential.** A **restricted API key** with read access only to Balance, Charges,
+Refunds, Payouts, Disputes and Invoices, and no other resource. For Connect, grant the
+key's Connect permission only when it reads connected accounts.
+
+**Config.** `clearing_account` (the Stripe balance, a postable asset),
+`revenue_account` (charges and their reversals), `suspense_account` (unknown
+categories), `expense_account` (fees), and the optional `stripe_account`. Each account is
+checked against the chart when the connection is saved: it must exist, not be archived,
+and not be a heading.
+
+**Suggested bank rule.** When the connection is created, Ledgers proposes a bank rule:
+a payout is an inflow whose description contains `stripe` (amount at least 1 minor unit),
+which books to the clearing account. The rule is proposed by the connector and waits in
+Bank, Rules until a person enables it.
+
 ## Providers not built, and why
 
 - **MiniMax.** No billing or usage API is documented. Balance and usage are on the
@@ -222,7 +286,8 @@ currency field. Until then, Supabase reports these prices as run notes only.
 
 - Migration `0002` widens the `connector` check to include `aws` and `vercel`;
   migration `0003` adds `gcp`, `azure` and `supabase`; migration `0004` adds `openai`
-  and `openrouter`.
+  and `openrouter`; migration `0005` adds `stripe` and the ledger idempotency table
+  `connector_ledger_line` (D1 mirror `0044`).
   SQLite cannot alter a check constraint, so the migration copies the rows into a
   new table and renames it into place. It defers foreign-key checks with
   `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores

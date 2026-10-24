@@ -20,6 +20,7 @@ const SOURCE_NAMES: Record<string, string> = {
   supabase: 'Supabase',
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
+  stripe: 'Stripe',
 };
 
 /** Stacked bars per month, one segment per series (a unit or a source). Same frame as the other charts. */

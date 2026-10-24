@@ -165,3 +165,24 @@ test('OpenRouter asks for a management key, and its help says that model calls a
   await expect(page.getByRole('status').filter({ hasText: 'OpenRouter (test) is connected' })).toBeVisible();
   expect(connectState.tokensReceived).toContain('sk-or-mgmt-TEST_0001');
 });
+
+test('Stripe takes a restricted key and its three accounts, and leaves an empty Connect account out', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Stripe' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('read only on Balance');
+  await form.getByLabel('Name').fill('Stripe (test)');
+  await form.getByLabel('Stripe balance (clearing account)').fill('1035');
+  await form.getByLabel('Revenue account for charges').fill('4010');
+  await form.getByLabel('Suspense account for unknown categories').fill('2040');
+  await form.getByLabel('Expense account').fill('5100');
+  await form.getByLabel('Token').fill('rk_live_TEST_0001');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Stripe (test) is connected' })).toBeVisible();
+  expect(connectState.tokensReceived).toContain('rk_live_TEST_0001');
+  const saved = connectState.connections.at(-1);
+  expect(saved?.config).toMatchObject({ clearing_account: '1035', revenue_account: '4010', suspense_account: '2040', expense_account: '5100' });
+  expect(saved?.config).not.toHaveProperty('stripe_account');
+});

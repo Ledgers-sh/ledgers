@@ -180,11 +180,13 @@ fn sync_input(connection: &str, fetched: SyncOutput) -> SyncInput {
         fetched: Some(fetched),
         fetch_error: None,
         created_by: OWNER_ID.to_owned(),
+        ledger_links: Vec::new(),
     }
 }
 
 fn sample_answer() -> SyncOutput {
     SyncOutput {
+        entries: Vec::new(),
         invoices: vec![
             invoice("cloudflare-billing:a", "2026-07", 1_001, "Cloudflare, Inc."),
             invoice("cloudflare-billing:b", "2026-08", 2_500, "Cloudflare, Inc."),
@@ -585,6 +587,7 @@ fn a_failed_fetch_is_a_failed_run_and_writes_no_invoice() {
                         .to_owned(),
                 ),
                 created_by: OWNER_ID.to_owned(),
+                ledger_links: Vec::new(),
             };
             let run = run_in(COMPANY, &*kit.db, &ConnectionsSyncNow, "sync-f", &failed)
                 .await

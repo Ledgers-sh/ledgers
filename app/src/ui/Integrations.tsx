@@ -75,6 +75,12 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://supabase.com/dashboard/account/tokens',
     tokenLabel: 'integrations.create_token',
   },
+  stripe: {
+    imports: 'integrations.stripe_imports',
+    scopes: 'integrations.scopes_stripe',
+    tokenUrl: 'https://docs.stripe.com/keys#create-restricted-api-secret-key',
+    tokenLabel: 'integrations.create_restricted_key',
+  },
   openai: {
     imports: 'integrations.openai_imports',
     scopes: 'integrations.scopes_openai',
@@ -105,10 +111,17 @@ const GENERIC_CONFIG: Record<string, MessageKey> = {
   tenant_id: 'integrations.azure_tenant',
   client_id: 'integrations.azure_client',
   subscription_id: 'integrations.azure_subscription',
+  clearing_account: 'integrations.stripe_clearing',
+  revenue_account: 'integrations.stripe_revenue',
+  suspense_account: 'integrations.stripe_suspense',
+  stripe_account: 'integrations.stripe_connect',
 };
 
+/** Generic config keys that may stay empty. */
+const OPTIONAL_CONFIG = new Set<string>(['stripe_account']);
+
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
-const COMING_SOON = ['MiniMax', 'GitHub', 'Stripe', 'Polar', 'Google Workspace', 'Resend'];
+const COMING_SOON = ['MiniMax', 'GitHub', 'Polar', 'Google Workspace', 'Resend'];
 
 function Mark({ connector }: { connector: string }) {
   const mark = BRAND_MARKS[connector];
@@ -308,7 +321,9 @@ function ConnectForm({
       next.credential = 'integrations.credential_error';
     }
     const genericKeys = connector.config_keys.filter((key) => key in GENERIC_CONFIG);
-    if (genericKeys.some((key) => (generic[key] ?? '').trim() === '')) next.generic = 'integrations.config_required';
+    if (genericKeys.some((key) => !OPTIONAL_CONFIG.has(key) && (generic[key] ?? '').trim() === '')) {
+      next.generic = 'integrations.config_required';
+    }
     if (account.trim() === '') next.account = 'integrations.expense_hint';
     if (needsCloudAccount && cloudAccount.trim() === '') next.cloudAccount = 'integrations.account_id';
     if (needsOrganization && organization.trim() === '') next.organization = 'integrations.organization';
@@ -322,7 +337,10 @@ function ConnectForm({
     if (needsCurrency) config.currency = currency.trim().toUpperCase();
     if (needsTagKey && tagKey.trim() !== '') config.tag_key = tagKey.trim();
     if (needsTeamId && teamId.trim() !== '') config.team_id = teamId.trim();
-    for (const key of genericKeys) config[key] = (generic[key] ?? '').trim();
+    for (const key of genericKeys) {
+      const value = (generic[key] ?? '').trim();
+      if (value !== '' || !OPTIONAL_CONFIG.has(key)) config[key] = value;
+    }
     const secret = tokenMode
       ? { token: token.trim() }
       : { credential: Object.fromEntries(connector.credential_fields.map((field) => [field.name, (credentials[field.name] ?? '').trim()])) };
