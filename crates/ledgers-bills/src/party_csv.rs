@@ -14,6 +14,12 @@
 //! `parties.import_check` runs the same plan without writing and reports each
 //! row. `parties.import` writes only when every row is valid; a file with any
 //! error is refused whole. Logos are not part of the file: they are uploaded.
+//!
+//! Formula safety: an exported cell that starts with `= + - @`, a tab, a
+//! carriage return or an apostrophe gets one apostrophe in front, and an
+//! import removes exactly that apostrophe again (only when a trigger or another
+//! apostrophe follows it). The escape is applied before a cell is parsed, so
+//! `-12.50` exports as `'-12.50` and imports as `-12.50`.
 
 use crate::iban;
 use crate::parties::{
@@ -120,6 +126,34 @@ fn csv_cell(value: &str) -> String {
     }
 }
 
+/// The characters that make a spreadsheet read a cell as a formula. Party
+/// names can come from scanned invoices, so an exported cell that starts with
+/// one of them is written with an apostrophe in front.
+const FORMULA_TRIGGERS: [char; 6] = ['=', '+', '-', '@', '\t', '\r'];
+
+/// Escapes one exported cell. A cell that starts with a trigger, or with an
+/// apostrophe, gets one apostrophe in front; the apostrophe makes an
+/// apostrophe-led value unambiguous on the way back in.
+fn guard_formula(value: &str) -> String {
+    match value.chars().next() {
+        Some(first) if first == '\'' || FORMULA_TRIGGERS.contains(&first) => format!("'{value}"),
+        _ => value.to_string(),
+    }
+}
+
+/// Undoes [`guard_formula`] on one imported cell. A cell that starts with an
+/// apostrophe whose second character is a trigger or another apostrophe loses
+/// exactly that one leading apostrophe. Every other cell is left as it is.
+fn unguard_formula(value: &str) -> &str {
+    let mut chars = value.chars();
+    match (chars.next(), chars.next()) {
+        (Some('\''), Some(second)) if second == '\'' || FORMULA_TRIGGERS.contains(&second) => {
+            &value[1..]
+        }
+        _ => value,
+    }
+}
+
 /// The parsed file: its header and its data rows, each the width of the header.
 struct Table {
     header: Vec<String>,
@@ -192,12 +226,14 @@ struct RowCells<'a> {
 }
 
 impl RowCells<'_> {
-    /// The trimmed cell, or `None` when the file has no such column.
+    /// The trimmed cell with any formula escape removed, or `None` when the
+    /// file has no such column. Numbers are parsed from this value, so the
+    /// escape is gone before any parse.
     fn get(&self, column: &str) -> Option<&str> {
         self.header
             .iter()
             .position(|h| h == column)
-            .map(|index| self.cells[index].trim())
+            .map(|index| unguard_formula(self.cells[index].trim()))
     }
 }
 
@@ -778,7 +814,7 @@ pub fn party_csv(parties: &[PartyView]) -> String {
             party.bic.clone().unwrap_or_default(),
             String::new(),
         ];
-        let line: Vec<String> = cells.iter().map(|c| csv_cell(c)).collect();
+        let line: Vec<String> = cells.iter().map(|c| csv_cell(&guard_formula(c))).collect();
         out.push_str(&line.join(","));
         out.push('\n');
     }
@@ -992,5 +1028,89 @@ impl Command for PartiesExport {
             csv: party_csv(&parties),
             rows,
         }))
+    }
+}
+
+#[cfg(test)]
+mod formula_tests {
+    use super::*;
+
+    /// The export of one cell, read back the way an import reads it: the
+    /// cell is written with `csv_cell`, parsed with `parse_csv`, then trimmed
+    /// and unguarded by `RowCells::get`.
+    fn round_trip(value: &str) -> String {
+        let line = format!("name,notes\nParty,{}\n", csv_cell(&guard_formula(value)));
+        let rows = parse_csv(&line).expect("the line parses");
+        let header: Vec<String> = rows[0].clone();
+        let cells = RowCells {
+            header: &header,
+            cells: &rows[1],
+        };
+        cells.get("notes").expect("the notes column").to_string()
+    }
+
+    #[test]
+    fn a_formula_cell_is_prefixed_and_imports_back_unchanged() {
+        let value = "=HYPERLINK(\"https://evil.example\",\"Invoice\")";
+        assert_eq!(
+            guard_formula(value),
+            "'=HYPERLINK(\"https://evil.example\",\"Invoice\")"
+        );
+        assert_eq!(round_trip(value), value);
+    }
+
+    #[test]
+    fn every_trigger_is_prefixed_and_imports_back() {
+        for trigger in ["=1+1", "+1", "-1", "@SUM(A1)", "\t=x", "\r=x"] {
+            assert_eq!(guard_formula(trigger), format!("'{trigger}"));
+            assert_eq!(round_trip(trigger), trigger, "{trigger:?}");
+        }
+    }
+
+    #[test]
+    fn a_leading_apostrophe_is_escaped_and_imports_back() {
+        assert_eq!(guard_formula("'=x"), "''=x");
+        assert_eq!(round_trip("'=x"), "'=x");
+    }
+
+    #[test]
+    fn an_apostrophe_without_a_trigger_is_escaped_and_imports_back() {
+        assert_eq!(guard_formula("'hello"), "''hello");
+        assert_eq!(round_trip("'hello"), "'hello");
+    }
+
+    #[test]
+    fn a_lone_apostrophe_and_an_apostrophe_inside_a_value_round_trip() {
+        assert_eq!(round_trip("'"), "'");
+        assert_eq!(round_trip("O'Brien & Sons"), "O'Brien & Sons");
+        assert_eq!(guard_formula("O'Brien"), "O'Brien");
+    }
+
+    #[test]
+    fn a_negative_number_exports_guarded_and_imports_as_the_number() {
+        assert_eq!(guard_formula("-12.50"), "'-12.50");
+        assert_eq!(round_trip("-12.50"), "-12.50");
+        // The escape is gone before the cell is parsed: a guarded number
+        // parses to the same value as the bare one.
+        let stripped = unguard_formula("'-12");
+        assert_eq!(stripped.parse::<i32>().expect("a number"), -12);
+    }
+
+    #[test]
+    fn an_import_leaves_cells_without_the_escape_pattern_alone() {
+        // An apostrophe with an ordinary second character is not an escape.
+        assert_eq!(unguard_formula("'hello"), "'hello");
+        assert_eq!(unguard_formula("Acme GmbH"), "Acme GmbH");
+        assert_eq!(unguard_formula("'"), "'");
+        assert_eq!(unguard_formula(""), "");
+        // Only one apostrophe is removed.
+        assert_eq!(unguard_formula("''=x"), "'=x");
+        assert_eq!(unguard_formula("'''"), "''");
+    }
+
+    #[test]
+    fn a_plain_value_is_not_changed_by_the_export() {
+        assert_eq!(guard_formula("Acme GmbH"), "Acme GmbH");
+        assert_eq!(guard_formula(""), "");
     }
 }

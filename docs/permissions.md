@@ -33,6 +33,16 @@ Within the matrix, each command belongs to one class:
 | money-out | bill payments, intercompany settlement (`agreements.settle_period`) | yes | yes | | | | |
 | close | close or reopen a period, create or close a fiscal year | yes | yes | | | | |
 
+Party CSV files (`parties.export`, `parties.import_check`, `parties.import`)
+guard against spreadsheet formulas. Party names can come from scanned invoices,
+so an exported cell that starts with `=`, `+`, `-`, `@`, a tab, a carriage
+return or an apostrophe gets one apostrophe in front (`=HYPERLINK(...)` exports
+as `'=HYPERLINK(...)`, `'x` as `''x`, `-12.50` as `'-12.50`). An import removes
+exactly one leading apostrophe, and only when the apostrophe is followed by one
+of those characters or by another apostrophe; every other cell is read as it
+is. The escape comes off before a cell is parsed, so a number reads as its
+value. The round trip is exact: importing an export stores the same values.
+
 Group commands touch more than one company, so the server checks the role in
 every company a command names, not only the one in the request. A group
 is created and its members changed by an owner of every member company.
