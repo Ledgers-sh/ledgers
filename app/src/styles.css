@@ -1448,3 +1448,6 @@ tr.open-month { background: var(--human-bg); }
 .kpi-value, .unit-figure .num, .bank-balances dd, .tile .value, .figure .num {
   font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere;
 }
+
+/* Every row of a card grid has the same height, so all cards in a grid share one size. */
+.kpis, .tiles, .unit-cards, .bank-accounts, .gallery, .accounts-grid, .figures, .recon-figures { grid-auto-rows: 1fr; }
