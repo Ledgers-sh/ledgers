@@ -3,8 +3,9 @@
 Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
-`planetscale` (earlier releases), `aws` and `vercel`, and `gcp`, `azure` and
-`supabase`. Supabase books no money; the others book bills and usage.
+`planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
+`supabase`, and `openai` and `openrouter`. Supabase books no money; OpenRouter books
+one invoice per day with no allocation; the others book bills by month.
 
 ## How a sync books money
 
@@ -159,10 +160,69 @@ OpenAPI document at <https://api.supabase.com/api/v1-json>.
 - **Config.** `organization`, the organization slug.
 - **Limit.** Projects beyond the first 25 are counted in a note, not read.
 
+## OpenAI (`openai`): needs an admin key
+
+The organization costs API, `GET https://api.openai.com/v1/organization/costs`, with
+`start_time` and `end_time` (Unix seconds), `bucket_width=1d`, `group_by=project_id`,
+paged by `page` while `has_more`. Each bucket's results carry `amount` (`value` in
+dollars, `currency` in lower case) and `project_id` (null when unattributed).
+Source: <https://platform.openai.com/docs/api-reference/usage/costs>
+
+- **Credential.** An **admin API key**, created by an organization owner or admin under
+  Settings, Organization, Admin API keys. A project key cannot read organization costs.
+- **Allocation key.** The project. A cost with no project books as `unattributed`.
+- **Months.** A month is booked once it has ended, as for the other cost connectors.
+- **Not verified live.** The costs reference page could not be checked against a live
+  admin key when this was written. If OpenAI answers 404 for a valid admin key, the
+  sync is recorded as a failed run with that status, and nothing is booked.
+
+## OpenRouter (`openrouter`)
+
+The activity endpoint, `GET https://openrouter.ai/api/v1/activity?date=YYYY-MM-DD`, one
+request per UTC day. Each row has `usage` (dollars, a number), `requests`, `model`,
+`provider_name` and `endpoint_id`. It needs a **management key** (created at
+<https://openrouter.ai/settings/management-keys>); a regular key is refused.
+Source: <https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity>
+
+- **What is booked.** Each completed UTC day in the window is one invoice,
+  `openrouter-usage:{date}:USD`, booked once and skipped on later syncs. Days with no
+  spend book nothing.
+- **Retention limit.** The endpoint keeps only the last 30 completed days, so a whole
+  month is never in reach. That is why the books are per day, not per month.
+- **Allocation.** Not yet. Allocation by model needs usage weights per day, and the
+  framework keeps usage per month. OpenRouter days therefore write no usage rows and
+  book to the connection's default unit, with a note saying so. Per-model totals per day
+  appear in the run notes.
+- **Test connection.** Today is not a completed day, so the test reads yesterday's
+  activity to prove the key, and books nothing.
+
+## Providers not built, and why
+
+- **MiniMax.** No billing or usage API is documented. Balance and usage are on the
+  console pages only, so there is nothing to read.
+- **Z.AI (GLM).** No billing or usage query API is documented (the docs point to the
+  console). Undocumented endpoints in community tools are not used.
+- **Mistral.** The admin usage endpoint (`/v1/admin/usage`) exists, but it is Enterprise
+  only and in preview, and it reports per workspace, with no split by key. It is left out
+  until it is generally available for the plans Ledgers is used on.
+- **Google Gemini.** The Gemini API has no spend API. Gemini costs appear in the Cloud
+  Billing export, so they come through the **Google Cloud** connector (`gcp`), filtered
+  to the Gemini API service. No separate Gemini connector is needed.
+- **Other providers researched** (DeepSeek, Groq, Cohere, Perplexity, xAI, Together,
+  Fireworks): the research is kept in `docs/connectors/llm-providers.md`. Each is left
+  for a later slice; the reasons are recorded there.
+
+## Open item: Supabase add-on prices
+
+Supabase add-on prices carry an amount and an interval but no currency. Nothing is
+booked in a currency until a live account's add-on response has been checked for a
+currency field. Until then, Supabase reports these prices as run notes only.
+
 ## Deploy notes
 
 - Migration `0002` widens the `connector` check to include `aws` and `vercel`;
-  migration `0003` adds `gcp`, `azure` and `supabase`.
+  migration `0003` adds `gcp`, `azure` and `supabase`; migration `0004` adds `openai`
+  and `openrouter`.
   SQLite cannot alter a check constraint, so the migration copies the rows into a
   new table and renames it into place. It defers foreign-key checks with
   `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores

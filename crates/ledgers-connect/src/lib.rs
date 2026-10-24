@@ -24,6 +24,8 @@ pub mod http;
 pub mod model;
 pub mod module;
 pub mod money;
+pub mod openai;
+pub mod openrouter;
 pub mod planetscale;
 pub mod secret;
 pub mod sigv4;
@@ -49,6 +51,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "connect_cloud",
         include_str!("../migrations/sqlite/0003_connect_cloud.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "connect_llm",
+        include_str!("../migrations/sqlite/0004_connect_llm.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite, with the append-only
@@ -68,6 +75,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0003",
         "connect_cloud",
         include_str!("../migrations/postgres/0003_connect_cloud.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0004",
+        "connect_llm",
+        include_str!("../migrations/postgres/0004_connect_llm.sql"),
     ),
 ];
 
