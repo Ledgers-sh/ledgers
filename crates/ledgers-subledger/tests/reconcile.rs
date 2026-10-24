@@ -655,3 +655,127 @@ fn subledger_reconciliation_check_detects_drift() {
         );
     });
 }
+
+#[test]
+fn an_open_item_whose_remaining_balance_drifts_is_a_blocker() {
+    let h = harness();
+    let db = h.db.as_ref();
+    pollster::block_on(async {
+        mount(db, COMPANY_ID).await;
+        let journal_id = create_journal(db, COMPANY_ID).await;
+        let item_id = post_invoice(
+            db,
+            &journal_id,
+            "cust1",
+            10_0000,
+            "EUR",
+            None,
+            "2026-10-15",
+            "inv_drift",
+        )
+        .await;
+
+        // Overwrite the remaining balance: the item now says 300 is open where
+        // its original 1000 less no allocations is 1000.
+        db.execute(&Statement::with_values(
+            "UPDATE open_item SET base_remaining_minor = 30_00 WHERE id = ?".to_owned(),
+            vec![Value::from(item_id.as_str())],
+        ))
+        .await
+        .expect("the drift update");
+
+        let journal = TestJournal;
+        let blockers = SubledgerReconciliationCheck
+            .blockers(CloseCheckContext {
+                db,
+                journal: &journal,
+                company_id: COMPANY_ID,
+                period: "2026-10",
+                starts_on: "2026-10-01",
+                ends_on: "2026-10-31",
+            })
+            .await
+            .expect("blockers query");
+        let item_blocker = blockers
+            .iter()
+            .find(|b| b.kind == "open-item-mismatch")
+            .expect("an open-item blocker");
+        assert!(
+            item_blocker.link.ends_with(&format!("item={item_id}")),
+            "the blocker names the item: {}",
+            item_blocker.link
+        );
+    });
+}
+
+#[test]
+fn the_ledger_reconciliation_is_as_of_the_date_asked_for() {
+    let h = harness();
+    let db = h.db.as_ref();
+    pollster::block_on(async {
+        mount(db, COMPANY_ID).await;
+        let journal_id = create_journal(db, COMPANY_ID).await;
+        let item_id = post_invoice(
+            db,
+            &journal_id,
+            "cust1",
+            10_0000,
+            "EUR",
+            None,
+            "2026-10-15",
+            "inv_asof",
+        )
+        .await;
+        // The customer pays on the 20th, after the reconciliation date below.
+        let input = AllocateInput {
+            ledger: "ar".to_owned(),
+            party_id: "cust1".to_owned(),
+            journal_id: journal_id.clone(),
+            date: "2026-10-20".to_owned(),
+            bank_account: "1200".to_owned(),
+            paid: 10_0000,
+            items: vec![AllocateItem {
+                open_item_id: item_id.clone(),
+                amount: 10_0000,
+                paid_base: None,
+            }],
+            description: None,
+            reference: None,
+        };
+        let executor = Executor::new(db, TestAuthenticator, DefaultPolicy);
+        executor
+            .run(
+                &SubledgerAllocate,
+                "bearer".to_string(),
+                CommandContext {
+                    company_id: COMPANY_ID.to_owned(),
+                    is_person: true,
+                    event_id: "alloc_asof".to_owned(),
+                    request_id: "req_alloc_asof".to_owned(),
+                    now: NOW.to_owned(),
+                },
+                &input,
+                Execute::Run,
+            )
+            .await
+            .expect("the payment allocates");
+
+        // On the 16th the receivable is still owed in full, in both views.
+        let before = reconcile(db, COMPANY_ID, "2026-10-16")
+            .await
+            .expect("reconcile as of the 16th");
+        let ar = before.iter().find(|r| r.ledger == "ar").expect("ar");
+        assert_eq!(ar.subledger_balance, 10_0000);
+        assert_eq!(ar.gl_balance, 10_0000);
+        assert_eq!(ar.difference, 0);
+
+        // By the 31st the payment is in both as well, and the balance is nil.
+        let after = reconcile(db, COMPANY_ID, "2026-10-31")
+            .await
+            .expect("reconcile as of the 31st");
+        let ar = after.iter().find(|r| r.ledger == "ar").expect("ar");
+        assert_eq!(ar.subledger_balance, 0);
+        assert_eq!(ar.gl_balance, 0);
+        assert_eq!(ar.difference, 0);
+    });
+}
