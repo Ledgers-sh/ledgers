@@ -75,6 +75,12 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://supabase.com/dashboard/account/tokens',
     tokenLabel: 'integrations.create_token',
   },
+  polar: {
+    imports: 'integrations.polar_imports',
+    scopes: 'integrations.scopes_polar',
+    tokenUrl: 'https://polar.sh/docs/integrate/oat',
+    tokenLabel: 'integrations.create_access_token',
+  },
   stripe: {
     imports: 'integrations.stripe_imports',
     scopes: 'integrations.scopes_stripe',
@@ -111,17 +117,18 @@ const GENERIC_CONFIG: Record<string, MessageKey> = {
   tenant_id: 'integrations.azure_tenant',
   client_id: 'integrations.azure_client',
   subscription_id: 'integrations.azure_subscription',
-  clearing_account: 'integrations.stripe_clearing',
-  revenue_account: 'integrations.stripe_revenue',
+  clearing_account: 'integrations.clearing_account',
+  revenue_account: 'integrations.revenue_account',
   suspense_account: 'integrations.stripe_suspense',
   stripe_account: 'integrations.stripe_connect',
+  tax_account: 'integrations.polar_tax',
 };
 
 /** Generic config keys that may stay empty. */
-const OPTIONAL_CONFIG = new Set<string>(['stripe_account']);
+const OPTIONAL_CONFIG = new Set<string>(['stripe_account', 'tax_account']);
 
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
-const COMING_SOON = ['MiniMax', 'GitHub', 'Polar', 'Google Workspace', 'Resend'];
+const COMING_SOON = ['MiniMax', 'GitHub', 'Google Workspace', 'Resend'];
 
 function Mark({ connector }: { connector: string }) {
   const mark = BRAND_MARKS[connector];

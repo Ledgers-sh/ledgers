@@ -59,6 +59,7 @@ export const SOURCE_COLOURS: Record<string, string> = {
   openai: '#D8C3A5',
   openrouter: '#9FB3C8',
   stripe: '#A9B6C6',
+  polar: '#B5C7A8',
 };
 
 /**

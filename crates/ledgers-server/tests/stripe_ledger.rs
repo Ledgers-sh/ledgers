@@ -471,3 +471,142 @@ fn a_stripe_connection_must_name_postable_accounts_of_the_chart() {
         "{detail}"
     );
 }
+
+/// A Stripe answer with one transaction in a category this connector does not know.
+const SUSPENSE_PAGE: &str = r#"{"object":"list","has_more":false,"data":[
+ {"id":"txn_tr_1","object":"balance_transaction","amount":500,"fee":0,"net":500,"currency":"eur",
+  "type":"transfer","reporting_category":"transfer","created":1785715200,"source":null}
+]}"#;
+
+struct SuspenseStub;
+
+#[async_trait::async_trait]
+impl HttpClient for SuspenseStub {
+    async fn send(
+        &self,
+        _request: http::Request<Bytes>,
+    ) -> Result<http::Response<Bytes>, HttpError> {
+        Ok(http::Response::builder()
+            .status(200)
+            .body(Bytes::from_static(SUSPENSE_PAGE.as_bytes()))
+            .expect("response"))
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn an_unknown_stripe_category_goes_to_suspense_and_an_approval_rebooks_it() {
+    let fx = person_fx();
+    seed_unit(&fx);
+    open_period(&fx, "2026-08");
+    let accounts = ServerDispatch::new(COMPANY);
+    pollster::block_on(accounts.dispatch(
+        &fx.deps,
+        "accounts.create",
+        json!({"number": CLEARING, "name": "Stripe balance", "type": "asset"}),
+        "stripe-suspense-clearing",
+        Some(owner()),
+    ))
+    .expect("the clearing account is created");
+    let mut deps = fx.deps.clone();
+    deps.http = Some(Arc::new(SuspenseStub) as Arc<dyn HttpClient>);
+    let dispatch =
+        ServerDispatch::new(COMPANY).with_connect_key(Some(ConnectKey::from_secret(KEY).unwrap()));
+    let created = pollster::block_on(dispatch.dispatch(
+        &deps,
+        "connections.create",
+        json!({
+            "connector": "stripe",
+            "name": "Stripe suspense",
+            "config": {
+                "expense_account": FEES,
+                "clearing_account": CLEARING,
+                "revenue_account": REVENUE,
+                "suspense_account": SUSPENSE,
+            },
+            "default_unit": "FZ",
+            "token": RESTRICTED_KEY,
+        }),
+        "stripe-suspense-create",
+        Some(owner()),
+    ))
+    .expect("the connection is created");
+    let connection = created["id"].as_str().expect("id").to_owned();
+
+    let sync = |request: &str| {
+        pollster::block_on(dispatch.dispatch(
+            &deps,
+            "connections.sync_now",
+            json!({"connection_id": connection, "since": "2026-08-01", "until": "2026-08-31"}),
+            request,
+            Some(owner()),
+        ))
+        .expect("the sync runs")
+    };
+    assert_eq!(sync("suspense-sync-1")["status"], "succeeded");
+    // The unknown category is in suspense, never in revenue.
+    assert_eq!(
+        balance(&fx, SUSPENSE),
+        -500,
+        "the suspense account holds the amount as a credit"
+    );
+    assert_eq!(balance(&fx, REVENUE), 0, "it never reaches revenue");
+    // A repeat sync raises no second item.
+    assert_eq!(sync("suspense-sync-2")["status"], "succeeded");
+
+    let inbox = person(&fx, Method::GET, "/v1/approval-requests", None);
+    assert_eq!(inbox.status, StatusCode::OK, "{}", inbox.text);
+    let items: Vec<Value> = inbox.json()["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|item| item["command"] == "connections.suspense_rebook")
+        .collect();
+    assert_eq!(
+        items.len(),
+        1,
+        "one item per suspense entry: {}",
+        inbox.text
+    );
+    let item = &items[0];
+    assert_eq!(item["status"], "pending");
+    assert_eq!(item["amount"]["EUR"], "5.00");
+    let id = item["id"].as_str().expect("id").to_owned();
+    // The detail shows the transaction, the amount and the reason it is in suspense.
+    let detail = person(
+        &fx,
+        Method::GET,
+        &format!("/v1/approval-requests/{id}"),
+        None,
+    );
+    assert_eq!(detail.status, StatusCode::OK, "{}", detail.text);
+    let preview = detail.json()["preview"].to_string();
+    assert!(
+        preview.contains("txn_tr_1") || preview.contains("stripe-bt:txn_tr_1"),
+        "{preview}"
+    );
+    assert!(
+        preview.contains("suspense"),
+        "the reason is shown: {preview}"
+    );
+
+    // A person approves: the amount is re-booked to the proposed account.
+    let decided = person(
+        &fx,
+        Method::POST,
+        &format!("/v1/approval-requests/{id}/decision"),
+        Some(json!({"decision": "approve"})),
+    );
+    assert_eq!(decided.status, StatusCode::OK, "{}", decided.text);
+    assert_eq!(
+        balance(&fx, SUSPENSE),
+        0,
+        "the re-book takes the suspense amount off the suspense account"
+    );
+    assert_eq!(
+        balance(&fx, REVENUE),
+        -500,
+        "and books it to the proposed revenue account"
+    );
+}
