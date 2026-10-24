@@ -96,6 +96,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --locked --target wasm32-unknown-unknown -p ledgers-server
 
+  # `cargo check` never links, so it cannot catch a wasm32 link failure in `ring`'s C
+  # parts. This job links the Worker's cdylib with a wasm32-capable clang (apt's on
+  # Ubuntu), the same toolchain docs/deploy.md requires before a deploy.
+  wasm32-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - run: tools/check-wasm-link.sh
+
   deny:
     runs-on: ubuntu-latest
     steps:
