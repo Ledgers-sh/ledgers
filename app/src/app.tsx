@@ -80,6 +80,9 @@ const NAV: { hash: string; label: MessageKey; icon: IconName; match: (route: str
   { hash: 'approvals', label: 'nav.approvals', icon: 'approvals', match: (r) => r === 'approvals' || r.startsWith('approvals/') },
 ];
 
+/** The sections in the phone bottom bar. The rest sit under More. */
+const BAR_NAV = ['overview', 'journal', 'bills', 'bank'];
+
 /**
  * Who is using the app. A person signs in with a passkey on the server and
  * their session cookie is sent with each call. An agent key (advanced, for
@@ -338,6 +341,13 @@ function Shell({
     (item) => (item.hash !== 'approvals' || !apiKey) && (item.hash !== 'group' || groupNav),
   );
   const navBadge = (hash: string) => (hash === 'approvals' ? badgeText(approvals.count) : null);
+  const barNav = nav.filter((item) => BAR_NAV.includes(item.hash));
+  const moreNav = nav.filter((item) => !BAR_NAV.includes(item.hash));
+  // The More button carries the approvals count when approvals sits under it.
+  const moreBadge = moreNav.some((item) => item.hash === 'approvals') ? badgeText(approvals.count) : null;
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Moving to another section closes the More sheet.
+  useEffect(() => setMoreOpen(false), [hash]);
 
   const setRange = useCallback((next: MonthRange) => {
     const normalised = normaliseRange(next);
@@ -507,14 +517,40 @@ function Shell({
           </main>
         </div>
       </div>
+      {/* Phones: four sections in the bar, the rest one tap away under More, so every target is at least 40px wide. */}
+      {moreOpen && (
+        <div id="bottom-more" class="bottom-more" role="region" aria-label={t('shell.more_sections')}>
+          {moreNav.map((item) => (
+            <a key={item.hash} href={hrefFor(item.hash)} aria-current={current === item ? 'page' : undefined}>
+              <Icon name={item.icon} />
+              {t(item.label)}
+              {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
+            </a>
+          ))}
+        </div>
+      )}
       <nav class="bottom-nav" aria-label={t('shell.sections')}>
-        {nav.map((item) => (
+        {barNav.map((item) => (
           <a key={item.hash} href={hrefFor(item.hash)} aria-current={current === item ? 'page' : undefined}>
             <Icon name={item.icon} />
             {t(item.label)}
             {navBadge(item.hash) && <span class="nav-count">{navBadge(item.hash)}</span>}
           </a>
         ))}
+        {moreNav.length > 0 && (
+          <button
+            type="button"
+            class="bottom-more-toggle"
+            aria-expanded={moreOpen}
+            aria-controls="bottom-more"
+            aria-current={moreNav.some((item) => current === item) ? 'page' : undefined}
+            onClick={() => setMoreOpen(!moreOpen)}
+          >
+            <Icon name="chevron" class={moreOpen ? 'flip' : undefined} />
+            {t('shell.more')}
+            {moreBadge && <span class="nav-count">{moreBadge}</span>}
+          </button>
+        )}
       </nav>
       <CommandPalette
         open={paletteOpen}

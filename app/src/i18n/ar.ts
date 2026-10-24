@@ -13,6 +13,8 @@ export const ar: Messages = {
   'shell.skip': 'انتقل إلى المحتوى',
   'shell.main_nav': 'التنقل الرئيسي',
   'shell.sections': 'الأقسام',
+  'shell.more': 'المزيد',
+  'shell.more_sections': 'أقسام أخرى',
   'shell.brand_link': 'نظرة عامة على ledgers.sh',
   'shell.server': 'الخادم',
   'shell.sign_out': 'تسجيل الخروج',

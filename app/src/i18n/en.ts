@@ -16,6 +16,8 @@ export const en = {
   'shell.skip': 'Skip to content',
   'shell.main_nav': 'Main',
   'shell.sections': 'Sections',
+  'shell.more': 'More',
+  'shell.more_sections': 'More sections',
   'shell.brand_link': 'ledgers.sh overview',
   'shell.server': 'Server',
   'shell.sign_out': 'Sign out',
