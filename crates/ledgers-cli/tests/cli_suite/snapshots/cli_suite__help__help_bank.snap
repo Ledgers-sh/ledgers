@@ -8,6 +8,7 @@ Usage: bank <COMMAND>
 
 Commands:
   accounts      Commands under `ledgers accounts`
+  receivables   Commands under `ledgers receivables`
   rules         Commands under `ledgers rules`
   statements    Commands under `ledgers statements`
   transactions  Commands under `ledgers transactions`

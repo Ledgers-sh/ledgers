@@ -9,8 +9,9 @@ use crate::routes::Presented;
 use cratefield_core::Problem;
 use ledgers_bank::commands::{
     AccountsArchive, AccountsCreate, AccountsGet, AccountsList, AccountsReconcile, AccountsUpdate,
-    RulesCreate, RulesEnable, RulesList, StatementsImport, TransactionsIgnore, TransactionsLink,
-    TransactionsList, TransactionsPost, rule_request_to_input,
+    ReceivablesOpenItems, RulesCreate, RulesEnable, RulesList, StatementsImport,
+    TransactionsIgnore, TransactionsLink, TransactionsList, TransactionsPost,
+    rule_request_to_input,
 };
 use ledgers_bank::model::{RulesCreateRequest, StatementsImportInput, StatementsImportRequest};
 use ledgers_bank::parse;
@@ -100,6 +101,10 @@ impl ServerDispatch {
             }
             "bank.rules.list" => {
                 self.execute(deps, &RulesList, presented, request_id, input)
+                    .await
+            }
+            "bank.receivables.open_items" => {
+                self.execute(deps, &ReceivablesOpenItems, presented, request_id, input)
                     .await
             }
             "bank.rules.create" => {

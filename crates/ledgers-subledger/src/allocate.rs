@@ -9,7 +9,7 @@ use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
 use ledgers_db::guard;
 use ledgers_ledger::surface::{
-    PostEntryInput, SerializableAmount, SerializableEntryDraft, SerializableLine,
+    PostEntryInput, PostEntryOutput, SerializableAmount, SerializableEntryDraft, SerializableLine,
     plan_post_entry_with_control,
 };
 use ledgers_money::{Amount, Currency};
@@ -126,302 +126,322 @@ impl Command for SubledgerAllocate {
         ctx: &CommandContext,
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
-        // Parse and validate input
-        let ledger = parse_ledger(&input.ledger)?;
-        let chart = load_chart(db, &ctx.company_id).await?;
+        plan_allocate(token, db, ctx, input)
+            .await
+            .map(|(plan, _)| plan)
+    }
+}
 
-        // Resolve control account
-        let control_account = chart
-            .control_account(ledger)
-            .ok_or_else(|| CommandError::Domain(Problem::new(&CONTROL_ACCOUNT_NOT_FOUND)))?
-            .to_owned();
+/// Plans an allocation of a payment against open items: the payment entry,
+/// the allocation rows, and any on-account item the excess becomes. Also
+/// returns the entry it posts, so a caller (a bank receipt) can report it.
+///
+/// # Errors
+/// As the command.
+#[allow(clippy::too_many_lines)]
+pub async fn plan_allocate(
+    token: &ExecToken,
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &AllocateInput,
+) -> Result<(Plan<AllocateOutput>, PostEntryOutput), CommandError> {
+    // Parse and validate input
+    let ledger = parse_ledger(&input.ledger)?;
+    let chart = load_chart(db, &ctx.company_id).await?;
 
-        // Resolve FX accounts
-        let fx_gain_account = chart
-            .fx_gain_account()
-            .ok_or_else(|| CommandError::InvalidInput("fx-gain account not found".to_string()))?
-            .to_owned();
-        let fx_loss_account = chart
-            .fx_loss_account()
-            .ok_or_else(|| CommandError::InvalidInput("fx-loss account not found".to_string()))?
-            .to_owned();
+    // Resolve control account
+    let control_account = chart
+        .control_account(ledger)
+        .ok_or_else(|| CommandError::Domain(Problem::new(&CONTROL_ACCOUNT_NOT_FOUND)))?
+        .to_owned();
 
-        // Load items
-        let mut items_to_allocate: Vec<(OpenItem, i64, Option<i64>)> = Vec::new();
-        let mut total_paid_base = 0i64;
-        let mut fx_difference_total = 0i64;
+    // Resolve FX accounts
+    let fx_gain_account = chart
+        .fx_gain_account()
+        .ok_or_else(|| CommandError::InvalidInput("fx-gain account not found".to_string()))?
+        .to_owned();
+    let fx_loss_account = chart
+        .fx_loss_account()
+        .ok_or_else(|| CommandError::InvalidInput("fx-loss account not found".to_string()))?
+        .to_owned();
 
-        for item_input in &input.items {
-            // Load item from DB
-            let item = load_open_item(db, &item_input.open_item_id).await?;
+    // Load items
+    let mut items_to_allocate: Vec<(OpenItem, i64, Option<i64>)> = Vec::new();
+    let mut total_paid_base = 0i64;
+    let mut fx_difference_total = 0i64;
 
-            // Verify item belongs to this company/ledger/party
-            if item.company_id != ctx.company_id
-                || item.ledger != ledger
-                || item.party_id != input.party_id
-            {
-                return Err(CommandError::InvalidInput(format!(
-                    "item {} not found for this party/ledger",
-                    item_input.open_item_id
-                )));
-            }
+    for item_input in &input.items {
+        // Load item from DB
+        let item = load_open_item(db, &item_input.open_item_id).await?;
 
-            // Settle and compute FX
-            let base_cleared = settle(&item, item_input.amount).map_err(CommandError::from)?;
-
-            // Determine paid_base: use provided value if item is non-base, otherwise use amount
-            let paid_base = if let Some(pb) = item_input.paid_base {
-                pb
-            } else {
-                item_input.amount
-            };
-
-            let fx = fx_difference(ledger, paid_base, base_cleared);
-            fx_difference_total += fx;
-            total_paid_base += paid_base;
-
-            items_to_allocate.push((item, item_input.amount, Some(paid_base)));
-        }
-
-        // Compute excess
-        let excess = input.paid - total_paid_base;
-        if excess < 0 {
-            return Err(CommandError::Domain(Problem::new(
-                &crate::error::ALLOCATION_EXCEEDS_OPEN_ITEM,
+        // Verify item belongs to this company/ledger/party
+        if item.company_id != ctx.company_id
+            || item.ledger != ledger
+            || item.party_id != input.party_id
+        {
+            return Err(CommandError::InvalidInput(format!(
+                "item {} not found for this party/ledger",
+                item_input.open_item_id
             )));
         }
 
-        // Build entry
-        let mut entry_lines = Vec::new();
+        // Settle and compute FX
+        let base_cleared = settle(&item, item_input.amount).map_err(CommandError::from)?;
 
-        let currency = Currency::from_code("EUR")
-            .map_err(|e| CommandError::InvalidInput(format!("invalid currency: {e}")))?;
-        let paid_amount = Amount::new(i128::from(input.paid), currency);
-
-        match ledger {
-            Ledger::Ar => {
-                // AR receipt: Dr bank paid, Cr control base_cleared per item, Cr control excess, Cr/Dr FX
-                entry_lines.push(SerializableLine {
-                    account_number: input.bank_account.clone(),
-                    side: "debit".to_string(),
-                    base: SerializableAmount {
-                        minor: paid_amount.minor().to_string(),
-                        currency: "EUR".to_string(),
-                    },
-                    fx: None,
-                    tax_code: None,
-                    dimensions: BTreeMap::new(),
-                    memo: None,
-                });
-
-                // Cr control for each settled item
-                for (item, tx_amount, _paid_base) in &items_to_allocate {
-                    let base_cleared = settle(item, *tx_amount)?;
-                    let base_cleared_amount = Amount::new(i128::from(base_cleared), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: control_account.clone(),
-                        side: "credit".to_string(),
-                        base: SerializableAmount {
-                            minor: base_cleared_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-
-                // Cr control for excess (on-account)
-                if excess > 0 {
-                    let excess_amount = Amount::new(i128::from(excess), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: control_account.clone(),
-                        side: "credit".to_string(),
-                        base: SerializableAmount {
-                            minor: excess_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-
-                // FX gain/loss
-                if fx_difference_total > 0 {
-                    // Cr fx-gain
-                    let fx_amount = Amount::new(i128::from(fx_difference_total), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: fx_gain_account.clone(),
-                        side: "credit".to_string(),
-                        base: SerializableAmount {
-                            minor: fx_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                } else if fx_difference_total < 0 {
-                    // Dr fx-loss
-                    let fx_amount = Amount::new(i128::from(-fx_difference_total), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: fx_loss_account.clone(),
-                        side: "debit".to_string(),
-                        base: SerializableAmount {
-                            minor: fx_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-            }
-            Ledger::Ap => {
-                // AP payment: Cr bank paid, Dr control base_cleared per item, Dr control excess, Cr/Dr FX
-                entry_lines.push(SerializableLine {
-                    account_number: input.bank_account.clone(),
-                    side: "credit".to_string(),
-                    base: SerializableAmount {
-                        minor: paid_amount.minor().to_string(),
-                        currency: "EUR".to_string(),
-                    },
-                    fx: None,
-                    tax_code: None,
-                    dimensions: BTreeMap::new(),
-                    memo: None,
-                });
-
-                // Dr control for each settled item
-                for (item, tx_amount, _paid_base) in &items_to_allocate {
-                    let base_cleared = settle(item, *tx_amount)?;
-                    let base_cleared_amount = Amount::new(i128::from(base_cleared), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: control_account.clone(),
-                        side: "debit".to_string(),
-                        base: SerializableAmount {
-                            minor: base_cleared_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-
-                // Dr control for excess (on-account)
-                if excess > 0 {
-                    let excess_amount = Amount::new(i128::from(excess), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: control_account.clone(),
-                        side: "debit".to_string(),
-                        base: SerializableAmount {
-                            minor: excess_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-
-                // FX gain/loss
-                if fx_difference_total > 0 {
-                    // Cr fx-gain
-                    let fx_amount = Amount::new(i128::from(fx_difference_total), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: fx_gain_account.clone(),
-                        side: "credit".to_string(),
-                        base: SerializableAmount {
-                            minor: fx_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                } else if fx_difference_total < 0 {
-                    // Dr fx-loss
-                    let fx_amount = Amount::new(i128::from(-fx_difference_total), currency);
-                    entry_lines.push(SerializableLine {
-                        account_number: fx_loss_account.clone(),
-                        side: "debit".to_string(),
-                        base: SerializableAmount {
-                            minor: fx_amount.minor().to_string(),
-                            currency: "EUR".to_string(),
-                        },
-                        fx: None,
-                        tax_code: None,
-                        dimensions: BTreeMap::new(),
-                        memo: None,
-                    });
-                }
-            }
-        }
-
-        let fiscal_year = input
-            .date
-            .get(..4)
-            .and_then(|y| y.parse::<i64>().ok())
-            .ok_or_else(|| CommandError::InvalidInput("invalid date year".to_string()))?;
-
-        let entry_input = PostEntryInput {
-            journal_id: input.journal_id.clone(),
-            fiscal_year,
-            entry: SerializableEntryDraft {
-                journal_id: input.journal_id.clone(),
-                document_date: input.date.clone(),
-                posting_date: input.date.clone(),
-                tax_point_date: None,
-                base_currency: "EUR".to_owned(),
-                description: input.description.clone().unwrap_or_default(),
-                source_documents: Vec::new(),
-                external_id: Some(format!("alloc-{}-{}", input.party_id, ctx.event_id)),
-                source_app: Some("ledgers-subledger".to_owned()),
-                reverses: None,
-                lines: entry_lines,
-            },
+        // Determine paid_base: use provided value if item is non-base, otherwise use amount
+        let paid_base = if let Some(pb) = item_input.paid_base {
+            pb
+        } else {
+            item_input.amount
         };
 
-        let mut posted = plan_post_entry_with_control(token, db, ctx, &entry_input).await?;
-        let entry_id = posted.output.entry.entry_id.clone();
+        let fx = fx_difference(ledger, paid_base, base_cleared);
+        fx_difference_total += fx;
+        total_paid_base += paid_base;
 
-        // Generate allocation ID
-        let allocation_id = format!("alloc_{}", ctx.event_id);
+        items_to_allocate.push((item, item_input.amount, Some(paid_base)));
+    }
 
-        // Build allocation rows and open_item update guard statements
-        for (i, (item, tx_amount, paid_base)) in items_to_allocate.iter().enumerate() {
-            let base_cleared = settle(item, *tx_amount)?;
+    // Compute excess
+    let excess = input.paid - total_paid_base;
+    if excess < 0 {
+        return Err(CommandError::Domain(Problem::new(
+            &crate::error::ALLOCATION_EXCEEDS_OPEN_ITEM,
+        )));
+    }
 
-            // Insert allocation row
-            let alloc_id = format!("{allocation_id}_{i}");
-            let fx = fx_difference(ledger, paid_base.unwrap_or(*tx_amount), base_cleared);
+    // Build entry
+    let mut entry_lines = Vec::new();
 
-            posted.statements.push(builders::build_allocation_insert(
-                &alloc_id,
-                &ctx.company_id,
-                &item.id,
-                &entry_id,
-                "payment",
-                *tx_amount,
-                base_cleared,
-                fx,
-                &input.date,
-                &ctx.now,
-            ));
+    let currency = Currency::from_code("EUR")
+        .map_err(|e| CommandError::InvalidInput(format!("invalid currency: {e}")))?;
+    let paid_amount = Amount::new(i128::from(input.paid), currency);
 
-            // Guard: verify that the item still has the expected remaining values
-            // (no concurrent allocation has changed them since plan time).
-            let guard_key = guard::guard_key(&["alloc-item", entry_id.as_str(), item.id.as_str()]);
-            posted.statements.push(guard::assert_statement(
+    match ledger {
+        Ledger::Ar => {
+            // AR receipt: Dr bank paid, Cr control base_cleared per item, Cr control excess, Cr/Dr FX
+            entry_lines.push(SerializableLine {
+                account_number: input.bank_account.clone(),
+                side: "debit".to_string(),
+                base: SerializableAmount {
+                    minor: paid_amount.minor().to_string(),
+                    currency: "EUR".to_string(),
+                },
+                fx: None,
+                tax_code: None,
+                dimensions: BTreeMap::new(),
+                memo: None,
+            });
+
+            // Cr control for each settled item
+            for (item, tx_amount, _paid_base) in &items_to_allocate {
+                let base_cleared = settle(item, *tx_amount)?;
+                let base_cleared_amount = Amount::new(i128::from(base_cleared), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: control_account.clone(),
+                    side: "credit".to_string(),
+                    base: SerializableAmount {
+                        minor: base_cleared_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+
+            // Cr control for excess (on-account)
+            if excess > 0 {
+                let excess_amount = Amount::new(i128::from(excess), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: control_account.clone(),
+                    side: "credit".to_string(),
+                    base: SerializableAmount {
+                        minor: excess_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+
+            // FX gain/loss
+            if fx_difference_total > 0 {
+                // Cr fx-gain
+                let fx_amount = Amount::new(i128::from(fx_difference_total), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: fx_gain_account.clone(),
+                    side: "credit".to_string(),
+                    base: SerializableAmount {
+                        minor: fx_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            } else if fx_difference_total < 0 {
+                // Dr fx-loss
+                let fx_amount = Amount::new(i128::from(-fx_difference_total), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: fx_loss_account.clone(),
+                    side: "debit".to_string(),
+                    base: SerializableAmount {
+                        minor: fx_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+        }
+        Ledger::Ap => {
+            // AP payment: Cr bank paid, Dr control base_cleared per item, Dr control excess, Cr/Dr FX
+            entry_lines.push(SerializableLine {
+                account_number: input.bank_account.clone(),
+                side: "credit".to_string(),
+                base: SerializableAmount {
+                    minor: paid_amount.minor().to_string(),
+                    currency: "EUR".to_string(),
+                },
+                fx: None,
+                tax_code: None,
+                dimensions: BTreeMap::new(),
+                memo: None,
+            });
+
+            // Dr control for each settled item
+            for (item, tx_amount, _paid_base) in &items_to_allocate {
+                let base_cleared = settle(item, *tx_amount)?;
+                let base_cleared_amount = Amount::new(i128::from(base_cleared), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: control_account.clone(),
+                    side: "debit".to_string(),
+                    base: SerializableAmount {
+                        minor: base_cleared_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+
+            // Dr control for excess (on-account)
+            if excess > 0 {
+                let excess_amount = Amount::new(i128::from(excess), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: control_account.clone(),
+                    side: "debit".to_string(),
+                    base: SerializableAmount {
+                        minor: excess_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+
+            // FX gain/loss
+            if fx_difference_total > 0 {
+                // Cr fx-gain
+                let fx_amount = Amount::new(i128::from(fx_difference_total), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: fx_gain_account.clone(),
+                    side: "credit".to_string(),
+                    base: SerializableAmount {
+                        minor: fx_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            } else if fx_difference_total < 0 {
+                // Dr fx-loss
+                let fx_amount = Amount::new(i128::from(-fx_difference_total), currency);
+                entry_lines.push(SerializableLine {
+                    account_number: fx_loss_account.clone(),
+                    side: "debit".to_string(),
+                    base: SerializableAmount {
+                        minor: fx_amount.minor().to_string(),
+                        currency: "EUR".to_string(),
+                    },
+                    fx: None,
+                    tax_code: None,
+                    dimensions: BTreeMap::new(),
+                    memo: None,
+                });
+            }
+        }
+    }
+
+    let fiscal_year = input
+        .date
+        .get(..4)
+        .and_then(|y| y.parse::<i64>().ok())
+        .ok_or_else(|| CommandError::InvalidInput("invalid date year".to_string()))?;
+
+    let entry_input = PostEntryInput {
+        journal_id: input.journal_id.clone(),
+        fiscal_year,
+        entry: SerializableEntryDraft {
+            journal_id: input.journal_id.clone(),
+            document_date: input.date.clone(),
+            posting_date: input.date.clone(),
+            tax_point_date: None,
+            base_currency: "EUR".to_owned(),
+            description: input.description.clone().unwrap_or_default(),
+            source_documents: Vec::new(),
+            external_id: Some(format!("alloc-{}-{}", input.party_id, ctx.event_id)),
+            source_app: Some("ledgers-subledger".to_owned()),
+            reverses: None,
+            lines: entry_lines,
+        },
+    };
+
+    let mut posted = plan_post_entry_with_control(token, db, ctx, &entry_input).await?;
+    let entry_id = posted.output.entry.entry_id.clone();
+    let entry_output = posted.output;
+
+    // Generate allocation ID
+    let allocation_id = format!("alloc_{}", ctx.event_id);
+
+    // Build allocation rows and open_item update guard statements
+    for (i, (item, tx_amount, paid_base)) in items_to_allocate.iter().enumerate() {
+        let base_cleared = settle(item, *tx_amount)?;
+
+        // Insert allocation row
+        let alloc_id = format!("{allocation_id}_{i}");
+        let fx = fx_difference(ledger, paid_base.unwrap_or(*tx_amount), base_cleared);
+
+        posted.statements.push(builders::build_allocation_insert(
+            &alloc_id,
+            &ctx.company_id,
+            &item.id,
+            &entry_id,
+            "payment",
+            *tx_amount,
+            base_cleared,
+            fx,
+            &input.date,
+            &ctx.now,
+        ));
+
+        // Guard: verify that the item still has the expected remaining values
+        // (no concurrent allocation has changed them since plan time).
+        let guard_key = guard::guard_key(&["alloc-item", entry_id.as_str(), item.id.as_str()]);
+        posted.statements.push(guard::assert_statement(
                 &guard_key,
                 "(SELECT 1 FROM open_item WHERE id = ? AND company_id = ? AND ledger = ? \n\
                  AND party_id = ? AND tx_remaining_minor = ? AND base_remaining_minor = ?) IS NOT NULL",
@@ -435,88 +455,87 @@ impl Command for SubledgerAllocate {
                 ],
             ));
 
-            // Update open_item with relative decrements
-            posted.statements.push(Statement::with_values(
-                "UPDATE open_item SET tx_remaining_minor = tx_remaining_minor - ?, \
+        // Update open_item with relative decrements
+        posted.statements.push(Statement::with_values(
+            "UPDATE open_item SET tx_remaining_minor = tx_remaining_minor - ?, \
                  base_remaining_minor = base_remaining_minor - ?, updated_at = ? \
                  WHERE id = ? AND company_id = ? AND ledger = ? AND party_id = ?"
-                    .to_owned(),
-                vec![
-                    Value::from(*tx_amount),
-                    Value::from(base_cleared),
-                    Value::from(ctx.now.as_str()),
-                    Value::from(item.id.as_str()),
-                    Value::from(ctx.company_id.as_str()),
-                    Value::from(ledger.to_string().as_str()),
-                    Value::from(input.party_id.as_str()),
-                ],
-            ));
+                .to_owned(),
+            vec![
+                Value::from(*tx_amount),
+                Value::from(base_cleared),
+                Value::from(ctx.now.as_str()),
+                Value::from(item.id.as_str()),
+                Value::from(ctx.company_id.as_str()),
+                Value::from(ledger.to_string().as_str()),
+                Value::from(input.party_id.as_str()),
+            ],
+        ));
 
-            // Release the guard
-            posted.statements.push(guard::release_statement(&guard_key));
-        }
+        // Release the guard
+        posted.statements.push(guard::release_statement(&guard_key));
+    }
 
-        // Handle on-account item if excess > 0 or items empty
-        let on_account_item_id = if excess > 0 || input.items.is_empty() {
-            let oa_id = format!("oa_{}", ctx.event_id);
-            posted.statements.push(Statement::with_values(
-                "INSERT INTO open_item (id, company_id, ledger, kind, party_id, source_id, entry_id, \
+    // Handle on-account item if excess > 0 or items empty
+    let on_account_item_id = if excess > 0 || input.items.is_empty() {
+        let oa_id = format!("oa_{}", ctx.event_id);
+        posted.statements.push(Statement::with_values(
+            "INSERT INTO open_item (id, company_id, ledger, kind, party_id, source_id, entry_id, \
                  control_account, currency, rate_scaled, document_date, posting_date, due_date, \
                  tx_original_minor, base_original_minor, tx_remaining_minor, base_remaining_minor, \
                  created_at, updated_at) \
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                    .to_owned(),
-                vec![
-                    Value::from(oa_id.as_str()),
-                    Value::from(ctx.company_id.as_str()),
-                    Value::from(ledger.to_string().as_str()),
-                    Value::from("on-account"),
-                    Value::from(input.party_id.as_str()),
-                    Value::from(None::<String>),
-                    Value::from(entry_id.as_str()),
-                    Value::from(control_account.as_str()),
-                    Value::from("EUR"),
-                    Value::from(None::<String>),
-                    Value::from(input.date.as_str()),
-                    Value::from(input.date.as_str()),
-                    Value::from(None::<String>),
-                    Value::from(-excess),
-                    Value::from(-excess),
-                    Value::from(-excess),
-                    Value::from(-excess),
-                    Value::from(ctx.now.as_str()),
-                    Value::from(ctx.now.as_str()),
-                ],
-            ));
-            Some(oa_id)
-        } else {
-            None
-        };
+                .to_owned(),
+            vec![
+                Value::from(oa_id.as_str()),
+                Value::from(ctx.company_id.as_str()),
+                Value::from(ledger.to_string().as_str()),
+                Value::from("on-account"),
+                Value::from(input.party_id.as_str()),
+                Value::from(None::<String>),
+                Value::from(entry_id.as_str()),
+                Value::from(control_account.as_str()),
+                Value::from("EUR"),
+                Value::from(None::<String>),
+                Value::from(input.date.as_str()),
+                Value::from(input.date.as_str()),
+                Value::from(None::<String>),
+                Value::from(-excess),
+                Value::from(-excess),
+                Value::from(-excess),
+                Value::from(-excess),
+                Value::from(ctx.now.as_str()),
+                Value::from(ctx.now.as_str()),
+            ],
+        ));
+        Some(oa_id)
+    } else {
+        None
+    };
 
-        // Build output
-        let items_remaining = items_to_allocate
-            .iter()
-            .map(|(item, tx_amount, _)| {
-                let base_cleared = settle(item, *tx_amount).unwrap_or(0);
-                AllocateItemRemaining {
-                    open_item_id: item.id.clone(),
-                    tx_remaining: item.tx_remaining_minor - tx_amount,
-                    base_remaining: item.base_remaining_minor - base_cleared,
-                }
-            })
-            .collect();
+    // Build output
+    let items_remaining = items_to_allocate
+        .iter()
+        .map(|(item, tx_amount, _)| {
+            let base_cleared = settle(item, *tx_amount).unwrap_or(0);
+            AllocateItemRemaining {
+                open_item_id: item.id.clone(),
+                tx_remaining: item.tx_remaining_minor - tx_amount,
+                base_remaining: item.base_remaining_minor - base_cleared,
+            }
+        })
+        .collect();
 
-        let mut plan = Plan::with_output(AllocateOutput {
-            entry_id,
-            items_remaining,
-            on_account_item_id,
-            fx_difference_total,
-        });
-        plan.statements = posted.statements;
-        plan.objects = vec![input.party_id.clone()];
+    let mut plan = Plan::with_output(AllocateOutput {
+        entry_id,
+        items_remaining,
+        on_account_item_id,
+        fx_difference_total,
+    });
+    plan.statements = posted.statements;
+    plan.objects = vec![input.party_id.clone()];
 
-        Ok(plan)
-    }
+    Ok((plan, entry_output))
 }
 
 /// Information about a chart account.

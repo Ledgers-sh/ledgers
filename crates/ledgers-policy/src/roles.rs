@@ -83,6 +83,7 @@ const READ_COMMANDS: &[&str] = &[
     "bank.accounts.get",
     "bank.transactions.list",
     "bank.rules.list",
+    "bank.receivables.open_items",
     "reports.units_summary",
     "tax.user_rates",
     "units.list",

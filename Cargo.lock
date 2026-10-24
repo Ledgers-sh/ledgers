@@ -2299,6 +2299,7 @@ dependencies = [
  "ledgers-ledger",
  "ledgers-money",
  "ledgers-storage",
+ "ledgers-subledger",
  "pollster",
  "proptest",
  "quick-xml",

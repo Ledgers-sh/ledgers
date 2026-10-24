@@ -1103,6 +1103,13 @@ fn bank_commands() -> Vec<CommandDescriptor> {
             "ledgers bank rules list",
         ),
         entry(
+            "bank.receivables.open_items",
+            "read",
+            "GET",
+            "/v1/bank/receivables/open-items",
+            "ledgers bank receivables open-items",
+        ),
+        entry(
             "bank.rules.create",
             "draft",
             "POST",
