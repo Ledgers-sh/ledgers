@@ -289,6 +289,16 @@ function csvRows(text: string): string[][] {
     .map((line) => line.split(','));
 }
 
+/** Mirrors the server: a cell starting with = + - @ tab CR or an apostrophe gets one apostrophe in front. */
+function guardFormula(value: string): string {
+  return /^['=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
+/** Mirrors the server: drops exactly one leading apostrophe when a trigger or another apostrophe follows it. */
+function unguardFormula(value: string): string {
+  return /^'['=+\-@\t\r]/.test(value) ? value.slice(1) : value;
+}
+
 const CSV_COLUMNS = ['id', 'name', 'trading_name', 'roles', 'vat_id', 'tax_ids', 'tax_number', 'registration_number', 'website', 'email', 'phone', 'currency', 'language', 'payment_terms_days', 'default_account', 'default_tax_code', 'default_unit', 'tags', 'notes', 'personal_data', 'addresses', 'contacts', 'iban', 'bic', 'bank_reason'];
 
 /** The export: every live party, in name order, in the columns the import reads. */
@@ -297,7 +307,7 @@ function exportCsv(): string {
     .filter((p) => !p.merged_into)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((p) => [p.id, p.name, p.trading_name ?? '', p.roles, p.vat_id ?? '', '', p.tax_number ?? '', p.registration_number ?? '', p.website ?? '', p.email ?? '', p.phone ?? '', p.currency ?? '', p.language ?? '', p.payment_terms_days === null ? '' : String(p.payment_terms_days), p.default_account ?? '', p.default_tax_code ?? '', p.default_unit ?? '', p.tags.join(';'), p.notes ?? '', p.personal_data ? 'true' : 'false', '', '', p.iban ?? '', p.bic ?? '', '']);
-  return [CSV_COLUMNS.join(','), ...rows.map((row) => row.map((cell) => (/[,"\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)).join(','))].join('\n') + '\n';
+  return [CSV_COLUMNS.join(','), ...rows.map((row) => row.map((cell) => (/[,"\n]/.test(guardFormula(cell)) ? `"${guardFormula(cell).replace(/"/g, '""')}"` : guardFormula(cell))).join(','))].join('\n') + '\n';
 }
 
 /** Checks a CSV file row by row, the way the server does: what each row would do, and its refusals. */
@@ -305,7 +315,7 @@ function checkCsv(text: string, asPerson: boolean) {
   const [header, ...body] = csvRows(text);
   const columns = header ?? [];
   const rows = body.map((cells, index) => {
-    const cell = (name: string) => (columns.indexOf(name) === -1 ? undefined : (cells[columns.indexOf(name)] ?? '').trim());
+    const cell = (name: string) => (columns.indexOf(name) === -1 ? undefined : unguardFormula((cells[columns.indexOf(name)] ?? '').trim()));
     const id = cell('id') ?? '';
     const existing = partiesState.parties.find((p) => p.id === id && !p.merged_into);
     const errors: { slug: string; field: string; message: string }[] = [];

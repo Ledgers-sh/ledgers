@@ -126,7 +126,7 @@ fn blank_create(id: &str, name: &str) -> CreateInput {
 
 // A canonical file: the export of the parties below, byte for byte.
 const CANONICAL_CSV: &str = "id,name,trading_name,roles,vat_id,tax_ids,tax_number,registration_number,website,email,phone,currency,language,payment_terms_days,default_account,default_tax_code,default_unit,tags,notes,personal_data,addresses,contacts,iban,bic,bank_reason
-party-acme,Acme GmbH,Acme,both,DE136695976,\"[{\"\"country\"\":\"\"FR\"\",\"\"kind\"\":\"\"vat\"\",\"\"value\"\":\"\"FR12345678901\"\"}]\",,HRB 12345,https://acme.example,billing@acme.example,+49 30 1234567,EUR,de,30,4000,DE19,,berlin;retail,\"Pays on time, asks for PDFs.\nSecond line \"\"quoted\"\".\",false,\"[{\"\"kind\"\":\"\"billing\"\",\"\"line1\"\":\"\"Musterstrasse 1\"\",\"\"line2\"\":null,\"\"postal_code\"\":\"\"10115\"\",\"\"city\"\":\"\"Berlin\"\",\"\"country\"\":\"\"DE\"\"}]\",\"[{\"\"name\"\":\"\"Ada\"\",\"\"email\"\":\"\"ada@acme.example\"\",\"\"phone\"\":null,\"\"role\"\":\"\"Buyer\"\",\"\"primary\"\":true}]\",,,
+party-acme,Acme GmbH,Acme,both,DE136695976,\"[{\"\"country\"\":\"\"FR\"\",\"\"kind\"\":\"\"vat\"\",\"\"value\"\":\"\"FR12345678901\"\"}]\",,HRB 12345,https://acme.example,billing@acme.example,'+49 30 1234567,EUR,de,30,4000,DE19,,berlin;retail,\"Pays on time, asks for PDFs.\nSecond line \"\"quoted\"\".\",false,\"[{\"\"kind\"\":\"\"billing\"\",\"\"line1\"\":\"\"Musterstrasse 1\"\",\"\"line2\"\":null,\"\"postal_code\"\":\"\"10115\"\",\"\"city\"\":\"\"Berlin\"\",\"\"country\"\":\"\"DE\"\"}]\",\"[{\"\"name\"\":\"\"Ada\"\",\"\"email\"\":\"\"ada@acme.example\"\",\"\"phone\"\":null,\"\"role\"\":\"\"Buyer\"\",\"\"primary\"\":true}]\",,,
 party-zeta,Zeta Supplies Ltd,,vendor,,,,,,,,,,,,,,,,false,,,,,
 ";
 
@@ -788,6 +788,326 @@ fn validate_names_the_slug_of_each_refused_field() {
             assert_eq!(
                 slug_of_field("contacts").as_deref(),
                 Some("party-contact-primary-duplicate")
+            );
+        });
+    }
+}
+
+/// One party read back by id, through `parties.get`.
+async fn get_party(db: &dyn Database, id: &str) -> PartyView {
+    run(
+        db,
+        &PartiesGet::new(false),
+        OWNER_TOKEN,
+        &format!("get-{id}"),
+        &GetInput { id: id.to_string() },
+    )
+    .await
+    .expect("get")
+    .party
+}
+
+/// One CSV cell, quoted the way the export quotes it.
+fn csv_quote(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+/// One full-width row of a file: the cells named in `cells`, the rest blank,
+/// with the roles and personal data every export writes.
+fn full_row(cells: &[(&str, &str)]) -> String {
+    let mut row: Vec<String> = COLUMNS
+        .iter()
+        .map(|column| match *column {
+            "roles" => "vendor".to_string(),
+            "personal_data" => "false".to_string(),
+            _ => String::new(),
+        })
+        .collect();
+    for (column, value) in cells {
+        let index = COLUMNS
+            .iter()
+            .position(|c| c == column)
+            .expect("a known column");
+        row[index] = (*value).to_string();
+    }
+    row.iter()
+        .map(|cell| csv_quote(cell))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A whole file: the header of every column, then the rows.
+fn full_file(rows: &[String]) -> String {
+    format!("{}\n{}\n", COLUMNS.join(","), rows.join("\n"))
+}
+
+#[test]
+fn formula_cells_import_as_their_values_and_export_as_escaped_cells() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            // The file holds the escaped form the export writes. Each party's
+            // stored value is the one the escape stands for. Rows are in name
+            // order of the stored values, which is the order the export writes.
+            let hyper_name = "=HYPERLINK(\"https://evil.example\",\"Invoice\")";
+            let hyper_file = format!("'{hyper_name}");
+            let rows = vec![
+                full_row(&[
+                    ("id", "party-apos"),
+                    ("name", "''hello"),
+                    ("notes", "''hello"),
+                ]),
+                full_row(&[
+                    ("id", "party-plus"),
+                    ("name", "'+Plus Ltd"),
+                    ("notes", "'-12.50"),
+                ]),
+                full_row(&[
+                    ("id", "party-hyper"),
+                    ("name", &hyper_file),
+                    ("notes", "''=x"),
+                ]),
+                full_row(&[
+                    ("id", "party-plain"),
+                    ("name", "Acme GmbH"),
+                    ("notes", "O'Brien"),
+                ]),
+            ];
+            let file = full_file(&rows);
+
+            let check = run(
+                db,
+                &PartiesImportCheck::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "check-formula",
+                &ImportInput { csv: file.clone() },
+            )
+            .await
+            .expect("the escaped file checks");
+            assert!(check.valid, "{:?}", check.rows);
+            assert_eq!(check.creates, 4);
+
+            run(
+                db,
+                &PartiesImport::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "import-formula",
+                &ImportInput { csv: file.clone() },
+            )
+            .await
+            .expect("the escaped file imports");
+
+            // The stored values are the unescaped ones.
+            let hyper = get_party(db, "party-hyper").await;
+            assert_eq!(hyper.name, hyper_name);
+            assert_eq!(hyper.notes.as_deref(), Some("'=x"));
+            let apos = get_party(db, "party-apos").await;
+            assert_eq!(apos.name, "'hello");
+            assert_eq!(apos.notes.as_deref(), Some("'hello"));
+            let plus = get_party(db, "party-plus").await;
+            assert_eq!(plus.name, "+Plus Ltd");
+            assert_eq!(plus.notes.as_deref(), Some("-12.50"));
+            let plain = get_party(db, "party-plain").await;
+            assert_eq!(plain.notes.as_deref(), Some("O'Brien"));
+
+            // The export writes the escaped form, in name order of the stored values.
+            let exported = run(
+                db,
+                &PartiesExport,
+                OWNER_TOKEN,
+                "export-formula",
+                &ExportInput {},
+            )
+            .await
+            .expect("export");
+            assert_eq!(exported.csv, file);
+
+            // Importing the export again changes nothing.
+            run(
+                db,
+                &PartiesImport::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "import-formula-again",
+                &ImportInput {
+                    csv: exported.csv.clone(),
+                },
+            )
+            .await
+            .expect("re-import of the export");
+            let again = run(
+                db,
+                &PartiesExport,
+                OWNER_TOKEN,
+                "export-formula-again",
+                &ExportInput {},
+            )
+            .await
+            .expect("export");
+            assert_eq!(again.csv, exported.csv);
+        });
+    }
+}
+
+#[test]
+fn a_guarded_number_is_parsed_after_its_escape_is_removed() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            // `'-12` is the escaped form of `-12`. The escape comes off before
+            // the cell is parsed, so the refusal is the one for a negative
+            // number of days, not one for a value that is not a whole number.
+            let file = full_file(&[full_row(&[
+                ("id", "party-terms"),
+                ("name", "Terms Ltd"),
+                ("payment_terms_days", "'-12"),
+            ])]);
+            let check = run(
+                db,
+                &PartiesImportCheck::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "check-terms",
+                &ImportInput { csv: file },
+            )
+            .await
+            .expect("the file checks");
+            assert!(!check.valid);
+            let errors = &check.rows[0].errors;
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.message == "payment_terms_days must be >= 0"),
+                "{errors:?}"
+            );
+            assert!(
+                errors.iter().all(|e| !e.message.contains("whole number")),
+                "{errors:?}"
+            );
+        });
+    }
+}
+
+/// The Halden Works demo parties, with formula-shaped text in their
+/// notes, as an invoice scan could bring in.
+fn demo_party_rows() -> Vec<String> {
+    vec![
+        full_row(&[
+            ("id", "party-acme"),
+            ("name", "Acme GmbH"),
+            ("trading_name", "Acme"),
+            ("roles", "both"),
+            ("vat_id", "DE136695976"),
+            ("currency", "EUR"),
+            ("payment_terms_days", "30"),
+            ("tags", "berlin;retail"),
+            ("notes", "'-12.50 deposit, '=SUM(A1:A9) in the old sheet"),
+        ]),
+        full_row(&[
+            ("id", "party-halden"),
+            ("name", "Halden Works GmbH"),
+            ("trading_name", "Halden"),
+            ("roles", "customer"),
+            ("currency", "EUR"),
+            ("notes", "'@owner entered from a scan"),
+        ]),
+        full_row(&[
+            ("id", "party-lumen"),
+            ("name", "Lumen Logistik AG"),
+            ("roles", "both"),
+            ("notes", "'+49 30 1234567 is the switchboard"),
+        ]),
+        full_row(&[
+            ("id", "party-tovar"),
+            ("name", "Tovar Studio"),
+            ("roles", "vendor"),
+            ("notes", "''quoted name"),
+        ]),
+    ]
+}
+
+#[test]
+fn the_demo_party_set_round_trips_with_identical_values() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            let db = &*kit.db;
+            let rows = demo_party_rows();
+            let file = full_file(&rows);
+            let check = run(
+                db,
+                &PartiesImportCheck::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "check-demo",
+                &ImportInput { csv: file.clone() },
+            )
+            .await
+            .expect("the demo set checks");
+            assert!(check.valid, "{:?}", check.rows);
+            assert_eq!(check.creates, 4);
+            run(
+                db,
+                &PartiesImport::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "import-demo",
+                &ImportInput { csv: file.clone() },
+            )
+            .await
+            .expect("the demo set imports");
+
+            let first = run(
+                db,
+                &PartiesExport,
+                OWNER_TOKEN,
+                "export-demo-1",
+                &ExportInput {},
+            )
+            .await
+            .expect("export");
+            assert_eq!(first.rows, 4);
+            // The rows are already in name order, so the export is the file.
+            assert_eq!(first.csv, file);
+
+            // Importing the export back changes nothing, and exporting again
+            // gives the same text.
+            run(
+                db,
+                &PartiesImport::new(Some(OWNER_ID.to_string())),
+                OWNER_TOKEN,
+                "import-demo-again",
+                &ImportInput {
+                    csv: first.csv.clone(),
+                },
+            )
+            .await
+            .expect("re-import of the demo export");
+            let second = run(
+                db,
+                &PartiesExport,
+                OWNER_TOKEN,
+                "export-demo-2",
+                &ExportInput {},
+            )
+            .await
+            .expect("export");
+            assert_eq!(second.csv, first.csv);
+
+            let acme = run(
+                db,
+                &PartiesGet::new(false),
+                OWNER_TOKEN,
+                "get-demo-acme",
+                &GetInput {
+                    id: "party-acme".to_string(),
+                },
+            )
+            .await
+            .expect("get")
+            .party;
+            assert_eq!(
+                acme.notes.as_deref(),
+                Some("-12.50 deposit, '=SUM(A1:A9) in the old sheet")
             );
         });
     }
