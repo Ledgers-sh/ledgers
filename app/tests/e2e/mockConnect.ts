@@ -129,6 +129,13 @@ const CONNECTORS = [
     config_keys: [],
   },
   {
+    id: 'stripe',
+    name: 'Stripe',
+    credential_fields: [{ name: 'token', label: 'Restricted API key (read access)' }],
+    hosts: ['api.stripe.com'],
+    config_keys: ['clearing_account', 'revenue_account', 'suspense_account', 'stripe_account'],
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     credential_fields: [{ name: 'token', label: 'Management API key' }],

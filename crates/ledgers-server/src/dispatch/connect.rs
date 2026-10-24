@@ -202,8 +202,47 @@ impl ServerDispatch {
         map.insert("created_by".to_owned(), json!(caller));
         // Demo connections are the seeder's alone: a client can never mark one.
         map.insert("demo".to_owned(), json!(false));
-        self.execute(deps, &ConnectionsCreate, presented, request_id, input)
-            .await
+        let suggested = suggested_rule_for(&input);
+        let created = self
+            .execute(
+                deps,
+                &ConnectionsCreate,
+                presented.clone(),
+                request_id,
+                input,
+            )
+            .await?;
+        if let Some(rule) = suggested {
+            // A suggestion, not a mapping: the rule is proposed by the connector and
+            // waits in Bank > Rules until a person enables it.
+            let request = ledgers_bank::model::RulesCreateRequest {
+                name: rule.name,
+                conditions: rule.conditions,
+                account_number: rule.account_number,
+                tax_code: None,
+                unit: None,
+            };
+            let value = serde_json::to_value(ledgers_bank::commands::rule_request_to_input(
+                request,
+                deps.id_gen.ulid(),
+                format!("connector:{}", rule.connector),
+                false,
+            ))
+            .map_err(|err| {
+                Problem::internal()
+                    .with_detail(format!("suggested rule: {err}"))
+                    .instance(request_id)
+            })?;
+            self.execute(
+                deps,
+                &ledgers_bank::commands::RulesCreate,
+                presented,
+                &format!("{request_id}-rule"),
+                value,
+            )
+            .await?;
+        }
+        Ok(created)
     }
 
     /// `connections.update`: a person only. A new token is sealed under the
@@ -271,6 +310,7 @@ impl ServerDispatch {
     /// and records the answer through the command. The window defaults to three
     /// months ending today, or ending with the last complete month for vendors
     /// whose totals are final only after a month closes.
+    #[allow(clippy::too_many_lines)]
     pub(super) async fn connections_sync_now(
         &self,
         deps: &Deps,
@@ -336,8 +376,36 @@ impl ServerDispatch {
             "until": until,
             "created_by": caller,
         });
+        // Planned journal entries (ledger connectors) are posted one at a time, each in
+        // its own batch, before the sync records its run. A failure is recorded as the
+        // run's failure; entries already posted are found again by a later sync.
+        let posting = match &outcome {
+            Ok(output) if !output.entries.is_empty() => Some(
+                self.post_planned_entries(
+                    deps,
+                    presented.clone(),
+                    request_id,
+                    &connection,
+                    &output.entries,
+                )
+                .await,
+            ),
+            _ => None,
+        };
         match outcome {
+            Ok(_) if matches!(posting, Some(Err(_))) => {
+                if let Some(Err(message)) = posting {
+                    command_input["fetch_error"] = json!(message);
+                }
+            }
             Ok(output) => {
+                if let Some(Ok(links)) = posting {
+                    command_input["ledger_links"] = serde_json::to_value(links).map_err(|err| {
+                        Problem::internal()
+                            .with_detail(format!("ledger links: {err}"))
+                            .instance(request_id)
+                    })?;
+                }
                 let stored = self
                     .store_vendor_documents(deps, &output, request_id)
                     .await?;
@@ -432,6 +500,81 @@ impl ServerDispatch {
                 .with_detail(format!("test answer: {err}"))
                 .instance(request_id)
         })
+    }
+
+    /// Posts each planned journal entry that is not yet posted, and returns the link of
+    /// every planned entry to its journal entry. An entry whose `external_id` already
+    /// exists in the ledger (a sync that stopped after posting) is linked, not posted
+    /// again. Units come from the connection's allocation rules, by the entry line's
+    /// resource, else the connection's default unit.
+    async fn post_planned_entries(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        connection: &ledgers_connect::store::ConnectionRow,
+        entries: &[ledgers_connect::model::PlannedEntry],
+    ) -> Result<Vec<ledgers_connect::commands::LedgerLink>, String> {
+        let company = self.company_id();
+        let journal = ledgers_ledger::journal::find_journal(deps.db.as_ref(), company, "GN")
+            .await
+            .map_err(|err| format!("the general journal could not be read: {err}"))?
+            .ok_or_else(|| "no general journal GN exists to post the entries to".to_owned())?
+            .id;
+        let rules = ledgers_connect::store::rules(deps.db.as_ref(), company, &connection.id)
+            .await
+            .map_err(|err| format!("allocation rules could not be read: {err}"))?;
+        let mut links = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if !entry.balances() {
+                return Err(format!(
+                    "{} does not balance and was not posted",
+                    entry.provider_id
+                ));
+            }
+            let existing = existing_entry(deps.db.as_ref(), company, &entry.provider_id)
+                .await
+                .map_err(|err| format!("the ledger could not be read: {err}"))?;
+            let entry_id = if let Some(id) = existing {
+                id
+            } else {
+                let draft = entry_draft(entry, &journal, &rules, &connection.default_unit);
+                let fiscal_year: i64 = entry
+                    .posting_date
+                    .get(..4)
+                    .and_then(|y| y.parse().ok())
+                    .ok_or_else(|| format!("{} has no posting year", entry.provider_id))?;
+                let input =
+                    json!({"journal_id": journal, "fiscal_year": fiscal_year, "entry": draft});
+                let answer = self
+                    .execute(
+                        deps,
+                        &ledgers_ledger::surface::PostEntry,
+                        presented.clone(),
+                        &format!("{request_id}-ledger-{index}"),
+                        input,
+                    )
+                    .await
+                    .map_err(|problem| {
+                        format!(
+                            "{} was not posted: {}",
+                            entry.provider_id,
+                            demo_problem(&problem)
+                        )
+                    })?;
+                answer
+                    .pointer("/entry/entry_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("{} posted without an entry id", entry.provider_id))?
+            };
+            links.push(ledgers_connect::commands::LedgerLink {
+                provider_id: entry.provider_id.clone(),
+                entry_id,
+                posting_date: entry.posting_date.clone(),
+            });
+        }
+        Ok(links)
     }
 
     /// Calls the vendor for the window. `Ok` is the vendor's answer, `Err` the
@@ -665,4 +808,102 @@ fn demo_problem(problem: &Problem) -> String {
         Some(detail) => format!("{}: {detail}", problem.title),
         None => problem.title.to_owned(),
     }
+}
+
+/// The id of the journal entry already posted under `external_id`, if any.
+async fn existing_entry(
+    db: &dyn cratefield_core::Database,
+    company_id: &str,
+    external_id: &str,
+) -> Result<Option<String>, cratefield_core::DbError> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT id FROM journal_entry WHERE company_id = ? AND external_id = ?".to_owned(),
+            vec![
+                sea_query::Value::from(company_id),
+                sea_query::Value::from(external_id),
+            ],
+        ))
+        .await?;
+    Ok(rows.rows.first().and_then(|row| row.get::<String>("id")))
+}
+
+/// The journal entry draft for a planned entry. Each line carries its unit as the
+/// `unit` dimension: the allocation rule for its resource, else the default unit.
+fn entry_draft(
+    entry: &ledgers_connect::model::PlannedEntry,
+    journal_id: &str,
+    rules: &[ledgers_connect::allocation::AllocationRule],
+    default_unit: &str,
+) -> Value {
+    let lines: Vec<Value> = entry
+        .lines
+        .iter()
+        .map(|line| {
+            let unit = line
+                .resource
+                .as_deref()
+                .and_then(|resource| ledgers_connect::allocation::unit_for(rules, resource))
+                .unwrap_or(default_unit);
+            json!({
+                "account_number": line.account,
+                "side": if line.debit { "debit" } else { "credit" },
+                "base": {"minor": line.minor.to_string(), "currency": entry.currency},
+                "fx": null,
+                "tax_code": null,
+                "dimensions": {"unit": unit},
+                "memo": null,
+            })
+        })
+        .collect();
+    json!({
+        "journal_id": journal_id,
+        "document_date": entry.posting_date,
+        "posting_date": entry.posting_date,
+        "tax_point_date": null,
+        "base_currency": entry.currency,
+        "description": entry.description,
+        "source_documents": [],
+        "external_id": entry.provider_id,
+        "source_app": "ledgers-connect",
+        "reverses": null,
+        "lines": lines,
+    })
+}
+
+/// A rule the connector suggests when it is created: the bank line of a payout
+/// from the provider, which then books to the connection's clearing account.
+struct SuggestedRule {
+    connector: &'static str,
+    name: String,
+    conditions: ledgers_bank::rules::RuleConditions,
+    account_number: String,
+}
+
+/// The suggested bank rule for a new connection, when its connector has one.
+/// Stripe's payouts arrive as inflows whose description names Stripe.
+fn suggested_rule_for(input: &Value) -> Option<SuggestedRule> {
+    let connector = input.get("connector").and_then(Value::as_str)?;
+    if connector != "stripe" {
+        return None;
+    }
+    let clearing = input
+        .pointer("/config/clearing_account")
+        .and_then(Value::as_str)?;
+    let name = input
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Stripe")
+        .to_owned();
+    Some(SuggestedRule {
+        connector: "stripe",
+        name: format!("{name}: payouts (suggested)"),
+        conditions: ledgers_bank::rules::RuleConditions {
+            contains: Some("stripe".to_owned()),
+            counterparty_iban: None,
+            amount_min: Some(1),
+            amount_max: None,
+        },
+        account_number: clearing.to_owned(),
+    })
 }

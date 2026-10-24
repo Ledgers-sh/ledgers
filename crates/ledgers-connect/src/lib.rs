@@ -31,6 +31,7 @@ pub mod secret;
 pub mod sigv4;
 pub mod split;
 pub mod store;
+pub mod stripe;
 pub mod supabase;
 pub mod vercel;
 
@@ -56,6 +57,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "connect_llm",
         include_str!("../migrations/sqlite/0004_connect_llm.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "connect_stripe",
+        include_str!("../migrations/sqlite/0005_connect_stripe.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite, with the append-only
@@ -80,6 +86,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0004",
         "connect_llm",
         include_str!("../migrations/postgres/0004_connect_llm.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0005",
+        "connect_stripe",
+        include_str!("../migrations/postgres/0005_connect_stripe.sql"),
     ),
 ];
 

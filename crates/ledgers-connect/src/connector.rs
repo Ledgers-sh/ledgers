@@ -88,6 +88,7 @@ pub fn all() -> Vec<Box<dyn Connector>> {
         Box::new(crate::supabase::Supabase),
         Box::new(crate::openai::OpenAi),
         Box::new(crate::openrouter::OpenRouter),
+        Box::new(crate::stripe::Stripe),
     ]
 }
 
