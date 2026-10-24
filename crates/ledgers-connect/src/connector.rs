@@ -90,6 +90,8 @@ pub fn all() -> Vec<Box<dyn Connector>> {
         Box::new(crate::openrouter::OpenRouter),
         Box::new(crate::stripe::Stripe),
         Box::new(crate::polar::Polar),
+        Box::new(crate::spaceship::Spaceship),
+        Box::new(crate::twilio::Twilio),
     ]
 }
 

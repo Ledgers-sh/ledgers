@@ -874,6 +874,12 @@ fn connection_human_commands() -> Vec<CommandDescriptor> {
             "ledgers connections test",
         ),
         human_entry(
+            "connections.renewals",
+            "POST",
+            "/v1/connections/{connection_id}/renewals",
+            "ledgers connections renewals",
+        ),
+        human_entry(
             "allocation_rules.set",
             "POST",
             "/v1/allocation-rules/{connection_id}",

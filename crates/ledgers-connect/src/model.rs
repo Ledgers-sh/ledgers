@@ -57,6 +57,24 @@ pub struct SyncOutput {
     /// (Stripe balance transactions). Each one balances; the server posts them.
     #[serde(default)]
     pub entries: Vec<PlannedEntry>,
+    /// Domains a registrar lists, as metadata. Nothing is booked from them: a
+    /// domain list carries no charge. The renewals view reads them.
+    #[serde(default)]
+    pub domains: Vec<DomainRecord>,
+}
+
+/// One domain a registrar lists for the account. Metadata only: the list has no
+/// charge, so no bill or entry is made from it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DomainRecord {
+    /// The domain name, as the registrar prints it (`squeez.in`).
+    pub name: String,
+    /// The expiry date, `YYYY-MM-DD`.
+    pub expires_on: String,
+    /// Whether the registrar renews the domain automatically.
+    pub auto_renew: bool,
+    /// The registrar's lifecycle status for the domain, when it gives one.
+    pub status: Option<String>,
 }
 
 /// One line of a planned journal entry. `credit` is `false` for a debit.

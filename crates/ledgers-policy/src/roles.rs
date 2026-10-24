@@ -70,6 +70,7 @@ fn integration_class(command: &str) -> Option<Class> {
         | "connections.sync_now"
         | "connections.suspense_rebook"
         | "connections.test"
+        | "connections.renewals"
         | "allocation_rules.set" => Class::Settings,
         _ => return None,
     })
@@ -317,6 +318,7 @@ mod tests {
         ("connections.sync_now", Class::Settings),
         ("connections.suspense_rebook", Class::Settings),
         ("connections.test", Class::Settings),
+        ("connections.renewals", Class::Settings),
         ("allocation_rules.set", Class::Settings),
         ("company.update", Class::Settings),
         ("tax_settings.update", Class::Settings),
@@ -514,6 +516,7 @@ mod connections_roles {
             "connections.delete",
             "connections.sync_now",
             "connections.test",
+            "connections.renewals",
             "allocation_rules.set",
         ] {
             assert!(check(Role::Owner, name).is_ok(), "owner may {name}");

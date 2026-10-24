@@ -503,6 +503,89 @@ impl ServerDispatch {
         })
     }
 
+    /// `connections.renewals`: a person only. Reads the registrar's domain list for
+    /// today and returns the domains that expire within the renewal window, soonest
+    /// first. Nothing is written: no run, no bill, no entry.
+    pub(super) async fn connections_renewals(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        self.caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        let connection_id = input
+            .get("connection_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("the connection id is required", request_id))?
+            .to_owned();
+        let connection =
+            ledgers_connect::store::connection(deps.db.as_ref(), self.company_id(), &connection_id)
+                .await
+                .map_err(|err| {
+                    CommandError::Database(err)
+                        .to_problem()
+                        .instance(request_id)
+                })?
+                .ok_or_else(|| {
+                    invalid(
+                        format!("connection {connection_id} does not exist"),
+                        request_id,
+                    )
+                })?;
+        if connection.connector != "spaceship" {
+            return Err(invalid(
+                "renewals are read from a registrar connection (Spaceship)",
+                request_id,
+            ));
+        }
+        let vendor = connector::by_id(&connection.connector).ok_or_else(|| {
+            invalid(
+                "the connector of this connection is not shipped",
+                request_id,
+            )
+        })?;
+        let today = today_of(deps.clock.as_ref());
+        let outcome = self
+            .fetch_vendor(
+                deps,
+                vendor.as_ref(),
+                &connection,
+                &today,
+                &today,
+                request_id,
+            )
+            .await?;
+        let output = match outcome {
+            Ok(answer) => ledgers_connect::commands::RenewalsOutput {
+                ok: true,
+                error: None,
+                as_of: today.clone(),
+                window_days: ledgers_connect::spaceship::RENEWAL_WINDOW_DAYS,
+                domains: ledgers_connect::spaceship::renewals_within(
+                    &answer.domains,
+                    &today,
+                    ledgers_connect::spaceship::RENEWAL_WINDOW_DAYS,
+                ),
+                notes: answer.notes,
+            },
+            Err(message) => ledgers_connect::commands::RenewalsOutput {
+                ok: false,
+                error: Some(message),
+                as_of: today.clone(),
+                window_days: ledgers_connect::spaceship::RENEWAL_WINDOW_DAYS,
+                domains: Vec::new(),
+                notes: Vec::new(),
+            },
+        };
+        serde_json::to_value(output).map_err(|err| {
+            Problem::internal()
+                .with_detail(format!("renewals answer: {err}"))
+                .instance(request_id)
+        })
+    }
+
     /// Posts each planned journal entry that is not yet posted, and returns the link of
     /// every planned entry to its journal entry. An entry whose `external_id` already
     /// exists in the ledger (a sync that stopped after posting) is linked, not posted

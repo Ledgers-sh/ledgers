@@ -207,7 +207,7 @@ pub fn output(
     out
 }
 
-fn exponent_of(code: &str) -> u32 {
+pub fn exponent_of(code: &str) -> u32 {
     Currency::from_code(code).map_or(2, ledgers_money::Currency::exponent)
 }
 

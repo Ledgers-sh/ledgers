@@ -918,6 +918,10 @@ impl Dispatch for ServerDispatch {
                 self.connections_test(deps, presented, request_id, input)
                     .await
             }
+            "connections.renewals" => {
+                self.connections_renewals(deps, presented, request_id, input)
+                    .await
+            }
             "connections.suspense_rebook" => {
                 self.execute(
                     deps,
@@ -2282,6 +2286,13 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_connect::commands::TestInput>(),
                 schema_of::<ledgers_connect::commands::TestOutput>(),
+            ),
+        ),
+        (
+            "connections.renewals",
+            (
+                schema_of::<ledgers_connect::commands::RenewalsInput>(),
+                schema_of::<ledgers_connect::commands::RenewalsOutput>(),
             ),
         ),
         (

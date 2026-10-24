@@ -21,6 +21,10 @@ const D1_CONNECT_CLOUD: &str =
 const D1_CONNECT_POLAR: &str =
     include_str!("../d1/migrations/0045_ledgers_connect_connect_polar.sql");
 
+/// The D1 mirror of migration 0007 (Spaceship and Twilio).
+const D1_CONNECT_SPACESHIP_TWILIO: &str =
+    include_str!("../d1/migrations/0050_ledgers_connect_connect_spaceship_twilio.sql");
+
 /// The D1 mirror of migration 0005 (Stripe, and the ledger idempotency table).
 const D1_CONNECT_STRIPE: &str =
     include_str!("../d1/migrations/0044_ledgers_connect_connect_stripe.sql");
@@ -188,4 +192,51 @@ fn a_failed_rebuild_rolls_back_and_leaves_the_books_as_they_were() {
         .query_row("SELECT COUNT(*) FROM connector_run", [], |row| row.get(0))
         .expect("count");
     assert_eq!(runs, 1);
+}
+
+#[test]
+fn the_spaceship_and_twilio_mirror_applies_to_a_database_with_rows() {
+    let conn = seeded();
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_PROVIDERS}\nCOMMIT;"))
+        .expect("0041 applies");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_CLOUD}\nCOMMIT;"))
+        .expect("0042 applies");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_LLM}\nCOMMIT;"))
+        .expect("0043 applies");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_STRIPE}\nCOMMIT;"))
+        .expect("0044 applies");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_POLAR}\nCOMMIT;"))
+        .expect("0045 applies, with the connection, credential and run in place");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_SPACESHIP_TWILIO}\nCOMMIT;"))
+        .expect("0050 applies to a database holding rows");
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect("count") };
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM connector_connection WHERE id = 'conn-1' AND name = 'Cloudflare (prod)'"
+        ),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_credential WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_run WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+    for connector in ["spaceship", "twilio"] {
+        conn.execute(
+            "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+             VALUES (?1, 'co-1', ?2, ?2, '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+            [format!("conn-{connector}"), connector.to_owned()],
+        )
+        .unwrap_or_else(|err| panic!("{connector} is accepted after 0050: {err}"));
+    }
+    let refused = conn.execute(
+        "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+         VALUES ('conn-x', 'co-1', 'unknown', 'X', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+        [],
+    );
+    assert!(refused.is_err(), "an unknown connector is still refused");
 }
