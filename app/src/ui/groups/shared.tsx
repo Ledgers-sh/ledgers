@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { t, type MessageKey } from '../../i18n';
 import { Ltr } from '../../i18n/Ltr';
 import { CompanyAvatar } from '../Avatar';
+import { TabRow } from '../TabRow';
 import type { GroupKind } from '../../api/groups';
 
 export type GroupSection = 'companies' | 'agreements' | 'reconciliation' | 'view';
@@ -23,13 +24,13 @@ const SECTION_LABEL: Record<GroupSection, MessageKey> = {
 
 export function GroupTabs({ current }: { current: GroupSection }) {
   return (
-    <nav class="tabs group-tabs" aria-label={t('groups.tabs_label')}>
+    <TabRow active={current} label={t('groups.tabs_label')} class="group-tabs">
       {(Object.keys(SECTION_HREF) as GroupSection[]).map((section) => (
         <a key={section} class="tab" href={SECTION_HREF[section]} aria-current={current === section ? 'page' : undefined}>
           {t(SECTION_LABEL[section])}
         </a>
       ))}
-    </nav>
+    </TabRow>
   );
 }
 

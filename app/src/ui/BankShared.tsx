@@ -8,17 +8,18 @@ import { signedAmount, type LineStatus } from '../lib/bank';
 import { accountName, intlLocale, t, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import type { SelectOption } from './Select';
+import { TabRow } from './TabRow';
 
 export function BankTabs({ current }: { current: 'accounts' | 'rules' }) {
   return (
-    <nav class="tabs bank-tabs" aria-label={t('bank.sections')}>
+    <TabRow active={current} label={t('bank.sections')} class="bank-tabs">
       <a class="tab" href="#/bank" aria-current={current === 'accounts' ? 'page' : undefined}>
         {t('bank.tab_accounts')}
       </a>
       <a class="tab" href="#/bank/rules" aria-current={current === 'rules' ? 'page' : undefined}>
         {t('bank.tab_rules')}
       </a>
-    </nav>
+    </TabRow>
   );
 }
 

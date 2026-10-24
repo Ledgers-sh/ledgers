@@ -10,6 +10,8 @@ export const id: Messages = {
   'shell.skip': 'Lewati ke konten',
   'shell.main_nav': 'Navigasi utama',
   'shell.sections': 'Bagian',
+  'shell.more': 'Lainnya',
+  'shell.more_sections': 'Bagian lainnya',
   'shell.brand_link': 'ringkasan ledgers.sh',
   'shell.server': 'Server',
   'shell.sign_out': 'Keluar',
