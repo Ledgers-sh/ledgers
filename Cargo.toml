@@ -142,6 +142,8 @@ fints-rs = "=0.2.0"
 
 # Company groups and intercompany agreements (issue #128).
 ledgers-group = { path = "crates/ledgers-group" }
+# Open items, AR/AP subledgers and control-account reconciliation (issue #47).
+ledgers-subledger = { path = "crates/ledgers-subledger" }
 # Dev dependencies for ledgers-commands (issue #10):
 insta = { version = "1", features = ["json"] }
 trybuild = "1"

@@ -500,6 +500,44 @@ impl Command for PostEntry {
     }
 }
 
+/// Internal helper: plan a posting batch allowing control account posting.
+/// Used by internal callers (bills, subledger) to bypass the control account restriction.
+///
+/// # Errors
+/// Returns `CommandError::InvalidInput` or `CommandError::Domain` for posting failures.
+pub async fn plan_post_entry_with_control(
+    token: &ExecToken,
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &PostEntryInput,
+) -> Result<Plan<PostEntryOutput>, CommandError> {
+    let domain_draft = input
+        .entry
+        .clone()
+        .to_domain()
+        .map_err(CommandError::InvalidInput)?;
+    let entry = Entry::from_draft(domain_draft, &ctx.company_id)
+        .map_err(|e| CommandError::InvalidInput(e.to_string()))?;
+
+    let (statements, posted_entry) = crate::posting::plan_control_post(
+        token,
+        db,
+        &ctx.company_id,
+        &entry,
+        input.fiscal_year,
+        &ctx.now,
+        &ctx.request_id,
+    )
+    .await
+    .map_err(|err| err.to_problem())?;
+
+    let mut plan = Plan::with_output(PostEntryOutput {
+        entry: SerializablePostedEntry::from(posted_entry),
+    });
+    plan.statements = statements;
+    Ok(plan)
+}
+
 /// Registry function: returns a ledgers-commands Registry with surface commands.
 #[must_use]
 pub fn registry() -> ledgers_commands::Registry {

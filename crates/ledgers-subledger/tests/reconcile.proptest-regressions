@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c73f31b2d5573286adadc62e4834e01a3563faf472fc0a5ac0338f0c29f39bf3 # shrinks to ops_raw = [(0, PostArInvoice { party_id: "cust1", amount: 100000, currency: "USD", day: 0 })]

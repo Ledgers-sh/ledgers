@@ -1,0 +1,35 @@
+[package]
+name = "ledgers-subledger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# The Postgres leg of migrations (CI and a local postgres:16).
+postgres = ["cratefield-testing/postgres"]
+
+[dependencies]
+cratefield-core = { workspace = true }
+ledgers-commands = { workspace = true }
+ledgers-db = { workspace = true }
+ledgers-ledger = { workspace = true }
+ledgers-money = { workspace = true }
+sea-query = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+pollster = { workspace = true }
+cratefield-testing = { workspace = true, features = ["harness"] }
+ledgers-audit = { workspace = true }
+ledgers-storage = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

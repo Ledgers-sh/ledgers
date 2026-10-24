@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 224b3252a54ee240c0c7678041fd0fb292f6a4200c4e8c7d33b8f13c62d0a655 # shrinks to seed = [Post { ap: false, party: 0, amount: 1000, currency: "EUR", rate: None }, Post { ap: false, party: 0, amount: 1000, currency: "EUR", rate: None }, Post { ap: false, party: 0, amount: 1000, currency: "EUR", rate: None }], ops = [CreditNote { pick: 0, pct: 67 }, CreditNote { pick: 46325, pct: 19 }, Post { ap: false, party: 1, amount: 4474, currency: "USD", rate: Some("1.15") }, Settle { pick: 40188, pct: 129, jitter: 76 }, Settle { pick: 299, pct: 56, jitter: -1587 }, Post { ap: false, party: 2, amount: 439642, currency: "EUR", rate: None }, Post { ap: true, party: 3, amount: 217410, currency: "USD", rate: Some("0.9") }, Offset { pick: 15035 }, Offset { pick: 16442 }, Post { ap: false, party: 2, amount: 119699, currency: "EUR", rate: None }]

@@ -270,6 +270,7 @@ async fn post_new_entry(
         period_override: entry.period.clone(),
         human: entry.human,
         daily_limit: Some((entry.actor_subject.clone(), entry.daily_limit)),
+        allow_control_posting: false,
     };
     let posted = posting::post_raw_entry_with(
         db,

@@ -33,13 +33,13 @@ const ACCOUNTS: [(&str, &str, AccountType, &[&str]); 5] = [
         "1030",
         "account.trends.receivables",
         AccountType::Asset,
-        &["ar"],
+        &[],
     ),
     (
         "2010",
         "account.trends.payables",
         AccountType::Liability,
-        &["ap"],
+        &[],
     ),
     ("4000", "account.trends.sales", AccountType::Income, &[]),
     (

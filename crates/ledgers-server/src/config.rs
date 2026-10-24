@@ -8,6 +8,7 @@ use ledgers_ext::{
     scope::{CompanyId, EntityScope},
 };
 use ledgers_ledger::close::CloseCheckRegistry;
+use ledgers_subledger::close_check::SubledgerReconciliationCheck;
 use std::sync::Arc;
 
 /// Service composition: pluggable extension trait implementations.
@@ -39,6 +40,7 @@ impl LedgersConfig {
         close_checks.register(Box::new(ledgers_ledger::close::DraftEntriesCloseCheck));
         close_checks.register(Box::new(FlaggedExtractionCloseCheck));
         close_checks.register(Box::new(UnpostedBillsCloseCheck));
+        close_checks.register(Box::new(SubledgerReconciliationCheck));
 
         LedgersConfig {
             scope: Arc::new(SingleCompany::new(company)),

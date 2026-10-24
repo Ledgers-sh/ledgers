@@ -199,6 +199,8 @@ pub fn compose(
     // module above, the same way the D1 files are numbered.
     let builder = builder.module(ledgers_documents::DocumentsStoreModule);
     let builder = builder.module(ledgers_bills::BillsModule);
+    // Subledger: open items and allocations for AR/AP reconciliation, after bills.
+    let builder = builder.module(ledgers_subledger::SubledgerModule);
     // Bank accounts, statements and reconciliation: after the documents and the
     // bills whose tables reconciliation reads.
     let builder = builder.module(ledgers_bank::BankModule);

@@ -14,15 +14,17 @@ use crate::store::{self, BillRow};
 use cratefield_core::{Database, Problem, Statement};
 use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
+use ledgers_db::guard as db_guard;
 use ledgers_extract::checks;
 use ledgers_extract::guard;
 use ledgers_extract::schema::parse_iso_date;
 use ledgers_ledger::account::{AccountEntry, AccountType};
 use ledgers_ledger::surface::{
     PostEntry, PostEntryInput, PostEntryOutput, SerializableAmount, SerializableEntryDraft,
-    SerializableLine, SerializablePostedEntry,
+    SerializableLine, SerializablePostedEntry, plan_post_entry_with_control,
 };
 use ledgers_ledger::units::{self, UnitScope};
+use ledgers_subledger::builders;
 use ledgers_tax::normalize_vat_id;
 use schemars::JsonSchema;
 use sea_query::Value;
@@ -1180,14 +1182,47 @@ impl Command for BillsPost {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         let (row, entry) = entry_for(db, ctx, input).await?;
-        let posted: Plan<PostEntryOutput> = PostEntry.plan(token, db, ctx, &entry).await?;
+        let posted: Plan<PostEntryOutput> =
+            plan_post_entry_with_control(token, db, ctx, &entry).await?;
         let mut statements = posted.statements;
+
+        // Create AP open_item for the bill in the same batch
+        let chart = load_chart(db, &ctx.company_id).await?;
+        let ap_control = chart.payable.clone().ok_or_else(|| {
+            CommandError::InvalidInput("the chart has no payable account (tag ap)".into())
+        })?;
+
+        let entry_id = posted.output.entry.entry_id.clone();
+        let item_id = format!("oi_{}", ctx.event_id);
+        let posting_date = ctx.now.get(..10).unwrap_or("").to_owned();
+        let gross_minor = row.gross_minor.unwrap_or(0);
+
+        let item_insert = builders::build_open_item_insert(
+            &item_id,
+            &ctx.company_id,
+            "ap",
+            "bill",
+            &row.vendor_id,
+            Some(row.id.as_str()),
+            &entry_id,
+            &ap_control,
+            &row.currency,
+            None,
+            row.invoice_date.as_deref().unwrap_or(&posting_date),
+            &posting_date,
+            row.due_date.as_deref(),
+            gross_minor,
+            gross_minor,
+            &ctx.now,
+        );
+        statements.push(item_insert);
+
         statements.push(Statement::with_values(
             "UPDATE bill SET posted_entry_id = ?, updated_at = ? \
              WHERE company_id = ? AND id = ? AND posted_entry_id IS NULL"
                 .to_owned(),
             vec![
-                Value::from(posted.output.entry.entry_id.as_str()),
+                Value::from(entry_id.as_str()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
                 Value::from(row.id.as_str()),
@@ -1196,7 +1231,7 @@ impl Command for BillsPost {
         // The view of the bill as the batch leaves it: posted, with the entry.
         let bill = view_of(
             BillRow {
-                posted_entry_id: Some(posted.output.entry.entry_id.clone()),
+                posted_entry_id: Some(entry_id),
                 ..row.clone()
             },
             Vec::new(),
@@ -1541,12 +1576,81 @@ impl Command for BillsRecordPayment {
 
         // Build and post the payment entry
         let entry_input = payment_entry_for(db, ctx, input, &row).await?;
-        let posted: Plan<PostEntryOutput> = PostEntry.plan(token, db, ctx, &entry_input).await?;
+        let posted: Plan<PostEntryOutput> =
+            plan_post_entry_with_control(token, db, ctx, &entry_input).await?;
+
+        let entry_id = posted.output.entry.entry_id.clone();
 
         // Combine all statements: guards before mutation, then mutation, then release
         let mut final_statements = Vec::new();
         final_statements.append(&mut guard_stmts);
         final_statements.extend(posted.statements);
+
+        // Try to load and allocate the bill's open_item (if it exists)
+        // Bills posted before this change have no open_item; skip subledger rows if not found
+        if let Some(rows) = db
+            .query(&Statement::with_values(
+                "SELECT id, company_id, ledger, party_id, tx_remaining_minor, base_remaining_minor FROM open_item \
+                 WHERE company_id = ? AND ledger = 'ap' AND kind = 'bill' AND source_id = ? LIMIT 1"
+                    .to_owned(),
+                vec![
+                    Value::from(ctx.company_id.as_str()),
+                    Value::from(row.id.as_str()),
+                ],
+            ))
+            .await
+            .ok()
+            && let Some(item_row) = rows.first()
+        {
+            let open_item_id: String = item_row.get("id").unwrap_or_default();
+            let ledger: String = item_row.get("ledger").unwrap_or_else(|| "ap".to_string());
+            let party_id: String = item_row
+                .get("party_id")
+                .unwrap_or_else(|| row.vendor_id.clone());
+            let tx_remaining: i64 = item_row.get("tx_remaining_minor").unwrap_or(0);
+            let base_remaining: i64 = item_row.get("base_remaining_minor").unwrap_or(0);
+
+            // Create allocation row
+            let alloc_id = format!("alloc_{}", ctx.event_id);
+            final_statements.push(builders::build_allocation_insert(
+                &alloc_id,
+                &ctx.company_id,
+                &open_item_id,
+                &entry_id,
+                "payment",
+                input.amount,
+                input.amount, // for now, assume base currency only
+                0,            // FX difference will be 0 for EUR bills
+                &input.date,
+                &ctx.now,
+            ));
+
+            // Build guard, decrement, and release
+            let (guard_key, guard_stmt) = builders::build_allocation_guard(
+                "bill-alloc-item",
+                &entry_id,
+                &open_item_id,
+                &ctx.company_id,
+                &ledger,
+                &party_id,
+                tx_remaining,
+                base_remaining,
+            );
+            final_statements.push(guard_stmt);
+
+            final_statements.push(builders::build_open_item_decrement(
+                &open_item_id,
+                &ctx.company_id,
+                &ledger,
+                &party_id,
+                input.amount,
+                input.amount,
+                &ctx.now,
+            ));
+
+            final_statements.push(db_guard::release_statement(&guard_key));
+        }
+
         final_statements.push(Statement::with_values(
             "UPDATE bill SET paid_minor = paid_minor + ?, updated_at = ? WHERE company_id = ? AND id = ?"
                 .to_owned(),
