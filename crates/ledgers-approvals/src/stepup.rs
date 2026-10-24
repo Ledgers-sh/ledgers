@@ -158,14 +158,10 @@ fn verify_es256_signature(
     message: &[u8],
     public_key: &[u8],
 ) -> Result<(), String> {
-    use p256::EncodedPoint;
-    use p256::ecdsa::{Signature, VerifyingKey};
-    use signature::Verifier;
+    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 
     // Decode the public key from SEC1 uncompressed format
-    let encoded_point =
-        EncodedPoint::from_bytes(public_key).map_err(|e| format!("invalid public key: {e}"))?;
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+    let verifying_key = VerifyingKey::from_sec1_bytes(public_key)
         .map_err(|e| format!("invalid public key point: {e}"))?;
 
     // Parse the DER signature
@@ -211,7 +207,7 @@ mod tests {
         let secret = SecretKey::from_slice(&seed).expect("valid seed");
         let signing_key = p256::ecdsa::SigningKey::from(secret);
         let verifying_key = p256::ecdsa::VerifyingKey::from(&signing_key);
-        let public_key_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        let public_key_bytes = verifying_key.to_sec1_point(false).as_bytes().to_vec();
 
         (signing_key, public_key_bytes)
     }
@@ -226,7 +222,7 @@ mod tests {
         valid: bool,
     ) -> PasskeyProof {
         let verifying_key = p256::ecdsa::VerifyingKey::from(signing_key);
-        let public_key_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        let public_key_bytes = verifying_key.to_sec1_point(false).as_bytes().to_vec();
 
         // Build authenticatorData: rpIdHash (32) + flags (1) + counter (4)
         let rp_id_hash = Sha256::new().chain_update(rp_id.as_bytes()).finalize();
@@ -366,7 +362,7 @@ mod tests {
 
         // Build a proof with wrong type in client data
         let verifying_key = p256::ecdsa::VerifyingKey::from(&signing_key);
-        let public_key_vec = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        let public_key_vec = verifying_key.to_sec1_point(false).as_bytes().to_vec();
 
         let rp_id_hash = Sha256::new().chain_update(rp_id.as_bytes()).finalize();
         let mut auth_data = rp_id_hash.to_vec();
@@ -430,7 +426,7 @@ mod tests {
         let secret2 = p256::SecretKey::from_slice(&seed2).expect("valid seed");
         let signing_key2 = p256::ecdsa::SigningKey::from(secret2);
         let verifying_key2 = p256::ecdsa::VerifyingKey::from(&signing_key2);
-        let public_key2 = verifying_key2.to_encoded_point(false).as_bytes().to_vec();
+        let public_key2 = verifying_key2.to_sec1_point(false).as_bytes().to_vec();
 
         let result = verifier.verify(&proof, challenge, rp_id, origin, &public_key2);
         assert!(
