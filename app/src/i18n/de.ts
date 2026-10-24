@@ -11,6 +11,8 @@ export const de: Messages = {
   'shell.skip': 'Zum Inhalt springen',
   'shell.main_nav': 'Hauptnavigation',
   'shell.sections': 'Bereiche',
+  'shell.more': 'Mehr',
+  'shell.more_sections': 'Weitere Bereiche',
   'shell.brand_link': 'ledgers.sh Übersicht',
   'shell.server': 'Server',
   'shell.sign_out': 'Abmelden',

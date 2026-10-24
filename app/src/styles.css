@@ -189,6 +189,7 @@ kbd { font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .page-head p { color: var(--muted); font-size: 15px; margin-top: 4px; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .bottom-nav { display: none; }
+.bottom-more { display: none; }
 .kbd-hint { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
 
 /* Cards and tiles */
@@ -317,17 +318,33 @@ dialog.confirm .dialog-actions { display: flex; gap: 10px; justify-content: flex
   .content { padding: 18px 14px 110px; gap: 18px; }
   .two-col { grid-template-columns: minmax(0, 1fr); }
   .bottom-nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
     background: color-mix(in srgb, var(--sunk) 96%, transparent); border-top: 1px solid var(--line);
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
   }
-  .bottom-nav a {
-    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; min-height: 48px;
-    font-size: 12px; color: var(--muted); border-radius: 6px; text-align: center;
+  .bottom-nav a, .bottom-nav .bottom-more-toggle {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; min-height: 48px; min-width: 0;
+    font-size: 12px; color: var(--muted); border-radius: 6px; text-align: center; background: transparent; border: 0;
+    font-family: inherit; font-weight: 400; overflow-wrap: anywhere;
   }
   .bottom-nav .icon { width: 22px; height: 22px; }
+  .bottom-nav .bottom-more-toggle .icon { transition: transform .15s; }
+  .bottom-nav .bottom-more-toggle .icon.flip { transform: rotate(180deg); }
   .topbar .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .bottom-nav a[aria-current='page'] { color: var(--text); box-shadow: inset 0 2px 0 var(--agent); }
+  .bottom-nav a[aria-current='page'], .bottom-nav .bottom-more-toggle[aria-current='page'] { color: var(--text); box-shadow: inset 0 2px 0 var(--agent); }
+  .bottom-more {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; position: fixed; z-index: 6;
+    left: 8px; right: 8px; bottom: calc(76px + env(safe-area-inset-bottom)); max-height: 60vh; overflow: auto;
+    padding: 8px; background: var(--raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    box-shadow: 0 10px 28px rgba(0,0,0,.3);
+  }
+  .bottom-more a {
+    display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border-radius: 6px;
+    color: var(--text-2); min-width: 0; overflow-wrap: anywhere;
+  }
+  .bottom-more a .icon { flex: none; }
+  .bottom-more a[aria-current='page'] { color: var(--text); box-shadow: inset 2px 0 0 var(--agent); }
+  .bottom-more .nav-count { position: static; margin-inline-start: auto; }
 }
 
 /* Phones: tables become readable cards */
@@ -1101,6 +1118,7 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
 .colour-input { width: 48px; height: 36px; padding: 2px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); cursor: pointer; }
 .logo-field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .logo-field .input { max-width: 100%; }
+.logo-field input[type='file'] { min-height: 40px; max-width: 100%; }
 .unit-pin { display: flex; flex-direction: column; gap: 6px; }
 
 /* By business unit (Overview, whole company) */
@@ -1330,3 +1348,14 @@ tr.open-month { background: var(--human-bg); }
 .pair-card .pair-title { flex: 1 1 100%; }
 .agreement-form .field-row { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .side-accounts legend .company-name { text-transform: none; letter-spacing: 0; font-size: 14px; }
+
+/* Phones: every control a finger lands on is at least 40px tall, and icon-only buttons at least 40px wide.
+   Declared last so these win over the component rules above. */
+@media (max-width: 640px) {
+  .btn, .btn-sm { min-height: 40px; min-width: 40px; }
+  .sel-trigger, .sel.compact .sel-trigger, .pp-trigger { min-height: 40px; }
+  .legend-item { min-height: 40px; }
+  .infotip-button { width: 40px; height: 40px; margin: -9px; }
+  .logo-field input[type='file'] { min-height: 40px; }
+  .dimension-switch button { min-height: 40px; }
+}
