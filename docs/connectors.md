@@ -93,11 +93,13 @@ one FOCUS 1.3 charge per line. Source:
 ## Deploy notes
 
 - Migration `0002` widens the `connector` check to include `aws` and `vercel`.
-  SQLite cannot alter a check constraint, so the migration rebuilds
-  `connector_connection` with foreign keys off. It is guarded so a repeat is
-  harmless. A crash between its DROP and RENAME needs the rename run by hand.
+  SQLite cannot alter a check constraint, so the migration copies the rows into a
+  new table and renames it into place. It defers foreign-key checks with
+  `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores
+  `foreign_keys = OFF`. The file runs as one transaction, natively and on D1.
 - The D1 mirror (`crates/ledgers-server/d1/migrations/0041_ledgers_connect_connect_providers.sql`)
-  carries the same SQL. D1 may not accept `PRAGMA foreign_keys`; run it against a
-  staging D1 database before production.
+  is the same SQL. `crates/ledgers-server/tests/d1_connect_rebuild.rs` applies it, as one
+  batch in a transaction, to a database holding a connection, a credential and a run, and
+  checks that the rows survive and the foreign-key check is empty.
 - `LEDGERS_CONNECT_KEY` must be set on the server for any connection to hold a
   credential.

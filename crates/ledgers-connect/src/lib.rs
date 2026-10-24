@@ -40,8 +40,7 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "connect_providers",
         include_str!("../migrations/sqlite/0002_connect_providers.sql"),
-    )
-    .non_transactional(),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite, with the append-only

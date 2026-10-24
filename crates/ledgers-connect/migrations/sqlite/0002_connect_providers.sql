@@ -1,15 +1,19 @@
 -- Widens connector_connection.connector to the cloud connectors (aws, vercel).
 --
--- SQLite cannot alter a CHECK, so the table is rebuilt. This migration runs
--- outside a transaction, because the foreign-key pragma can only be changed
--- outside one; the statements are guarded so a repeat is harmless:
--- CREATE ... IF NOT EXISTS, and INSERT OR IGNORE. The child tables refer to
+-- SQLite cannot alter a CHECK, so the table is rebuilt: copy the rows into a
+-- new table, drop the old one, rename the new one into its name. The child
+-- tables (connector_run, connector_invoice, connector_split, ...) refer to
 -- connector_connection by name, so they stay linked to the rebuilt table.
--- Known limit: a crash between the DROP and the RENAME leaves the rows in
--- connector_connection_v2 and needs the RENAME run by hand.
-PRAGMA foreign_keys = OFF;
+--
+-- The rebuild needs foreign keys deferred, not switched off: D1 ignores
+-- `PRAGMA foreign_keys = OFF`, and an immediate check fails on DROP TABLE while
+-- child rows still refer to the parent. `defer_foreign_keys` holds the check
+-- to the end of the transaction, when every child refers to a row again.
+-- This file runs as one transaction, natively (the migration runner) and on
+-- D1 (the batch), so both apply the same statements.
+PRAGMA defer_foreign_keys = true;
 
-CREATE TABLE IF NOT EXISTS connector_connection_v2 (
+CREATE TABLE connector_connection_v2 (
     id              TEXT NOT NULL PRIMARY KEY,
     company_id      TEXT NOT NULL,
     connector       TEXT NOT NULL CHECK (connector IN ('cloudflare', 'anthropic', 'planetscale', 'aws', 'vercel')),
@@ -25,12 +29,12 @@ CREATE TABLE IF NOT EXISTS connector_connection_v2 (
     UNIQUE (company_id, name)
 );
 
-INSERT OR IGNORE INTO connector_connection_v2 (id, company_id, connector, name, config_json, default_unit, is_demo, last_sync_at, deleted_at, created_by, created_at, updated_at)
+INSERT INTO connector_connection_v2 (id, company_id, connector, name, config_json, default_unit, is_demo, last_sync_at, deleted_at, created_by, created_at, updated_at)
 SELECT id, company_id, connector, name, config_json, default_unit, is_demo, last_sync_at, deleted_at, created_by, created_at, updated_at
 FROM connector_connection;
 
-DROP TABLE IF EXISTS connector_connection;
+DROP TABLE connector_connection;
 
 ALTER TABLE connector_connection_v2 RENAME TO connector_connection;
 
-PRAGMA foreign_keys = ON;
+PRAGMA defer_foreign_keys = false;
