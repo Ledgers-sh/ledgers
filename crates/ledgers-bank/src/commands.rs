@@ -8,6 +8,7 @@
 //! audit trail are the executor's: an agent's post into the bank's ledger
 //! account is held for a person, exactly as a bill payment is.
 
+use crate::close::balance_summary;
 use crate::fingerprint;
 use crate::iban;
 use crate::model::{
@@ -705,46 +706,6 @@ impl Command for AccountsReconcile {
             ignored_count,
         }))
     }
-}
-
-/// The sums and counts of an account's lines up to a date, by status:
-/// `(unmatched total, unmatched count, ignored total, ignored count)`.
-async fn balance_summary(
-    db: &dyn Database,
-    company_id: &str,
-    account_id: &str,
-    as_of: &str,
-) -> Result<(i64, u32, i64, u32), DbError> {
-    let rows = db
-        .query(&Statement::with_values(
-            "SELECT status, COUNT(*) AS n, COALESCE(SUM(minor), 0) AS total FROM bank_transaction \
-             WHERE company_id = ? AND account_id = ? AND booking_date <= ? GROUP BY status"
-                .to_owned(),
-            vec![
-                Value::from(company_id),
-                Value::from(account_id),
-                Value::from(as_of),
-            ],
-        ))
-        .await?;
-    let (mut unmatched, mut unmatched_n, mut ignored, mut ignored_n) = (0i64, 0u32, 0i64, 0u32);
-    for row in &rows.rows {
-        let status = row.get::<String>("status").unwrap_or_default();
-        let n = u32::try_from(row.get::<i64>("n").unwrap_or(0)).unwrap_or(u32::MAX);
-        let total = row.get::<i64>("total").unwrap_or(0);
-        match status.as_str() {
-            "unmatched" => {
-                unmatched = total;
-                unmatched_n = n;
-            }
-            "ignored" => {
-                ignored = total;
-                ignored_n = n;
-            }
-            _ => {}
-        }
-    }
-    Ok((unmatched, unmatched_n, ignored, ignored_n))
 }
 
 // --- statements -----------------------------------------------------------

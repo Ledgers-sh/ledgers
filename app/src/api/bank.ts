@@ -59,7 +59,13 @@ export interface CsvMapping {
   bank_reference: string | null;
 }
 
-export type SuggestionKind = 'rule' | 'bill' | 'entry';
+export type SuggestionKind = 'rule' | 'bill' | 'entry' | 'combined' | 'partial-payment';
+
+export interface CombinedTarget {
+  id: string;
+  /** Amount in minor units. */
+  amount_minor: string;
+}
 
 export interface Suggestion {
   kind: SuggestionKind;
@@ -69,6 +75,8 @@ export interface Suggestion {
   /** Stable reason codes; the screen words the ones it knows. */
   reasons: string[];
   account_number: string | null;
+  /** For combined or partial payments: the bills involved and their allocated amounts. */
+  combined_targets?: CombinedTarget[];
 }
 
 export interface MatchedView {

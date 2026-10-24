@@ -14611,7 +14611,7 @@
             "$ref": "#/components/schemas/SuggestionKind"
           },
           "target_id": {
-            "description": "The target's id: the rule, bill or entry id.",
+            "description": "The target's id: the rule, bill or entry id (or primary bill for combined/partial).",
             "type": "string"
           },
           "score": {
@@ -14634,6 +14634,16 @@
               "string",
               "null"
             ]
+          },
+          "combined_targets": {
+            "description": "For combined or partial payments: the bills involved and their allocated amounts.",
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CombinedTarget"
+            }
           }
         },
         "required": [
@@ -14660,7 +14670,36 @@
             "description": "A posted journal entry on the bank's ledger account.",
             "type": "string",
             "const": "entry"
+          },
+          {
+            "description": "Multiple open bills of the same vendor settled by one bank line.",
+            "type": "string",
+            "const": "combined"
+          },
+          {
+            "description": "A partial payment: one bill paid by several bank lines (or one line paying part of one bill).",
+            "type": "string",
+            "const": "partial-payment"
           }
+        ]
+      },
+      "CombinedTarget": {
+        "description": "One target in a combined payment: a bill and its allocated amount.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The bill id.",
+            "type": "string"
+          },
+          "amount_minor": {
+            "description": "The amount in minor units to allocate to this bill.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "id",
+          "amount_minor"
         ]
       },
       "PartyRef": {
