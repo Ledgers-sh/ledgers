@@ -57,12 +57,42 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://vercel.com/docs/rest-api/reference/welcome#authentication',
     tokenLabel: 'integrations.create_token',
   },
+  gcp: {
+    imports: 'integrations.gcp_imports',
+    scopes: 'integrations.scopes_gcp',
+    tokenUrl: 'https://cloud.google.com/iam/docs/keys-create-delete',
+    tokenLabel: 'integrations.create_key',
+  },
+  azure: {
+    imports: 'integrations.azure_imports',
+    scopes: 'integrations.scopes_azure',
+    tokenUrl: 'https://learn.microsoft.com/azure/cost-management-billing/costs/assign-access-acm-data-reader',
+    tokenLabel: 'integrations.create_token',
+  },
+  supabase: {
+    imports: 'integrations.supabase_imports',
+    scopes: 'integrations.scopes_supabase',
+    tokenUrl: 'https://supabase.com/dashboard/account/tokens',
+    tokenLabel: 'integrations.create_token',
+  },
 };
 
 /** The label of each credential field the connectors name. */
 const CREDENTIAL_LABELS: Record<string, MessageKey> = {
   access_key_id: 'integrations.cred_access_key_id',
   secret_access_key: 'integrations.cred_secret_access_key',
+  client_secret: 'integrations.cred_client_secret',
+  service_account_json: 'integrations.cred_service_account',
+};
+
+/** Config keys the form asks for as plain text, when a connector names them. */
+const GENERIC_CONFIG: Record<string, MessageKey> = {
+  project: 'integrations.gcp_project',
+  dataset: 'integrations.gcp_dataset',
+  table: 'integrations.gcp_table',
+  tenant_id: 'integrations.azure_tenant',
+  client_id: 'integrations.azure_client',
+  subscription_id: 'integrations.azure_subscription',
 };
 
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
@@ -244,6 +274,7 @@ function ConnectForm({
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [tagKey, setTagKey] = useState('');
   const [teamId, setTeamId] = useState('');
+  const [generic, setGeneric] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -254,6 +285,7 @@ function ConnectForm({
   const needsTagKey = connector.config_keys.includes('tag_key');
   const needsTeamId = connector.config_keys.includes('team_id');
   const tokenMode = connector.credential_fields.length === 1 && connector.credential_fields[0].name === 'token';
+  const genericKeys = connector.config_keys.filter((key) => key in GENERIC_CONFIG);
 
   const submit = async (event: Event) => {
     event.preventDefault();
@@ -263,6 +295,8 @@ function ConnectForm({
     if (!tokenMode && connector.credential_fields.some((field) => (credentials[field.name] ?? '').trim() === '')) {
       next.credential = 'integrations.credential_error';
     }
+    const genericKeys = connector.config_keys.filter((key) => key in GENERIC_CONFIG);
+    if (genericKeys.some((key) => (generic[key] ?? '').trim() === '')) next.generic = 'integrations.config_required';
     if (account.trim() === '') next.account = 'integrations.expense_hint';
     if (needsCloudAccount && cloudAccount.trim() === '') next.cloudAccount = 'integrations.account_id';
     if (needsOrganization && organization.trim() === '') next.organization = 'integrations.organization';
@@ -276,6 +310,7 @@ function ConnectForm({
     if (needsCurrency) config.currency = currency.trim().toUpperCase();
     if (needsTagKey && tagKey.trim() !== '') config.tag_key = tagKey.trim();
     if (needsTeamId && teamId.trim() !== '') config.team_id = teamId.trim();
+    for (const key of genericKeys) config[key] = (generic[key] ?? '').trim();
     const secret = tokenMode
       ? { token: token.trim() }
       : { credential: Object.fromEntries(connector.credential_fields.map((field) => [field.name, (credentials[field.name] ?? '').trim()])) };
@@ -339,6 +374,20 @@ function ConnectForm({
           <span id="connect-currency-hint" class="hint">{t('integrations.currency_hint')}</span>
         </label>
       )}
+      {genericKeys.map((key) => (
+        <label class="field" key={key}>
+          <span class="field-label">{t(GENERIC_CONFIG[key])}</span>
+          <input
+            class="input mono"
+            spellcheck={false}
+            autocomplete="off"
+            value={generic[key] ?? ''}
+            onInput={(e) => setGeneric({ ...generic, [key]: (e.target as HTMLInputElement).value })}
+            aria-invalid={errors.generic ? 'true' : undefined}
+          />
+          {errors.generic && <span class="field-error">{t(errors.generic as MessageKey)}</span>}
+        </label>
+      ))}
       {needsTagKey && (
         <label class="field">
           <span class="field-label">{t('integrations.tag_key')}</span>
@@ -372,15 +421,27 @@ function ConnectForm({
         connector.credential_fields.map((field) => (
           <label class="field" key={field.name}>
             <span class="field-label">{t(CREDENTIAL_LABELS[field.name] ?? 'integrations.token')}</span>
-            <input
-              class="input mono"
-              type={field.name.includes('secret') ? 'password' : 'text'}
-              autocomplete="off"
-              spellcheck={false}
-              value={credentials[field.name] ?? ''}
-              onInput={(e) => setCredentials({ ...credentials, [field.name]: (e.target as HTMLInputElement).value })}
-              aria-invalid={errors.credential ? 'true' : undefined}
-            />
+            {field.name === 'service_account_json' ? (
+              <textarea
+                class="input mono"
+                rows={6}
+                spellcheck={false}
+                autocomplete="off"
+                value={credentials[field.name] ?? ''}
+                onInput={(e) => setCredentials({ ...credentials, [field.name]: (e.target as HTMLTextAreaElement).value })}
+                aria-invalid={errors.credential ? 'true' : undefined}
+              />
+            ) : (
+              <input
+                class="input mono"
+                type={field.name.includes('secret') ? 'password' : 'text'}
+                autocomplete="off"
+                spellcheck={false}
+                value={credentials[field.name] ?? ''}
+                onInput={(e) => setCredentials({ ...credentials, [field.name]: (e.target as HTMLInputElement).value })}
+                aria-invalid={errors.credential ? 'true' : undefined}
+              />
+            )}
           </label>
         ))}
       {!tokenMode && errors.credential && <span class="field-error">{t(errors.credential as MessageKey)}</span>}

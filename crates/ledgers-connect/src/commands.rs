@@ -40,6 +40,9 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
         "planetscale" => &["organization", "currency"],
         "aws" => &["tag_key"],
         "vercel" => &["team_id"],
+        "gcp" => &["project", "dataset", "table"],
+        "azure" => &["tenant_id", "client_id", "subscription_id"],
+        "supabase" => &["organization"],
         _ => &[],
     }
 }

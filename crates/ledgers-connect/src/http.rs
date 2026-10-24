@@ -17,6 +17,7 @@
 use bytes::Bytes;
 use cratefield_core::{HttpClient, HttpPolicy};
 use http::header;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -375,6 +376,31 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_millis(500 * u64::from(2_u32.pow(attempt.saturating_sub(1))))
 }
 
+/// Percent-encodes `text` for a URL or a form value: unreserved characters
+/// (`A-Z a-z 0-9 - . _ ~`) pass, everything else is `%XX`.
+#[must_use]
+pub fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+/// An `application/x-www-form-urlencoded` body from name and value pairs.
+#[must_use]
+pub fn form_body(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(name, value)| format!("{}={}", percent_encode(name), percent_encode(value)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 /// Vendor text (descriptions, names, line items) is data. This keeps it
 /// printable, drops control and bidirectional-override characters, collapses
 /// whitespace and caps the length. It never adds or removes digits, so an
@@ -434,6 +460,18 @@ mod tests {
     fn refusal_messages_do_not_echo_the_query() {
         let err = check_url("https://evil.test/x?token=SECRET123", HOSTS).unwrap_err();
         assert!(!err.to_string().contains("SECRET123"));
+    }
+
+    #[test]
+    fn form_values_are_percent_encoded() {
+        assert_eq!(percent_encode("a b/c+d"), "a%20b%2Fc%2Bd");
+        assert_eq!(
+            form_body(&[
+                ("grant_type", "client_credentials"),
+                ("scope", "https://management.azure.com/.default")
+            ]),
+            "grant_type=client_credentials&scope=https%3A%2F%2Fmanagement.azure.com%2F.default"
+        );
     }
 
     #[test]

@@ -13,6 +13,10 @@ const CONNECT_0001: &str = include_str!("../../ledgers-connect/migrations/sqlite
 const D1_CONNECT_PROVIDERS: &str =
     include_str!("../d1/migrations/0041_ledgers_connect_connect_providers.sql");
 
+/// The D1 mirror of migration 0003 (the Google Cloud, Azure and Supabase ids).
+const D1_CONNECT_CLOUD: &str =
+    include_str!("../d1/migrations/0042_ledgers_connect_connect_cloud.sql");
+
 fn seeded() -> Connection {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     // D1 enforces foreign keys; so does this connection.
@@ -62,18 +66,51 @@ fn the_d1_rebuild_keeps_the_connection_its_credential_and_its_runs() {
     );
 
     // The widened check accepts the cloud connectors, and still refuses others.
-    conn.execute(
-        "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
-         VALUES ('conn-aws', 'co-1', 'aws', 'AWS', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
-        [],
-    )
-    .expect("aws is accepted");
+    for connector in ["aws", "vercel"] {
+        conn.execute(
+            "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+             VALUES (?1, 'co-1', ?2, ?2, '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+            [format!("conn-{connector}"), connector.to_owned()],
+        )
+        .unwrap_or_else(|err| panic!("{connector} is accepted: {err}"));
+    }
     let refused = conn.execute(
         "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
          VALUES ('conn-x', 'co-1', 'unknown', 'X', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
         [],
     );
     assert!(refused.is_err(), "an unknown connector is still refused");
+}
+
+#[test]
+fn the_cloud_mirror_applies_after_the_provider_mirror_to_a_database_with_rows() {
+    let conn = seeded();
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_PROVIDERS}\nCOMMIT;"))
+        .expect("0041 applies");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_CLOUD}\nCOMMIT;"))
+        .expect("0042 applies to the rebuilt table, with the run and credential rows in place");
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect("count") };
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_connection WHERE id = 'conn-1'"),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_credential WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_run WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+    for connector in ["gcp", "azure", "supabase"] {
+        conn.execute(
+            "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+             VALUES (?1, 'co-1', ?2, ?2, '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+            [format!("conn-{connector}"), connector.to_owned()],
+        )
+        .unwrap_or_else(|err| panic!("{connector} is accepted after 0042: {err}"));
+    }
 }
 
 #[test]

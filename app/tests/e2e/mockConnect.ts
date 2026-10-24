@@ -100,6 +100,27 @@ const CONNECTORS = [
     hosts: ['api.vercel.com'],
     config_keys: ['team_id'],
   },
+  {
+    id: 'gcp',
+    name: 'Google Cloud',
+    credential_fields: [{ name: 'service_account_json', label: 'Service account key (JSON)' }],
+    hosts: ['bigquery.googleapis.com', 'oauth2.googleapis.com'],
+    config_keys: ['project', 'dataset', 'table'],
+  },
+  {
+    id: 'azure',
+    name: 'Microsoft Azure',
+    credential_fields: [{ name: 'client_secret', label: 'Client secret' }],
+    hosts: ['login.microsoftonline.com', 'management.azure.com'],
+    config_keys: ['tenant_id', 'client_id', 'subscription_id'],
+  },
+  {
+    id: 'supabase',
+    name: 'Supabase',
+    credential_fields: [{ name: 'token', label: 'Personal access token' }],
+    hosts: ['api.supabase.com'],
+    config_keys: ['organization'],
+  },
 ];
 
 const MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'];
