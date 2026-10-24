@@ -112,11 +112,6 @@ pub enum EInvoiceError {
     InvalidDocument(String),
 }
 
-/// Convert i128 to i64, returning an error on overflow.
-fn i128_to_i64(value: i128) -> Result<i64, EInvoiceError> {
-    i64::try_from(value).map_err(|_| EInvoiceError::InvalidDecimal("amount overflow".to_string()))
-}
-
 /// Escape XML special characters.
 fn escape_xml(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -346,7 +341,86 @@ fn validate_einvoice_document(doc: &EInvoiceDocument) -> Result<(), EInvoiceErro
         }
     }
 
+    check_iso_date("issue_date", &doc.base.issue_date)?;
+    check_iso_date("supply_date", &doc.base.supply_date)?;
+    if let Some(due) = doc.base.due_date.as_deref() {
+        check_iso_date("due_date", due)?;
+    }
+
     Ok(())
+}
+
+/// Require an ISO calendar date (YYYY-MM-DD), the form every date field is rendered from.
+fn check_iso_date(field: &str, value: &str) -> Result<(), EInvoiceError> {
+    let bytes = value.as_bytes();
+    let shape_ok = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit());
+    if shape_ok {
+        Ok(())
+    } else {
+        Err(EInvoiceError::InvalidDocument(format!(
+            "{field} must be YYYY-MM-DD, got {value:?}"
+        )))
+    }
+}
+
+/// Whether the invoice contains an intra-EU supply (BR-IC rules: delivery date and delivery country).
+fn is_intra_eu(doc: &EInvoiceDocument) -> bool {
+    doc.base
+        .tax_breakdown
+        .iter()
+        .any(|tb| tb.kind == "intra-eu")
+        || doc
+            .base
+            .lines
+            .iter()
+            .any(|l| l.tax_kind.as_deref() == Some("intra-eu"))
+}
+
+/// Human-readable text for a VATEX exemption code (BT-120).
+fn exemption_reason_text(code: &str) -> &'static str {
+    match code {
+        "VATEX-EU-IC" => "Intra-community supply",
+        "VATEX-EU-AE" => "Reverse charge",
+        _ => "",
+    }
+}
+
+/// UBL `TaxCategory` exemption elements (empty when the category is not exempt).
+fn ubl_exemption_xml(code: Option<&str>) -> String {
+    code.map_or_else(String::new, |c| {
+        format!(
+            "\t\t\t\t<cbc:TaxExemptionReasonCode>{}</cbc:TaxExemptionReasonCode>\n\t\t\t\t<cbc:TaxExemptionReason>{}</cbc:TaxExemptionReason>\n",
+            escape_xml(c),
+            escape_xml(exemption_reason_text(c))
+        )
+    })
+}
+
+/// UBL `Delivery` element: actual delivery date (BT-72) and, for intra-EU supplies, the
+/// delivery address (BT-77, BT-78, BT-80). The delivery address is the buyer's address.
+fn delivery_xml_ubl(doc: &EInvoiceDocument) -> String {
+    let mut xml = format!(
+        "\t<cac:Delivery>\n\t\t<cbc:ActualDeliveryDate>{}</cbc:ActualDeliveryDate>\n",
+        escape_xml(&doc.base.supply_date)
+    );
+    if is_intra_eu(doc) {
+        let _ = writeln!(
+            xml,
+            "\t\t<cac:DeliveryLocation>\n\t\t\t<cac:Address>\n\t\t\t\t<cbc:StreetName>{}</cbc:StreetName>\n\t\t\t\t<cbc:CityName>{}</cbc:CityName>\n\t\t\t\t<cbc:PostalZone>{}</cbc:PostalZone>\n\t\t\t\t<cac:Country>\n\t\t\t\t\t<cbc:IdentificationCode>{}</cbc:IdentificationCode>\n\t\t\t\t</cac:Country>\n\t\t\t</cac:Address>\n\t\t</cac:DeliveryLocation>",
+            escape_xml(&doc.buyer.street),
+            escape_xml(&doc.buyer.city),
+            escape_xml(&doc.buyer.postal_code),
+            escape_xml(&doc.buyer.country_code)
+        );
+    }
+    xml.push_str("\t</cac:Delivery>\n");
+    xml
 }
 
 /// Build UBL tax breakdown section XML.
@@ -360,17 +434,19 @@ fn build_ubl_tax_breakdown(
         let tax = format_amount(tb.tax_minor, currency)?;
         let rate = &tb.tax_rate_percent;
 
-        let (vat_category, _, _) = validate_vat_category(
+        let (vat_category, _, exemption) = validate_vat_category(
             &tb.kind,
             rate,
             doc.seller.vat_id.as_deref(),
             doc.buyer.vat_id.as_deref(),
         )?;
+        let exemption_xml = ubl_exemption_xml(exemption.as_deref());
 
         write!(
             xml,
-            "\t\t<cac:TaxSubtotal>\n\t\t\t<cbc:TaxableAmount currencyID=\"{currency}\">{net}</cbc:TaxableAmount>\n\t\t\t<cbc:TaxAmount currencyID=\"{currency}\">{tax}</cbc:TaxAmount>\n\t\t\t<cac:TaxCategory>\n\t\t\t\t<cbc:ID>{vat_category}</cbc:ID>\n\t\t\t\t<cbc:Percent>{rate}</cbc:Percent>\n\t\t\t\t<cac:TaxScheme>\n\t\t\t\t\t<cbc:ID>VAT</cbc:ID>\n\t\t\t\t</cac:TaxScheme>\n\t\t\t</cac:TaxCategory>\n\t\t</cac:TaxSubtotal>\n"
-        ).unwrap();
+            "\t\t<cac:TaxSubtotal>\n\t\t\t<cbc:TaxableAmount currencyID=\"{currency}\">{net}</cbc:TaxableAmount>\n\t\t\t<cbc:TaxAmount currencyID=\"{currency}\">{tax}</cbc:TaxAmount>\n\t\t\t<cac:TaxCategory>\n\t\t\t\t<cbc:ID>{vat_category}</cbc:ID>\n\t\t\t\t<cbc:Percent>{rate}</cbc:Percent>\n{exemption_xml}\t\t\t\t<cac:TaxScheme>\n\t\t\t\t\t<cbc:ID>VAT</cbc:ID>\n\t\t\t\t</cac:TaxScheme>\n\t\t\t</cac:TaxCategory>\n\t\t</cac:TaxSubtotal>\n"
+        )
+        .unwrap();
     }
     Ok(xml)
 }
@@ -381,6 +457,11 @@ fn build_ubl_invoice_lines(
     currency: &str,
 ) -> Result<String, EInvoiceError> {
     let mut xml = String::new();
+    let (line_tag, qty_tag) = if doc.document_type == "credit_note" {
+        ("cac:CreditNoteLine", "cbc:CreditedQuantity")
+    } else {
+        ("cac:InvoiceLine", "cbc:InvoicedQuantity")
+    };
     for line in &doc.base.lines {
         let unit = if let Some(ref u) = line.unit {
             map_unit_code(u)?
@@ -402,7 +483,7 @@ fn build_ubl_invoice_lines(
 
         write!(
             xml,
-            "\t\t<cac:InvoiceLine>\n\t\t\t<cbc:ID>{}</cbc:ID>\n\t\t\t<cbc:InvoicedQuantity unitCode=\"{}\">{}</cbc:InvoicedQuantity>\n\t\t\t<cbc:LineExtensionAmount currencyID=\"{}\">{}</cbc:LineExtensionAmount>\n\t\t\t<cac:Item>\n\t\t\t\t<cbc:Name>{}</cbc:Name>\n\t\t\t\t<cac:ClassifiedTaxCategory>\n\t\t\t\t\t<cbc:ID>{}</cbc:ID>\n\t\t\t\t\t<cbc:Percent>{}</cbc:Percent>\n\t\t\t\t\t<cac:TaxScheme>\n\t\t\t\t\t\t<cbc:ID>VAT</cbc:ID>\n\t\t\t\t\t</cac:TaxScheme>\n\t\t\t\t</cac:ClassifiedTaxCategory>\n\t\t\t</cac:Item>\n\t\t\t<cac:Price>\n\t\t\t\t<cbc:PriceAmount currencyID=\"{}\">{}</cbc:PriceAmount>\n\t\t\t\t<cbc:BaseQuantity unitCode=\"{}\">1</cbc:BaseQuantity>\n\t\t\t</cac:Price>\n\t\t</cac:InvoiceLine>\n",
+            "\t\t<{line_tag}>\n\t\t\t<cbc:ID>{}</cbc:ID>\n\t\t\t<{qty_tag} unitCode=\"{}\">{}</{qty_tag}>\n\t\t\t<cbc:LineExtensionAmount currencyID=\"{}\">{}</cbc:LineExtensionAmount>\n\t\t\t<cac:Item>\n\t\t\t\t<cbc:Name>{}</cbc:Name>\n\t\t\t\t<cac:ClassifiedTaxCategory>\n\t\t\t\t\t<cbc:ID>{}</cbc:ID>\n\t\t\t\t\t<cbc:Percent>{}</cbc:Percent>\n\t\t\t\t\t<cac:TaxScheme>\n\t\t\t\t\t\t<cbc:ID>VAT</cbc:ID>\n\t\t\t\t\t</cac:TaxScheme>\n\t\t\t\t</cac:ClassifiedTaxCategory>\n\t\t\t</cac:Item>\n\t\t\t<cac:Price>\n\t\t\t\t<cbc:PriceAmount currencyID=\"{}\">{}</cbc:PriceAmount>\n\t\t\t\t<cbc:BaseQuantity unitCode=\"{}\">{}</cbc:BaseQuantity>\n\t\t\t</cac:Price>\n\t\t</{line_tag}>\n",
             line.sequence,
             unit,
             quantity,
@@ -414,6 +495,7 @@ fn build_ubl_invoice_lines(
             currency,
             net_amount,
             unit,
+            quantity,
         ).unwrap();
     }
     Ok(xml)
@@ -439,6 +521,21 @@ fn assemble_ubl_xml(
 ) -> String {
     // Use default namespace for root element (conventional UBL approach)
     let root_ns = format!("urn:oasis:names:specification:ubl:schema:xsd:{root_element}-2");
+    let is_credit_note = root_element == "CreditNote";
+    let type_tag = if is_credit_note {
+        "cbc:CreditNoteTypeCode"
+    } else {
+        "cbc:InvoiceTypeCode"
+    };
+    let due_xml = if is_credit_note {
+        String::new()
+    } else {
+        format!(
+            "<cbc:DueDate>{}</cbc:DueDate>\n\t",
+            escape_xml(doc.base.due_date.as_deref().unwrap_or(&doc.base.issue_date))
+        )
+    };
+    let delivery_xml = delivery_xml_ubl(doc);
 
     // Build seller electronic address (EndpointID as first child of Party)
     let seller_endpoint_xml = if let Some(ref email) = doc.seller.email {
@@ -540,12 +637,12 @@ fn assemble_ubl_xml(
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <{} xmlns="{}" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">
+	<cbc:UBLVersionID>2.1</cbc:UBLVersionID>
 	<cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0</cbc:CustomizationID>
 	<cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
 	<cbc:ID>{}</cbc:ID>
 	<cbc:IssueDate>{}</cbc:IssueDate>
-	<cbc:DueDate>{}</cbc:DueDate>
-	<cbc:InvoiceTypeCode>{}</cbc:InvoiceTypeCode>
+	{due_xml}<{type_tag}>{invoice_type_code}</{type_tag}>
 	<cbc:DocumentCurrencyCode>{}</cbc:DocumentCurrencyCode>
 	<cbc:BuyerReference>{}</cbc:BuyerReference>
 {}	<cac:AccountingSupplierParty>
@@ -591,7 +688,7 @@ fn assemble_ubl_xml(
 			</cac:PartyTaxScheme>
 			{}		</cac:Party>
 	</cac:AccountingCustomerParty>
-{}{}	<cac:TaxTotal>
+{delivery_xml}{}{}	<cac:TaxTotal>
 		<cbc:TaxAmount currencyID="{}">{}</cbc:TaxAmount>
 {}	</cac:TaxTotal>
 	<cac:LegalMonetaryTotal>
@@ -607,8 +704,6 @@ fn assemble_ubl_xml(
         root_ns,
         escape_xml(&doc.base.invoice_number),
         escape_xml(&doc.base.issue_date),
-        doc.base.due_date.as_deref().unwrap_or(&doc.base.issue_date),
-        invoice_type_code,
         currency,
         escape_xml(&doc.buyer_reference),
         billing_ref,
@@ -728,6 +823,26 @@ fn render_factur_x(doc: &EInvoiceDocument) -> Result<String, EInvoiceError> {
     render_cii_impl(doc, "urn:cen.eu:en16931:2017")
 }
 
+/// CII `ExemptionReason` text element for a VATEX code (placed before `BasisAmount`).
+fn cii_exemption_reason_xml(code: Option<&str>) -> String {
+    code.map_or_else(String::new, |c| {
+        format!(
+            "\t\t\t\t\t\t<ram:ExemptionReason>{}</ram:ExemptionReason>\n",
+            escape_xml(exemption_reason_text(c))
+        )
+    })
+}
+
+/// CII `ExemptionReasonCode` element for a VATEX code (placed after `CategoryCode`).
+fn cii_exemption_code_xml(code: Option<&str>) -> String {
+    code.map_or_else(String::new, |c| {
+        format!(
+            "\t\t\t\t\t\t<ram:ExemptionReasonCode>{}</ram:ExemptionReasonCode>\n",
+            escape_xml(c)
+        )
+    })
+}
+
 /// Build CII invoice lines section XML.
 fn build_cii_invoice_lines(
     doc: &EInvoiceDocument,
@@ -735,37 +850,23 @@ fn build_cii_invoice_lines(
 ) -> Result<String, EInvoiceError> {
     let mut xml = String::new();
     for line in &doc.base.lines {
+        let unit = match line.unit.as_deref() {
+            Some(u) => map_unit_code(u)?,
+            None => "C62".to_string(),
+        };
         let quantity = validate_quantity(&line.quantity)?;
         let net_amount = format_amount(line.net_minor, currency)?;
         let tax_rate = line.tax_rate_percent.as_ref().unwrap();
         let tax_kind = line.tax_kind.as_ref().unwrap();
 
-        let (_, _, _) = validate_vat_category(
+        // Line-level VAT carries the category only; the exemption reason and the
+        // tax amounts are stated once per rate in the header breakdown.
+        let (category, _, _) = validate_vat_category(
             tax_kind,
             tax_rate,
             doc.seller.vat_id.as_deref(),
             doc.buyer.vat_id.as_deref(),
         )?;
-
-        // Calculate tax for this line
-        let line_tax_minor: i64 = doc
-            .base
-            .tax_breakdown
-            .iter()
-            .filter(|tb| tb.kind == *tax_kind && tb.tax_rate_percent == *tax_rate)
-            .map(|tb| {
-                if tb.net_minor > 0 {
-                    let tax_calc = i128::from(line.net_minor) * i128::from(tb.tax_minor)
-                        / i128::from(tb.net_minor);
-                    i128_to_i64(tax_calc).unwrap_or(0)
-                } else {
-                    0
-                }
-            })
-            .sum();
-
-        let line_tax_amount = format_amount(line_tax_minor, currency)?;
-        let gross_amount = format_amount(line.net_minor + line_tax_minor, currency)?;
 
         write!(
             xml,
@@ -778,82 +879,234 @@ fn build_cii_invoice_lines(
 				</ram:SpecifiedTradeProduct>
 				<ram:SpecifiedLineTradeAgreement>
 					<ram:NetPriceProductTradePrice>
-						<ram:ChargeAmount currencyID="{}">{}</ram:ChargeAmount>
-						<ram:BasisQuantity unitCode="C62">{}</ram:BasisQuantity>
+						<ram:ChargeAmount>{net_amount}</ram:ChargeAmount>
+						<ram:BasisQuantity unitCode="{unit}">{quantity}</ram:BasisQuantity>
 					</ram:NetPriceProductTradePrice>
 				</ram:SpecifiedLineTradeAgreement>
 				<ram:SpecifiedLineTradeDelivery>
-					<ram:BilledQuantity unitCode="C62">{}</ram:BilledQuantity>
+					<ram:BilledQuantity unitCode="{unit}">{quantity}</ram:BilledQuantity>
 				</ram:SpecifiedLineTradeDelivery>
 				<ram:SpecifiedLineTradeSettlement>
 					<ram:ApplicableTradeTax>
 						<ram:TypeCode>VAT</ram:TypeCode>
-						<ram:RateApplicablePercent>{}</ram:RateApplicablePercent>
-						<ram:CalculatedAmount currencyID="{}">{}</ram:CalculatedAmount>
-						<ram:BasisAmount currencyID="{}">{}</ram:BasisAmount>
+						<ram:CategoryCode>{category}</ram:CategoryCode>
+						<ram:RateApplicablePercent>{tax_rate}</ram:RateApplicablePercent>
 					</ram:ApplicableTradeTax>
 					<ram:SpecifiedTradeSettlementLineMonetarySummation>
-						<ram:LineTotalAmount currencyID="{}">{}</ram:LineTotalAmount>
+						<ram:LineTotalAmount>{net_amount}</ram:LineTotalAmount>
 					</ram:SpecifiedTradeSettlementLineMonetarySummation>
 				</ram:SpecifiedLineTradeSettlement>
 			</ram:IncludedSupplyChainTradeLineItem>
 "#,
             line.sequence,
             escape_xml(&line.description),
-            currency,
-            net_amount,
-            quantity,
-            quantity,
-            tax_rate,
-            currency,
-            line_tax_amount,
-            currency,
-            net_amount,
-            currency,
-            gross_amount,
         )
         .unwrap();
     }
     Ok(xml)
 }
 
+/// Header `ApplicableTradeTax` entries in CII, one per VAT breakdown row.
+fn cii_header_tax_xml(doc: &EInvoiceDocument, currency: &str) -> Result<String, EInvoiceError> {
+    let mut xml = String::new();
+    for tb in &doc.base.tax_breakdown {
+        let net = format_amount(tb.net_minor, currency)?;
+        let tax = format_amount(tb.tax_minor, currency)?;
+        let rate = &tb.tax_rate_percent;
+        let (category, _, exemption) = validate_vat_category(
+            &tb.kind,
+            rate,
+            doc.seller.vat_id.as_deref(),
+            doc.buyer.vat_id.as_deref(),
+        )?;
+        let reason_xml = cii_exemption_reason_xml(exemption.as_deref());
+        let code_xml = cii_exemption_code_xml(exemption.as_deref());
+        write!(
+            xml,
+            r"			<ram:ApplicableTradeTax>
+				<ram:CalculatedAmount>{tax}</ram:CalculatedAmount>
+				<ram:TypeCode>VAT</ram:TypeCode>
+{reason_xml}				<ram:BasisAmount>{net}</ram:BasisAmount>
+				<ram:CategoryCode>{category}</ram:CategoryCode>
+{code_xml}				<ram:RateApplicablePercent>{rate}</ram:RateApplicablePercent>
+			</ram:ApplicableTradeTax>
+"
+        )
+        .unwrap();
+    }
+    Ok(xml)
+}
+
+/// CII `SpecifiedTradeSettlementPaymentMeans` (BG-16), empty when no payment means is given.
+fn cii_payment_means_xml(doc: &EInvoiceDocument) -> String {
+    let Some(pm) = doc.payment_means.as_ref() else {
+        return String::new();
+    };
+    let mut xml = format!(
+        "\t\t\t<ram:SpecifiedTradeSettlementPaymentMeans>\n\t\t\t\t<ram:TypeCode>{}</ram:TypeCode>\n\t\t\t\t<ram:PayeePartyCreditorFinancialAccount>\n\t\t\t\t\t<ram:IBANID>{}</ram:IBANID>\n",
+        escape_xml(&pm.code),
+        escape_xml(&pm.iban)
+    );
+    if let Some(name) = &pm.account_name {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t\t<ram:AccountName>{}</ram:AccountName>",
+            escape_xml(name)
+        );
+    }
+    xml.push_str("\t\t\t\t</ram:PayeePartyCreditorFinancialAccount>\n");
+    if let Some(bic) = &pm.bic {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t<ram:PayeeSpecifiedCreditorFinancialInstitution>\n\t\t\t\t\t<ram:BICID>{}</ram:BICID>\n\t\t\t\t</ram:PayeeSpecifiedCreditorFinancialInstitution>",
+            escape_xml(bic)
+        );
+    }
+    xml.push_str("\t\t\t</ram:SpecifiedTradeSettlementPaymentMeans>\n");
+    xml
+}
+
+/// CII `SpecifiedTradePaymentTerms`: payment terms text (BT-20) and due date (BT-9).
+fn cii_payment_terms_xml(doc: &EInvoiceDocument) -> String {
+    let due = doc
+        .base
+        .due_date
+        .as_deref()
+        .unwrap_or(&doc.base.issue_date)
+        .replace('-', "");
+    let description = doc
+        .payment_terms_text
+        .as_ref()
+        .map_or_else(String::new, |t| {
+            format!(
+                "\t\t\t\t<ram:Description>{}</ram:Description>\n",
+                escape_xml(t)
+            )
+        });
+    format!(
+        "\t\t\t<ram:SpecifiedTradePaymentTerms>\n{description}\t\t\t\t<ram:DueDateDateTime>\n\t\t\t\t\t<udt:DateTimeString format=\"102\">{}</udt:DateTimeString>\n\t\t\t\t</ram:DueDateDateTime>\n\t\t\t</ram:SpecifiedTradePaymentTerms>\n",
+        escape_xml(&due)
+    )
+}
+
+/// CII `ApplicableHeaderTradeDelivery`: for intra-EU supplies the delivery address
+/// (BT-77, BT-78, BT-80, the buyer's address), and the actual delivery date (BT-72).
+fn cii_delivery_xml(doc: &EInvoiceDocument) -> String {
+    let mut xml = String::from("\t\t<ram:ApplicableHeaderTradeDelivery>\n");
+    if is_intra_eu(doc) {
+        let _ = writeln!(
+            xml,
+            "\t\t\t<ram:ShipToTradeParty>\n\t\t\t\t<ram:Name>{}</ram:Name>\n\t\t\t\t<ram:PostalTradeAddress>\n\t\t\t\t\t<ram:PostcodeCode>{}</ram:PostcodeCode>\n\t\t\t\t\t<ram:LineOne>{}</ram:LineOne>\n\t\t\t\t\t<ram:CityName>{}</ram:CityName>\n\t\t\t\t\t<ram:CountryID>{}</ram:CountryID>\n\t\t\t\t</ram:PostalTradeAddress>\n\t\t\t</ram:ShipToTradeParty>",
+            escape_xml(&doc.buyer.name),
+            escape_xml(&doc.buyer.postal_code),
+            escape_xml(&doc.buyer.street),
+            escape_xml(&doc.buyer.city),
+            escape_xml(&doc.buyer.country_code)
+        );
+    }
+    let _ = writeln!(
+        xml,
+        "\t\t\t<ram:ActualDeliverySupplyChainEvent>\n\t\t\t\t<ram:OccurrenceDateTime>\n\t\t\t\t\t<udt:DateTimeString format=\"102\">{}</udt:DateTimeString>\n\t\t\t\t</ram:OccurrenceDateTime>\n\t\t\t</ram:ActualDeliverySupplyChainEvent>\n\t\t</ram:ApplicableHeaderTradeDelivery>",
+        escape_xml(&doc.base.supply_date.replace('-', ""))
+    );
+    xml
+}
+
+/// CII `ContactInfo` as `DefinedTradeContact` (BG-6), empty when absent.
+fn cii_contact_xml(contact: Option<&ContactInfo>) -> String {
+    let Some(c) = contact else {
+        return String::new();
+    };
+    let mut xml = String::from("\t\t\t\t<ram:DefinedTradeContact>\n");
+    if let Some(name) = &c.name {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t\t<ram:PersonName>{}</ram:PersonName>",
+            escape_xml(name)
+        );
+    }
+    if let Some(phone) = &c.phone {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t\t<ram:TelephoneUniversalCommunication>\n\t\t\t\t\t\t<ram:CompleteNumber>{}</ram:CompleteNumber>\n\t\t\t\t\t</ram:TelephoneUniversalCommunication>",
+            escape_xml(phone)
+        );
+    }
+    if let Some(email) = &c.email {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t\t<ram:EmailURIUniversalCommunication>\n\t\t\t\t\t\t<ram:URIID schemeID=\"EM\">{}</ram:URIID>\n\t\t\t\t\t</ram:EmailURIUniversalCommunication>",
+            escape_xml(email)
+        );
+    }
+    xml.push_str("\t\t\t\t</ram:DefinedTradeContact>\n");
+    xml
+}
+
+/// One CII trade party in schema order: name, legal organisation, contact, address,
+/// electronic address, tax registration.
+fn cii_party_xml(party: &PartyInfo, contact_xml: &str) -> String {
+    let name = escape_xml(&party.name);
+    let mut xml = format!(
+        "\t\t\t\t<ram:Name>{name}</ram:Name>\n\t\t\t\t<ram:SpecifiedLegalOrganization>\n\t\t\t\t\t<ram:TradingBusinessName>{name}</ram:TradingBusinessName>\n\t\t\t\t</ram:SpecifiedLegalOrganization>\n"
+    );
+    xml.push_str(contact_xml);
+    let _ = writeln!(
+        xml,
+        "\t\t\t\t<ram:PostalTradeAddress>\n\t\t\t\t\t<ram:PostcodeCode>{}</ram:PostcodeCode>\n\t\t\t\t\t<ram:LineOne>{}</ram:LineOne>\n\t\t\t\t\t<ram:CityName>{}</ram:CityName>\n\t\t\t\t\t<ram:CountryID>{}</ram:CountryID>\n\t\t\t\t</ram:PostalTradeAddress>",
+        escape_xml(&party.postal_code),
+        escape_xml(&party.street),
+        escape_xml(&party.city),
+        escape_xml(&party.country_code)
+    );
+    if let Some(email) = &party.email {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t<ram:URIUniversalCommunication>\n\t\t\t\t\t<ram:URIID schemeID=\"EM\">{}</ram:URIID>\n\t\t\t\t</ram:URIUniversalCommunication>",
+            escape_xml(email)
+        );
+    }
+    if let Some(vat_id) = &party.vat_id {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t<ram:SpecifiedTaxRegistration>\n\t\t\t\t\t<ram:ID schemeID=\"VA\">{}</ram:ID>\n\t\t\t\t</ram:SpecifiedTaxRegistration>",
+            escape_xml(vat_id)
+        );
+    } else if let Some(tax_number) = &party.tax_number {
+        let _ = writeln!(
+            xml,
+            "\t\t\t\t<ram:SpecifiedTaxRegistration>\n\t\t\t\t\t<ram:ID schemeID=\"FC\">{}</ram:ID>\n\t\t\t\t</ram:SpecifiedTaxRegistration>",
+            escape_xml(tax_number)
+        );
+    }
+    xml
+}
+
+/// Format the `ApplicableHeaderTradeAgreement` section for CII.
+fn format_agreement_section(doc: &EInvoiceDocument, buyer_reference_xml: &str) -> String {
+    let seller = cii_party_xml(&doc.seller, &cii_contact_xml(doc.seller_contact.as_ref()));
+    let buyer = cii_party_xml(&doc.buyer, "");
+    format!(
+        "\t\t<ram:ApplicableHeaderTradeAgreement>\n{buyer_reference_xml}\t\t\t<ram:SellerTradeParty>\n{seller}\t\t\t</ram:SellerTradeParty>\n\t\t\t<ram:BuyerTradeParty>\n{buyer}\t\t\t</ram:BuyerTradeParty>\n\t\t</ram:ApplicableHeaderTradeAgreement>\n"
+    )
+}
+
 /// Shared CII renderer for `XRechnung` and `Factur-X` (parameterised by guideline ID).
 fn render_cii_impl(doc: &EInvoiceDocument, guideline_id: &str) -> Result<String, EInvoiceError> {
     validate_einvoice_document(doc)?;
 
-    let currency = &doc.base.currency;
+    let currency = doc.base.currency.as_str();
     let is_credit_note = doc.document_type == "credit_note";
 
     let lines_xml = build_cii_invoice_lines(doc, currency)?;
-
-    // Note: VAT breakdown is included in each line item via SpecifiedLineTradeSettlement
-
     let net_total = format_amount(doc.base.totals.net_minor, currency)?;
     let tax_total = format_amount(doc.base.totals.tax_minor, currency)?;
     let gross_total = format_amount(doc.base.totals.gross_minor, currency)?;
+    let tax_xml = cii_header_tax_xml(doc, currency)?;
 
     let doc_type_code = if is_credit_note { "381" } else { "380" };
-
-    let seller_vat_id = doc.seller.vat_id.as_deref().unwrap_or("");
-    let buyer_vat_id = doc.buyer.vat_id.as_deref().unwrap_or("");
-
-    let seller_vat_xml = if seller_vat_id.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\t\t\t\t\t<ram:VATID>{}</ram:VATID>\n",
-            escape_xml(seller_vat_id)
-        )
-    };
-
-    let buyer_vat_xml = if buyer_vat_id.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\t\t\t\t\t<ram:VATID>{}</ram:VATID>\n",
-            escape_xml(buyer_vat_id)
-        )
-    };
+    let invoice_number = escape_xml(&doc.base.invoice_number);
+    let issue_date = doc.base.issue_date.replace('-', "");
 
     let buyer_reference_xml = if doc.buyer_reference.is_empty() {
         String::new()
@@ -863,54 +1116,22 @@ fn render_cii_impl(doc: &EInvoiceDocument, guideline_id: &str) -> Result<String,
             escape_xml(&doc.buyer_reference)
         )
     };
+    let agreement = format_agreement_section(doc, &buyer_reference_xml);
+    let delivery_xml = cii_delivery_xml(doc);
+    let payment_means_xml = cii_payment_means_xml(doc);
+    let payment_terms_xml = cii_payment_terms_xml(doc);
 
-    let preceding_invoice_xml = if is_credit_note {
-        let preceding_num = doc.preceding_invoice_number.as_ref().unwrap();
+    let preceding_xml = if is_credit_note {
+        let preceding = doc.preceding_invoice_number.as_deref().unwrap_or_default();
         format!(
             "\t\t\t<ram:InvoiceReferencedDocument>\n\t\t\t\t<ram:IssuerAssignedID>{}</ram:IssuerAssignedID>\n\t\t\t</ram:InvoiceReferencedDocument>\n",
-            escape_xml(preceding_num)
+            escape_xml(preceding)
         )
     } else {
         String::new()
     };
 
-    let agreement =
-        format_agreement_section(doc, &seller_vat_xml, &buyer_vat_xml, &buyer_reference_xml);
-    let due_date_str = doc.base.due_date.as_deref().unwrap_or(&doc.base.issue_date);
-
-    let xml = assemble_cii_xml(
-        guideline_id,
-        doc,
-        doc_type_code,
-        &preceding_invoice_xml,
-        &agreement,
-        &lines_xml,
-        currency,
-        due_date_str,
-        &net_total,
-        &tax_total,
-        &gross_total,
-    );
-
-    Ok(xml)
-}
-
-/// Assemble final CII XML document.
-#[allow(clippy::too_many_arguments)]
-fn assemble_cii_xml(
-    guideline_id: &str,
-    doc: &EInvoiceDocument,
-    doc_type_code: &str,
-    preceding_invoice_xml: &str,
-    agreement: &str,
-    lines_xml: &str,
-    currency: &str,
-    due_date_str: &str,
-    net_total: &str,
-    tax_total: &str,
-    gross_total: &str,
-) -> String {
-    format!(
+    let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <rsm:CrossIndustryInvoice
   xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
@@ -918,170 +1139,37 @@ fn assemble_cii_xml(
   xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
   xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
 	<rsm:ExchangedDocumentContext>
-		<ram:TestIndicator>
-			<udt:Indicator>false</udt:Indicator>
-		</ram:TestIndicator>
+		<ram:BusinessProcessSpecifiedDocumentContextParameter>
+			<ram:ID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</ram:ID>
+		</ram:BusinessProcessSpecifiedDocumentContextParameter>
 		<ram:GuidelineSpecifiedDocumentContextParameter>
-			<ram:ID>{}</ram:ID>
+			<ram:ID>{guideline_id}</ram:ID>
 		</ram:GuidelineSpecifiedDocumentContextParameter>
 	</rsm:ExchangedDocumentContext>
 	<rsm:ExchangedDocument>
-		<ram:ID>{}</ram:ID>
-		<ram:TypeCode>{}</ram:TypeCode>
+		<ram:ID>{invoice_number}</ram:ID>
+		<ram:TypeCode>{doc_type_code}</ram:TypeCode>
 		<ram:IssueDateTime>
-			<udt:DateTimeString format="102">{}</udt:DateTimeString>
+			<udt:DateTimeString format="102">{issue_date}</udt:DateTimeString>
 		</ram:IssueDateTime>
-		{}	</rsm:ExchangedDocument>
+	</rsm:ExchangedDocument>
 	<rsm:SupplyChainTradeTransaction>
-		{}{}		<ram:ApplicableHeaderTradeDelivery>
-			<ram:ActualDeliveryDateTime>
-				<udt:DateTimeString format="102">{}</udt:DateTimeString>
-			</ram:ActualDeliveryDateTime>
-		</ram:ApplicableHeaderTradeDelivery>
-		<ram:ApplicableHeaderTradeSettlement>
-			<ram:PaymentReference></ram:PaymentReference>
-			<ram:TaxCurrencyCode>{}</ram:TaxCurrencyCode>
-			<ram:InvoiceCurrencyCode>{}</ram:InvoiceCurrencyCode>
-			<ram:SpecifiedTradePaymentTerms>
-				<ram:DueDateDateTime>
-					<udt:DateTimeString format="102">{}</udt:DateTimeString>
-				</ram:DueDateDateTime>
-			</ram:SpecifiedTradePaymentTerms>
-			<ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-				<ram:DuePayableAmount currencyID="{}">{}</ram:DuePayableAmount>
-				<ram:LineTotalBilledAmount currencyID="{}">{}</ram:LineTotalBilledAmount>
-				<ram:ChargeTotalAmount currencyID="{}">{}</ram:ChargeTotalAmount>
-				<ram:TaxBasisTotalAmount currencyID="{}">{}</ram:TaxBasisTotalAmount>
-				<ram:TaxTotalAmount currencyID="{}">{}</ram:TaxTotalAmount>
-				<ram:GrandTotalAmount currencyID="{}">{}</ram:GrandTotalAmount>
+{lines_xml}{agreement}{delivery_xml}		<ram:ApplicableHeaderTradeSettlement>
+			<ram:InvoiceCurrencyCode>{currency}</ram:InvoiceCurrencyCode>
+{payment_means_xml}{tax_xml}{payment_terms_xml}			<ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+				<ram:LineTotalAmount>{net_total}</ram:LineTotalAmount>
+				<ram:TaxBasisTotalAmount>{net_total}</ram:TaxBasisTotalAmount>
+				<ram:TaxTotalAmount currencyID="{currency}">{tax_total}</ram:TaxTotalAmount>
+				<ram:GrandTotalAmount>{gross_total}</ram:GrandTotalAmount>
+				<ram:DuePayableAmount>{gross_total}</ram:DuePayableAmount>
 			</ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-		</ram:ApplicableHeaderTradeSettlement>
+{preceding_xml}		</ram:ApplicableHeaderTradeSettlement>
 	</rsm:SupplyChainTradeTransaction>
 </rsm:CrossIndustryInvoice>
-"#,
-        guideline_id,
-        escape_xml(&doc.base.invoice_number),
-        doc_type_code,
-        escape_xml(&doc.base.issue_date),
-        preceding_invoice_xml,
-        agreement,
-        lines_xml,
-        escape_xml(&doc.base.supply_date),
-        currency,
-        currency,
-        due_date_str,
-        currency,
-        gross_total,
-        currency,
-        net_total,
-        currency,
-        net_total,
-        currency,
-        net_total,
-        currency,
-        tax_total,
-        currency,
-        gross_total,
-    )
-}
-
-/// Format the `ApplicableHeaderTradeAgreement` section for CII.
-fn format_agreement_section(
-    doc: &EInvoiceDocument,
-    seller_vat_xml: &str,
-    buyer_vat_xml: &str,
-    buyer_reference_xml: &str,
-) -> String {
-    // Build seller electronic address
-    let seller_email_xml = if let Some(ref email) = doc.seller.email {
-        format!(
-            "\t\t\t\t<ram:URIUniversalCommunication>\n\t\t\t\t\t<ram:URIID schemeID=\"EM\">{}</ram:URIID>\n\t\t\t\t</ram:URIUniversalCommunication>\n",
-            escape_xml(email)
-        )
-    } else {
-        String::new()
-    };
-
-    // Build seller legal organization
-    let seller_legal_org_xml = format!(
-        "\t\t\t\t<ram:SpecifiedLegalOrganization>\n\t\t\t\t\t<ram:TradingBusinessName>{}</ram:TradingBusinessName>\n\t\t\t\t</ram:SpecifiedLegalOrganization>\n",
-        escape_xml(&doc.seller.name)
+"#
     );
 
-    // Build buyer electronic address
-    let buyer_email_xml = if let Some(ref email) = doc.buyer.email {
-        format!(
-            "\t\t\t\t<ram:URIUniversalCommunication>\n\t\t\t\t\t<ram:URIID schemeID=\"EM\">{}</ram:URIID>\n\t\t\t\t</ram:URIUniversalCommunication>\n",
-            escape_xml(email)
-        )
-    } else {
-        String::new()
-    };
-
-    // Build buyer legal organization
-    let buyer_legal_org_xml = format!(
-        "\t\t\t\t<ram:SpecifiedLegalOrganization>\n\t\t\t\t\t<ram:TradingBusinessName>{}</ram:TradingBusinessName>\n\t\t\t\t</ram:SpecifiedLegalOrganization>\n",
-        escape_xml(&doc.buyer.name)
-    );
-
-    // Wrap seller VAT in SpecifiedTaxRegistration
-    let seller_tax_reg_xml = if seller_vat_xml.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\t\t\t\t<ram:SpecifiedTaxRegistration>\n{seller_vat_xml}\t\t\t\t</ram:SpecifiedTaxRegistration>\n"
-        )
-    };
-
-    // Wrap buyer VAT in SpecifiedTaxRegistration
-    let buyer_tax_reg_xml = if buyer_vat_xml.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\t\t\t\t<ram:SpecifiedTaxRegistration>\n{buyer_vat_xml}\t\t\t\t</ram:SpecifiedTaxRegistration>\n"
-        )
-    };
-
-    format!(
-        r"		<ram:ApplicableHeaderTradeAgreement>
-{}			<ram:SellerTradeParty>
-				<ram:Name>{}</ram:Name>
-				<ram:PostalTradeAddress>
-					<ram:PostcodeCode>{}</ram:PostcodeCode>
-					<ram:LineOne>{}</ram:LineOne>
-					<ram:CityName>{}</ram:CityName>
-					<ram:CountryID>{}</ram:CountryID>
-				</ram:PostalTradeAddress>
-{}{}{}			</ram:SellerTradeParty>
-			<ram:BuyerTradeParty>
-				<ram:Name>{}</ram:Name>
-				<ram:PostalTradeAddress>
-					<ram:PostcodeCode>{}</ram:PostcodeCode>
-					<ram:LineOne>{}</ram:LineOne>
-					<ram:CityName>{}</ram:CityName>
-					<ram:CountryID>{}</ram:CountryID>
-				</ram:PostalTradeAddress>
-{}{}{}			</ram:BuyerTradeParty>
-		</ram:ApplicableHeaderTradeAgreement>
-",
-        buyer_reference_xml,
-        escape_xml(&doc.seller.name),
-        escape_xml(&doc.seller.postal_code),
-        escape_xml(&doc.seller.street),
-        escape_xml(&doc.seller.city),
-        escape_xml(&doc.seller.country_code),
-        seller_email_xml,
-        seller_legal_org_xml,
-        seller_tax_reg_xml,
-        escape_xml(&doc.buyer.name),
-        escape_xml(&doc.buyer.postal_code),
-        escape_xml(&doc.buyer.street),
-        escape_xml(&doc.buyer.city),
-        escape_xml(&doc.buyer.country_code),
-        buyer_email_xml,
-        buyer_legal_org_xml,
-        buyer_tax_reg_xml,
-    )
+    Ok(xml)
 }
 
 /// Generate an e-invoice in the specified profile and return it as `EInvoice`.

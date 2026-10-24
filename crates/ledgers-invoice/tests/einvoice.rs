@@ -268,8 +268,17 @@ fn test_credit_note() {
         seller: create_seller(),
         buyer: create_acme_buyer(),
         buyer_reference: "PO-2026-12345".to_string(),
-        seller_contact: None,
-        payment_means: None,
+        seller_contact: Some(ContactInfo {
+            name: Some("John Smith".to_string()),
+            phone: Some("+49 30 123456".to_string()),
+            email: Some("john@haldenworks.de".to_string()),
+        }),
+        payment_means: Some(PaymentMeans {
+            code: "58".to_string(),
+            iban: "DE02120300000000202051".to_string(),
+            bic: Some("BYLADEM".to_string()),
+            account_name: Some("Halden Works GmbH".to_string()),
+        }),
         payment_terms_text: None,
     };
 
@@ -356,8 +365,17 @@ fn test_intra_eu_supply() {
         seller: create_seller(),
         buyer: create_fjordlys_buyer(),
         buyer_reference: "ORD-2026-99999".to_string(),
-        seller_contact: None,
-        payment_means: None,
+        seller_contact: Some(ContactInfo {
+            name: Some("John Smith".to_string()),
+            phone: Some("+49 30 123456".to_string()),
+            email: Some("john@haldenworks.de".to_string()),
+        }),
+        payment_means: Some(PaymentMeans {
+            code: "58".to_string(),
+            iban: "DE02120300000000202051".to_string(),
+            bic: Some("BYLADEM".to_string()),
+            account_name: Some("Halden Works GmbH".to_string()),
+        }),
         payment_terms_text: None,
     };
 
@@ -447,8 +465,17 @@ fn test_reverse_charge() {
         seller: create_seller(),
         buyer: create_acme_buyer(),
         buyer_reference: "PO-2026-12345".to_string(),
-        seller_contact: None,
-        payment_means: None,
+        seller_contact: Some(ContactInfo {
+            name: Some("John Smith".to_string()),
+            phone: Some("+49 30 123456".to_string()),
+            email: Some("john@haldenworks.de".to_string()),
+        }),
+        payment_means: Some(PaymentMeans {
+            code: "58".to_string(),
+            iban: "DE02120300000000202051".to_string(),
+            bic: Some("BYLADEM".to_string()),
+            account_name: Some("Halden Works GmbH".to_string()),
+        }),
         payment_terms_text: None,
     };
 

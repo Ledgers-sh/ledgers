@@ -59,7 +59,8 @@ if [[ ! -d "$XRECHNUNG_CONFIG_DIR" ]]; then
     }
 
     # Extract
-    unzip -q "$XRECHNUNG_ZIP.tmp" -d "$KOSIT_DIR"
+    mkdir -p "$XRECHNUNG_CONFIG_DIR"
+    unzip -q "$XRECHNUNG_ZIP.tmp" -d "$XRECHNUNG_CONFIG_DIR"
     rm -f "$XRECHNUNG_ZIP.tmp"
     echo "✓ XRechnung configuration downloaded and verified"
 else
@@ -93,42 +94,39 @@ WARNINGS=0
 for xml_file in "$SAMPLES_DIR"/*.xml; do
     filename=$(basename "$xml_file")
     report_file="$REPORTS_DIR/${filename%.xml}-report.xml"
+    log_file="$REPORTS_DIR/${filename%.xml}-validator.log"
 
     echo -n "  Validating $filename ... "
 
-    # Run validator with -r (repository/config dir) and -o (output report dir)
+    # -s scenarios, -r repository (the XRechnung configuration), -o report output.
+    # Console output goes to a log file so a failure is diagnosable from CI.
+    set +e
     java -jar "$VALIDATOR_JAR" \
         -s "$XRECHNUNG_CONFIG_DIR/scenarios.xml" \
         -r "$XRECHNUNG_CONFIG_DIR" \
         -o "$REPORTS_DIR" \
         "$xml_file" \
-        > /dev/null 2>&1
-
+        > "$log_file" 2>&1
     exit_code=$?
+    set -e
 
-    # Check report for acceptance status
-    if [[ -f "$report_file" ]] && grep -q "<rep:accept>true</rep:accept>" "$report_file"; then
+    # The report states the verdict as an element: <rep:accept>, <rep:acceptable> or <rep:reject>.
+    if [[ -f "$report_file" ]] && grep -q "<rep:reject>" "$report_file"; then
+        echo "✗ REJECTED"
+        REJECTED=$((REJECTED + 1))
+        grep -o 'level="error"[^>]*>[^<]\{1,160\}' "$report_file" | sed -n '1,5p' | sed 's/^/      /'
+    elif [[ -f "$report_file" ]] && grep -Eq "<rep:accept(able)?>" "$report_file"; then
         echo "✓ ACCEPTED"
-        ((ACCEPTED++))
-
-        # Check for warnings
-        if grep -q "<rep:warning" "$report_file"; then
-            ((WARNINGS++))
+        ACCEPTED=$((ACCEPTED + 1))
+        if grep -q '<rep:message [^>]*level="warning"' "$report_file"; then
+            WARNINGS=$((WARNINGS + 1))
             echo "    ⚠ Contains warnings (see report for details)"
         fi
     else
         echo "✗ REJECTED"
-        ((REJECTED++))
-
-        # Print rejection details if report exists
-        if [[ -f "$report_file" ]]; then
-            if grep -q "<rep:accept>false</rep:accept>" "$report_file"; then
-                echo "    Rejection reason:"
-                grep -A 5 "<rep:accept>false</rep:accept>" "$report_file" | head -10 | sed 's/^/      /'
-            fi
-        else
-            echo "    (validator exit code: $exit_code, no report generated)"
-        fi
+        REJECTED=$((REJECTED + 1))
+        echo "    (validator exit code: $exit_code, no verdict in report; see $log_file)"
+        tail -5 "$log_file" | sed 's/^/      /'
     fi
 done
 
