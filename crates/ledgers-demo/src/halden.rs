@@ -6,7 +6,9 @@
 //! accrued expenses, depreciation, expense accounts). Everything that moves
 //! bank, receivables, payables, VAT or equity is person-posted.
 
-use crate::{DemoBook, DemoDimension, DemoEntry, DemoLine, EntryKind, Poster, Side, vat_19};
+use crate::{
+    DemoBook, DemoDimension, DemoEntry, DemoLine, EntryKind, Poster, Side, mirror_of, vat_19,
+};
 
 /// The company's display name.
 pub const COMPANY: &str = "Halden Works GmbH";
@@ -204,6 +206,86 @@ fn reverse(
     }
 }
 
+/// A subledger item (an invoice, credit note or bill) and its lines.
+fn item(
+    external_id: String,
+    poster: Poster,
+    posting_date: String,
+    description: impl Into<String>,
+    ledger: &'static str,
+    kind: &'static str,
+    party: &'static str,
+    source_id: String,
+    lines: Vec<DemoLine>,
+) -> DemoEntry {
+    DemoEntry {
+        external_id,
+        poster,
+        posting_date,
+        description: description.into(),
+        kind: EntryKind::Item {
+            ledger,
+            kind,
+            party,
+            source_id,
+            lines,
+        },
+    }
+}
+
+/// A payment of a party's items from the bank, through the subledger.
+fn allocate(
+    external_id: String,
+    poster: Poster,
+    posting_date: String,
+    description: impl Into<String>,
+    ledger: &'static str,
+    party: &'static str,
+    items: Vec<(String, i64)>,
+    lines: Vec<DemoLine>,
+) -> DemoEntry {
+    DemoEntry {
+        external_id,
+        poster,
+        posting_date,
+        description: description.into(),
+        kind: EntryKind::Allocate {
+            ledger,
+            party,
+            bank: "1020",
+            items,
+            lines,
+        },
+    }
+}
+
+/// A credit item cleared against a debit item, through the subledger.
+fn offset(
+    external_id: String,
+    poster: Poster,
+    posting_date: String,
+    description: impl Into<String>,
+    ledger: &'static str,
+    party: &'static str,
+    credit: String,
+    debit: String,
+    amount: i64,
+) -> DemoEntry {
+    DemoEntry {
+        external_id,
+        poster,
+        posting_date,
+        description: description.into(),
+        kind: EntryKind::Offset {
+            ledger,
+            party,
+            credit,
+            debit,
+            amount,
+        },
+    }
+}
+
 /// Output VAT on the month's sales (frames and services), minor units.
 fn output_vat(month_index: usize) -> i64 {
     vat_19(SALES_NET[month_index]) + vat_19(SERVICES_NET[month_index])
@@ -274,11 +356,15 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         ));
     }
     if month == 2 {
-        out.push(post(
+        out.push(item(
             id(2, "equipment-purchase"),
             Poster::Person,
             date(year, 2, 1),
             "Production line equipment, bill from Fördertechnik Oberhausen GmbH",
+            "ap",
+            "bill",
+            "foerdertechnik",
+            format!("FO-{year}-02"),
             vec![
                 debit("1510", EQUIPMENT),
                 taxed(debit("1050", vat_19(EQUIPMENT))),
@@ -287,11 +373,14 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         ));
     }
     if month == 3 {
-        out.push(post(
+        out.push(allocate(
             id(3, "equipment-payment"),
             Poster::Person,
             date(year, 3, 15),
             "Payment to Fördertechnik Oberhausen GmbH",
+            "ap",
+            "foerdertechnik",
+            vec![(id(2, "equipment-purchase"), EQUIPMENT + vat_19(EQUIPMENT))],
             vec![
                 debit("2010", EQUIPMENT + vat_19(EQUIPMENT)),
                 credit("1020", EQUIPMENT + vat_19(EQUIPMENT)),
@@ -363,22 +452,30 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         format!("Rent of the Halden site, {name}"),
         vec![tagged(debit("5030", RENT), CC_ADMIN), credit("1020", RENT)],
     ));
-    out.push(post(
+    out.push(item(
         id(month, "hosting-bill"),
         Poster::Person,
         date(year, month, 3),
         format!("Cloudsteward GmbH hosting, {name}"),
+        "ap",
+        "bill",
+        "cloudsteward",
+        format!("CS-{year}-{month:02}"),
         vec![
             tagged(taxed(debit("5060", HOSTING)), CC_ADMIN),
             taxed(debit("1050", vat_19(HOSTING))),
             credit("2010", gross(HOSTING)),
         ],
     ));
-    out.push(post(
+    out.push(item(
         id(month, "materials-bill"),
         Poster::Person,
         date(year, month, 8),
         format!("Nordwald Stahl GmbH steel stock, {name}"),
+        "ap",
+        "bill",
+        "nordwald",
+        format!("NW-{year}-{month:02}"),
         vec![
             tagged(taxed(debit("5010", MATERIALS_NET[index])), CC_PRODUCTION),
             taxed(debit("1050", vat_19(MATERIALS_NET[index]))),
@@ -411,22 +508,30 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
     // Sales: two invoices a month, and last month's invoices paid in.
     let elbe_number = format!("RE-{year}-{:04}", (index * 2) + 1);
     let kessler_number = format!("RE-{year}-{:04}", (index * 2) + 2);
-    out.push(post(
+    out.push(item(
         id(month, "invoice-nordstrand"),
         Poster::Person,
         date(year, month, 5),
         format!("Invoice {elbe_number} to Nordstrand Präzision GmbH, frames, {name}"),
+        "ar",
+        "invoice",
+        "nordstrand",
+        elbe_number.clone(),
         vec![
             debit("1030", gross(SALES_NET[index])),
             tagged(taxed(credit("4010", SALES_NET[index])), CC_SALES),
             credit("2020", vat_19(SALES_NET[index])),
         ],
     ));
-    out.push(post(
+    out.push(item(
         id(month, "invoice-kessler"),
         Poster::Person,
         date(year, month, 12),
         format!("Invoice {kessler_number} to Kessler Logistik GmbH, integration services, {name}"),
+        "ar",
+        "invoice",
+        "kessler",
+        kessler_number.clone(),
         vec![
             debit("1030", gross(SERVICES_NET[index])),
             tagged(taxed(credit("4020", SERVICES_NET[index])), PROJECT_KESSLER),
@@ -437,51 +542,124 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         // A duplicate of the August frames invoice, posted by the owner and
         // reversed the same day.
         let duplicate = id(8, "invoice-nordstrand-duplicate");
-        out.push(post(
+        let duplicate_lines = vec![
+            debit("1030", gross(SALES_NET[index])),
+            tagged(taxed(credit("4010", SALES_NET[index])), CC_SALES),
+            credit("2020", vat_19(SALES_NET[index])),
+        ];
+        out.push(item(
             duplicate.clone(),
             Poster::Person,
             date(year, 8, 12),
             "Invoice Nordstrand Präzision GmbH, posted twice (duplicate)",
-            vec![
-                debit("1030", gross(SALES_NET[index])),
-                tagged(taxed(credit("4010", SALES_NET[index])), CC_SALES),
-                credit("2020", vat_19(SALES_NET[index])),
-            ],
+            "ar",
+            "invoice",
+            "nordstrand",
+            format!("DUP-{year}-08"),
+            duplicate_lines.clone(),
         ));
-        out.push(reverse(
-            id(8, "invoice-nordstrand-duplicate-reversal"),
+        // The correction is a credit note for the same lines, cleared against
+        // the duplicate through the subledger.
+        let credit_note = id(8, "invoice-nordstrand-duplicate-reversal");
+        out.push(item(
+            credit_note.clone(),
             Poster::Person,
             date(year, 8, 12),
             "Reversal of the duplicate invoice",
-            &duplicate,
+            "ar",
+            "credit-note",
+            "nordstrand",
+            format!("CN-{year}-08"),
+            mirror_of(&duplicate_lines),
+        ));
+        out.push(offset(
+            id(8, "invoice-nordstrand-duplicate-offset"),
+            Poster::Person,
+            date(year, 8, 12),
+            "Credit note set against the duplicate invoice",
+            "ar",
+            "nordstrand",
+            credit_note,
+            duplicate,
+            gross(SALES_NET[index]),
         ));
     }
     if let Some(prev) = prev {
-        out.push(post(
-            id(month, "receipts"),
+        let prev_month = prev as u32 + 1;
+        out.push(allocate(
+            id(month, "receipts-nordstrand"),
             Poster::Person,
             date(year, month, 20),
-            format!("Customer payments for {}, received", MONTH_NAMES[prev]),
+            format!(
+                "Customer payment for {} from Nordstrand, received",
+                MONTH_NAMES[prev]
+            ),
+            "ar",
+            "nordstrand",
+            vec![(id(prev_month, "invoice-nordstrand"), gross(SALES_NET[prev]))],
             vec![
-                debit("1020", gross(SALES_NET[prev]) + gross(SERVICES_NET[prev])),
-                credit("1030", gross(SALES_NET[prev]) + gross(SERVICES_NET[prev])),
+                debit("1020", gross(SALES_NET[prev])),
+                credit("1030", gross(SALES_NET[prev])),
             ],
         ));
-        // Last month's supplier bills are paid on the 25th.
-        let mut supplier_bills = gross(HOSTING) + gross(MATERIALS_NET[prev]);
-        if month == 5 {
-            supplier_bills += gross(GOODS_RECEIVED);
-        }
-        out.push(post(
-            id(month, "supplier-payments"),
+        out.push(allocate(
+            id(month, "receipts-kessler"),
+            Poster::Person,
+            date(year, month, 20),
+            format!(
+                "Customer payment for {} from Kessler, received",
+                MONTH_NAMES[prev]
+            ),
+            "ar",
+            "kessler",
+            vec![(id(prev_month, "invoice-kessler"), gross(SERVICES_NET[prev]))],
+            vec![
+                debit("1020", gross(SERVICES_NET[prev])),
+                credit("1030", gross(SERVICES_NET[prev])),
+            ],
+        ));
+        // Last month's supplier bills are paid on the 25th, one payment per vendor.
+        out.push(allocate(
+            id(month, "supplier-payments-cloudsteward"),
             Poster::Person,
             date(year, month, 26),
-            format!("Payments to suppliers for {}", MONTH_NAMES[prev]),
+            format!("Payment to Cloudsteward GmbH for {}", MONTH_NAMES[prev]),
+            "ap",
+            "cloudsteward",
+            vec![(id(prev_month, "hosting-bill"), gross(HOSTING))],
             vec![
-                debit("2010", supplier_bills),
-                credit("1020", supplier_bills),
+                debit("2010", gross(HOSTING)),
+                credit("1020", gross(HOSTING)),
             ],
         ));
+        out.push(allocate(
+            id(month, "supplier-payments-nordwald"),
+            Poster::Person,
+            date(year, month, 26),
+            format!("Payment to Nordwald Stahl GmbH for {}", MONTH_NAMES[prev]),
+            "ap",
+            "nordwald",
+            vec![(id(prev_month, "materials-bill"), gross(MATERIALS_NET[prev]))],
+            vec![
+                debit("2010", gross(MATERIALS_NET[prev])),
+                credit("1020", gross(MATERIALS_NET[prev])),
+            ],
+        ));
+        if month == 5 {
+            out.push(allocate(
+                id(month, "supplier-payments-acme"),
+                Poster::Person,
+                date(year, month, 26),
+                "Payment to Acme GmbH for RE-2026-0418",
+                "ap",
+                "acme",
+                vec![(id(4, "invoice-acme-rg-0418"), gross(GOODS_RECEIVED))],
+                vec![
+                    debit("2010", gross(GOODS_RECEIVED)),
+                    credit("1020", gross(GOODS_RECEIVED)),
+                ],
+            ));
+        }
         // Last month's payroll taxes and social security are remitted on the 10th.
         out.push(post(
             id(month, "payroll-remittance"),
@@ -498,11 +676,15 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         ));
     }
     if month == 4 {
-        out.push(post(
+        out.push(item(
             id(4, "invoice-acme-rg-0418"),
             Poster::Person,
             date(year, 4, 3),
             "Acme GmbH invoice RE-2026-0418 against PO-1182 and GR-0931, clearing the goods received accrual",
+            "ap",
+            "bill",
+            "acme",
+            "RE-2026-0418".to_owned(),
             vec![
                 debit("2030", GOODS_RECEIVED),
                 debit("1050", vat_19(GOODS_RECEIVED)),

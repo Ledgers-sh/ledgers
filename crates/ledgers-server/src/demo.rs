@@ -23,6 +23,10 @@ use ledgers_commands::error::CommandError;
 use ledgers_commands::{CommandContext, Execute, Executor};
 use ledgers_demo::{DemoBook, DemoEntry, DemoLine, EntryKind, Poster};
 use ledgers_ledger::query;
+use ledgers_subledger::commands::{
+    AllocateInput, AllocateItem, CounterLine, PostItemInput, SubledgerAllocate, SubledgerPostItem,
+};
+use ledgers_subledger::offset::{OffsetInput, SubledgerOffset};
 use serde_json::{Value, json};
 
 /// The person id the in-process seeding posts as. The company's owner
@@ -293,6 +297,28 @@ pub async fn seed_as(
                 known.insert(entry.external_id.clone());
                 report.posted += 1;
             }
+            EntryKind::Item { .. } | EntryKind::Allocate { .. } | EntryKind::Offset { .. } => {
+                if let EntryKind::Offset { debit, .. } = &entry.kind {
+                    // Link-only: done once the debit item is fully cleared.
+                    if offset_is_posted(db, debit).await? {
+                        report.skipped += 1;
+                        continue;
+                    }
+                } else {
+                    let key = stored_external_id(entry).unwrap_or_default();
+                    if known.contains(&key) {
+                        report.skipped += 1;
+                        continue;
+                    }
+                }
+                post_subledger(deps, company_id, entry)
+                    .await
+                    .map_err(|err| format!("{}: {err}", entry.external_id))?;
+                if let Some(key) = stored_external_id(entry) {
+                    known.insert(key);
+                }
+                report.posted += 1;
+            }
             EntryKind::Reverse { of } => {
                 let target = query::entry_by_external_id(db, company_id, of)
                     .await
@@ -550,14 +576,175 @@ pub async fn post_as_owner(
     currency: &str,
     entry: &DemoEntry,
 ) -> Result<(), String> {
-    let lines = match &entry.kind {
-        EntryKind::Post { lines } => lines,
-        EntryKind::Reverse { .. } => {
-            return Err("a reversal is not posted as a new entry".to_owned());
+    match &entry.kind {
+        EntryKind::Post { lines } => {
+            let input = post_input(currency, entry, lines);
+            post_as_person(deps, company_id, &input).await
         }
+        EntryKind::Reverse { .. } => Err("a reversal is not posted as a new entry".to_owned()),
+        EntryKind::Item { .. } | EntryKind::Allocate { .. } | EntryKind::Offset { .. } => {
+            post_subledger(deps, company_id, entry).await
+        }
+    }
+}
+
+/// The journal the demo posts to: the company's general journal (code `GN`),
+/// the same one the entries API defaults to. Journal ids are global keys, so
+/// the id is read back rather than assumed.
+async fn demo_journal(db: &dyn Database, company_id: &str) -> Result<String, String> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT id FROM journal WHERE company_id = ? AND code = 'GN'".to_owned(),
+            vec![sea_query::Value::from(company_id)],
+        ))
+        .await
+        .map_err(|err| format!("read the general journal: {err}"))?;
+    rows.first()
+        .and_then(|row| row.get::<String>("id"))
+        .ok_or_else(|| "the company has no general journal (GN)".to_owned())
+}
+
+/// The control account of a ledger: receivables or payables.
+fn control_account(ledger: &str) -> &'static str {
+    if ledger == "ar" { "1030" } else { "2010" }
+}
+
+/// The `external_id` the journal stores for a subledger-posted fixture entry.
+/// The command writes it from the event id, which the seed sets to the
+/// fixture's own `external_id`, so a re-run finds the entry and skips it.
+fn stored_external_id(entry: &DemoEntry) -> Option<String> {
+    let ext = &entry.external_id;
+    match &entry.kind {
+        EntryKind::Post { .. } | EntryKind::Reverse { .. } => Some(ext.clone()),
+        EntryKind::Item { .. } => Some(format!("item-{ext}")),
+        EntryKind::Allocate { party, .. } => Some(format!("alloc-{party}-{ext}")),
+        // A link-only offset posts no journal entry; see `offset_is_posted`.
+        EntryKind::Offset { .. } => None,
+    }
+}
+
+/// Whether a link-only offset has been posted: the debit item, which it clears
+/// in full, has no balance left.
+async fn offset_is_posted(db: &dyn Database, debit: &str) -> Result<bool, String> {
+    let rows = db
+        .query(&cratefield_core::Statement::with_values(
+            "SELECT tx_remaining_minor FROM open_item WHERE id = ?".to_owned(),
+            vec![sea_query::Value::from(format!("oi_{debit}"))],
+        ))
+        .await
+        .map_err(|err| format!("read {debit}: {err}"))?;
+    Ok(rows
+        .first()
+        .and_then(|row| row.get::<i64>("tx_remaining_minor"))
+        == Some(0))
+}
+
+/// Posts a subledger fixture entry (an item, a payment or an offset) as the
+/// owner, with the fixture's `external_id` as the event id.
+async fn post_subledger(deps: &Deps, company_id: &str, entry: &DemoEntry) -> Result<(), String> {
+    let auth = OwnerAuth {
+        person_id: DEMO_OWNER_ID.to_owned(),
     };
-    let input = post_input(currency, entry, lines);
-    post_as_person(deps, company_id, &input).await
+    let journal_id = demo_journal(deps.db.as_ref(), company_id).await?;
+    let event = entry.external_id.as_str();
+    match &entry.kind {
+        EntryKind::Item {
+            ledger,
+            kind,
+            party,
+            source_id,
+            lines,
+        } => {
+            let control = control_account(ledger);
+            let amount: i64 = lines
+                .iter()
+                .filter(|line| line.account == control)
+                .map(|line| line.minor)
+                .sum();
+            let counter_lines = lines
+                .iter()
+                .filter(|line| line.account != control)
+                .map(|line| CounterLine {
+                    account_number: line.account.to_owned(),
+                    amount: line.minor,
+                    tax_code: line.tax_code.map(str::to_owned),
+                    dimensions: line
+                        .dimensions
+                        .iter()
+                        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                        .collect(),
+                })
+                .collect();
+            let input = PostItemInput {
+                ledger: (*ledger).to_owned(),
+                kind: (*kind).to_owned(),
+                party_id: (*party).to_owned(),
+                journal_id,
+                document_date: entry.posting_date.clone(),
+                posting_date: entry.posting_date.clone(),
+                due_date: None,
+                currency: "EUR".to_owned(),
+                amount,
+                rate: None,
+                counter_account: String::new(),
+                dimensions: std::collections::BTreeMap::new(),
+                counter_lines,
+                description: entry.description.clone(),
+                source_id: Some(source_id.clone()),
+            };
+            run_as_person_event(deps, company_id, &SubledgerPostItem, auth, &input, event).await
+        }
+        EntryKind::Allocate {
+            ledger,
+            party,
+            bank,
+            items,
+            ..
+        } => {
+            let input = AllocateInput {
+                ledger: (*ledger).to_owned(),
+                party_id: (*party).to_owned(),
+                journal_id,
+                date: entry.posting_date.clone(),
+                bank_account: (*bank).to_owned(),
+                paid: items.iter().map(|(_, amount)| amount).sum(),
+                items: items
+                    .iter()
+                    .map(|(item, amount)| AllocateItem {
+                        open_item_id: format!("oi_{item}"),
+                        amount: *amount,
+                        paid_base: None,
+                    })
+                    .collect(),
+                description: Some(entry.description.clone()),
+                reference: None,
+            };
+            run_as_person_event(deps, company_id, &SubledgerAllocate, auth, &input, event).await
+        }
+        EntryKind::Offset {
+            ledger,
+            party,
+            credit,
+            debit,
+            amount,
+        } => {
+            let input = OffsetInput {
+                ledger: (*ledger).to_owned(),
+                party_id: (*party).to_owned(),
+                journal_id,
+                date: entry.posting_date.clone(),
+                credit_item_id: format!("oi_{credit}"),
+                debit_item_id: format!("oi_{debit}"),
+                amount: *amount,
+                description: Some(entry.description.clone()),
+                reference: None,
+            };
+            run_as_person_event(deps, company_id, &SubledgerOffset, auth, &input, event).await
+        }
+        EntryKind::Post { .. } | EntryKind::Reverse { .. } => {
+            Err("not a subledger entry".to_owned())
+        }
+    }
 }
 
 async fn post_as_person(
@@ -594,13 +781,31 @@ where
     C: ledgers_commands::Command + Sync,
     C::Input: Sync,
 {
+    let event = deps.id_gen.ulid();
+    run_as_person_event(deps, company_id, command, auth, input, &event).await
+}
+
+/// [`run_as_person`] with the event id given, so the entry the command posts
+/// carries a key the seed can find again.
+async fn run_as_person_event<C>(
+    deps: &Deps,
+    company_id: &str,
+    command: &C,
+    auth: OwnerAuth,
+    input: &C::Input,
+    event_id: &str,
+) -> Result<(), String>
+where
+    C: ledgers_commands::Command + Sync,
+    C::Input: Sync,
+{
     let policy = dispatch::load_policy(deps.db.as_ref(), company_id, deps.clock.now())
         .await
         .map_err(|err| err.to_string())?;
     let ctx = CommandContext {
         company_id: company_id.to_owned(),
         request_id: request_id(deps),
-        event_id: deps.id_gen.ulid(),
+        event_id: event_id.to_owned(),
         now: dispatch::rfc3339_utc(deps.clock.now()),
         is_person: false, // Demo internal agent
     };
@@ -658,10 +863,20 @@ pub async fn check(deps: &Deps, company_id: &str, book: &DemoBook) -> Result<Che
     // Check 6: every fixture entry is present and reversals are reversed
     for entry in &book.entries {
         match &entry.kind {
-            EntryKind::Post { .. } => {
-                let found = query::entry_by_external_id(db, company_id, &entry.external_id)
+            EntryKind::Offset { debit, .. } => {
+                if !offset_is_posted(db, debit).await? {
+                    return Err(format!(
+                        "fixture offset {} is not posted",
+                        entry.external_id
+                    ));
+                }
+                report.fixture_entries_found += 1;
+            }
+            EntryKind::Post { .. } | EntryKind::Item { .. } | EntryKind::Allocate { .. } => {
+                let key = stored_external_id(entry).unwrap_or_default();
+                let found = query::entry_by_external_id(db, company_id, &key)
                     .await
-                    .map_err(|err| format!("read {}: {err}", entry.external_id))?;
+                    .map_err(|err| format!("read {key}: {err}"))?;
                 if found.is_none() {
                     return Err(format!("fixture entry {} is not posted", entry.external_id));
                 }

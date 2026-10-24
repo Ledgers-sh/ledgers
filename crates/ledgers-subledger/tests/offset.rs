@@ -150,8 +150,8 @@ fn test_offset_link_only_same_rate() {
             party_id: party_id.to_owned(),
             journal_id: journal_id.clone(),
             date: "2026-10-15".to_owned(),
-            credit_item_id: credit_id,
-            debit_item_id: invoice_id,
+            credit_item_id: credit_id.clone(),
+            debit_item_id: invoice_id.clone(),
             amount: 10000,
             description: None,
             reference: None,
@@ -184,6 +184,20 @@ fn test_offset_link_only_same_rate() {
                 "no FX difference for same rate"
             );
         }
+
+        // The credit note (-100.00) and the invoice (+300.00) each move by the
+        // 100.00 cleared: the credit note to zero, the invoice to 200.00.
+        let credit = common::open_item_row(db, &credit_id).await.expect("credit");
+        assert_eq!(credit.tx_remaining_minor, 0);
+        assert_eq!(
+            credit.base_remaining_minor, 0,
+            "the credit note clears in base too"
+        );
+        let invoice = common::open_item_row(db, &invoice_id)
+            .await
+            .expect("invoice");
+        assert_eq!(invoice.tx_remaining_minor, 20000);
+        assert_eq!(invoice.base_remaining_minor, 20000);
     });
 }
 

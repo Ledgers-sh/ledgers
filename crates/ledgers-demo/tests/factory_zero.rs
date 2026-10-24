@@ -6,10 +6,7 @@ use ledgers_demo::factory_zero::{self, GOLDEN};
 use ledgers_demo::{EntryKind, balance_of, is_intercompany};
 
 fn lines_of(entry: &ledgers_demo::DemoEntry) -> &[ledgers_demo::DemoLine] {
-    match &entry.kind {
-        EntryKind::Post { lines } => lines,
-        EntryKind::Reverse { .. } => &[],
-    }
+    entry.kind.lines().unwrap_or(&[])
 }
 
 #[test]
@@ -19,7 +16,7 @@ fn every_entry_balances_and_the_book_has_eight_units() {
     assert_eq!(book.currency, "SGD");
     assert_eq!(book.units.len(), 8, "the holding and seven ventures");
     for entry in &book.entries {
-        if let EntryKind::Post { lines } = &entry.kind {
+        if let Some(lines) = entry.kind.lines() {
             assert_eq!(balance_of(lines), 0, "entry {} balances", entry.external_id);
         }
     }

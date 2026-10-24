@@ -56,12 +56,16 @@ fn movements(book: &DemoBook) -> Vec<Movement> {
         .iter()
         .filter_map(|entry| match &entry.kind {
             EntryKind::Reverse { of } => Some(of.as_str()),
-            EntryKind::Post { .. } => None,
+            EntryKind::Post { .. }
+            | EntryKind::Item { .. }
+            | EntryKind::Allocate { .. }
+            | EntryKind::Offset { .. } => None,
         })
         .collect();
     let mut out = Vec::new();
     for entry in &book.entries {
-        let EntryKind::Post { lines } = &entry.kind else {
+        // Every entry that posts its own lines: a bank payment is an allocation.
+        let Some(lines) = entry.kind.lines() else {
             continue;
         };
         if reversed.contains(entry.external_id.as_str()) {

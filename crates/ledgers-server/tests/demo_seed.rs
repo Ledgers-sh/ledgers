@@ -47,8 +47,11 @@ fn account_balances(f: &common::Fixture) -> BTreeMap<String, i64> {
 fn seeding_posts_the_whole_book_and_the_chart_matches_the_golden_balances() {
     let f = fixture();
     let report = seed_once(&f);
-    assert_eq!(report.posted, 153, "{report:?}");
-    assert_eq!(report.reversed, 2, "{report:?}");
+    // Every fixture entry is posted: 177 journal entries (items, payments and
+    // the book's own entries) and one link-only offset. One reversal remains
+    // (the June depreciation); the duplicate invoice is cleared by a credit note.
+    assert_eq!(report.posted, 178, "{report:?}");
+    assert_eq!(report.reversed, 1, "{report:?}");
     assert_eq!(report.skipped, 0, "{report:?}");
     assert_eq!(report.dimensions_created, 4, "{report:?}");
 
@@ -227,7 +230,7 @@ fn a_dev_company_with_no_entries_loads_the_demo_once() {
     let f = fixture();
     let first =
         pollster::block_on(demo::seed_if_empty(&f.deps, COMPANY, &f.keys.full)).expect("loads");
-    assert_eq!(first.map(|r| r.posted), Some(153));
+    assert_eq!(first.map(|r| r.posted), Some(178));
     let second =
         pollster::block_on(demo::seed_if_empty(&f.deps, COMPANY, &f.keys.full)).expect("checks");
     assert_eq!(second, None, "a company with entries is left alone");
@@ -301,19 +304,24 @@ fn an_agent_cannot_reverse_a_person_posted_entry() {
 }
 
 #[test]
-fn an_owner_entry_that_was_reversed_is_recorded_as_person() {
-    // The owner's duplicate invoice: posted as a person, then reversed.
+fn an_owner_entry_that_was_cleared_is_recorded_as_person() {
+    // The owner's duplicate invoice is posted as a person, then corrected by a
+    // credit note the owner posts, and the two are cleared by an offset.
     let f = fixture();
     seed_once(&f);
-    let entry = f.send(
-        Method::GET,
-        "/v1/entries/halden-08-invoice-nordstrand-duplicate",
-        &f.keys.full,
-        None,
-    );
-    assert_eq!(entry.status.as_u16(), 200, "{}", entry.json());
-    assert_eq!(json(&entry)["posted_by"], "person");
-    assert!(!json(&entry)["reversed_by"].is_null(), "{}", entry.json());
+    for key in [
+        "item-halden-08-invoice-nordstrand-duplicate",
+        "item-halden-08-invoice-nordstrand-duplicate-reversal",
+    ] {
+        let entry = f.send(
+            Method::GET,
+            &format!("/v1/entries/{key}"),
+            &f.keys.full,
+            None,
+        );
+        assert_eq!(entry.status.as_u16(), 200, "{key}: {}", entry.json());
+        assert_eq!(json(&entry)["posted_by"], "person", "{key}");
+    }
 }
 
 #[test]
@@ -405,8 +413,8 @@ fn the_internal_agent_loads_the_book_and_a_second_run_posts_nothing() {
     let book = halden::book(YEAR);
     let first = pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book))
         .expect("the internal agent seeds the book");
-    assert_eq!(first.posted, 153, "{first:?}");
-    assert_eq!(first.reversed, 2, "{first:?}");
+    assert_eq!(first.posted, 178, "{first:?}");
+    assert_eq!(first.reversed, 1, "{first:?}");
     assert_eq!(first.dimensions_created, 4, "{first:?}");
 
     let before = account_balances(&f);
@@ -453,11 +461,12 @@ fn check_passes_after_seeding_the_book() {
     let book = halden::book(YEAR);
     pollster::block_on(demo::seed_internal(&f.deps, COMPANY, &book)).expect("seeds");
     let report = pollster::block_on(demo::check(&f.deps, COMPANY, &book)).expect("check passes");
-    // The fixture has 153 post entries and 2 reversal entries (155 total)
-    assert_eq!(report.fixture_entries_found, 153, "{report:?}");
-    assert_eq!(report.fixture_reversals_found, 2, "{report:?}");
-    assert_eq!(report.entries_verified, 153, "{report:?}");
-    assert_eq!(report.reversals_verified, 2, "{report:?}");
+    // 177 journal entries, one link-only offset (no journal entry), and one
+    // reversal (the June depreciation).
+    assert_eq!(report.fixture_entries_found, 178, "{report:?}");
+    assert_eq!(report.fixture_reversals_found, 1, "{report:?}");
+    assert_eq!(report.entries_verified, 177, "{report:?}");
+    assert_eq!(report.reversals_verified, 1, "{report:?}");
 }
 
 #[test]
@@ -723,6 +732,10 @@ fn the_trend_activity_counts_every_entry_by_who_posted_it() {
     let book = halden::book(YEAR);
     let (mut agent, mut human) = (0_i64, 0_i64);
     for entry in &book.entries {
+        // A link-only offset posts no journal entry, so it is not counted.
+        if matches!(entry.kind, ledgers_demo::EntryKind::Offset { .. }) {
+            continue;
+        }
         match entry.poster {
             ledgers_demo::Poster::Agent => agent += 1,
             ledgers_demo::Poster::Person => human += 1,
@@ -743,4 +756,34 @@ fn the_trend_activity_counts_every_entry_by_who_posted_it() {
         human > 0 && agent > 0,
         "the fixture has both kinds of poster"
     );
+}
+
+#[test]
+fn the_demo_books_reconcile_control_accounts_to_open_items() {
+    let f = fixture();
+    seed_once(&f);
+    let db = f.deps.db.as_ref();
+    let as_of = format!("{YEAR}-12-31");
+
+    // The control account is the open items: receivables and payables still
+    // owed at year end are the same figure in the ledger and the subledger.
+    let rows = pollster::block_on(ledgers_subledger::reconcile::reconcile(db, COMPANY, &as_of))
+        .expect("the reconciliation runs");
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    for row in &rows {
+        assert_eq!(row.difference, 0, "{row:?}");
+        assert!(row.subledger_balance > 0, "{row:?} still owes something");
+    }
+
+    // And every open item's remaining balance is its amount less its allocations.
+    let mismatched = pollster::block_on(db.query(&cratefield_core::Statement::with_values(
+        "SELECT COUNT(*) AS cnt FROM open_item oi WHERE oi.company_id = ? AND \
+         (oi.tx_remaining_minor <> oi.tx_original_minor - \
+            CAST(COALESCE((SELECT SUM(a.tx_minor) FROM allocation a WHERE a.open_item_id = oi.id), 0) AS BIGINT) \
+          OR oi.base_remaining_minor <> oi.base_original_minor - \
+            CAST(COALESCE((SELECT SUM(a.base_minor) FROM allocation a WHERE a.open_item_id = oi.id), 0) AS BIGINT))",
+        vec![sea_query::Value::from(COMPANY)],
+    )))
+    .expect("the integrity query");
+    assert_eq!(mismatched.rows[0].get::<i64>("cnt"), Some(0));
 }

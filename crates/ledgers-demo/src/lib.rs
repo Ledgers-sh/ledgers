@@ -101,6 +101,67 @@ pub enum EntryKind {
         /// The `external_id` of the entry being reversed.
         of: String,
     },
+    /// An invoice or bill posted through the subledger (`subledger.post-item`):
+    /// the control line (receivables or payables) and the counter lines, all
+    /// in `lines`. The control account comes from `ledger`.
+    Item {
+        /// `ar` or `ap`.
+        ledger: &'static str,
+        /// `invoice`, `credit-note` or `bill`.
+        kind: &'static str,
+        /// The customer or vendor the item belongs to.
+        party: &'static str,
+        /// The document number (unique per company and kind).
+        source_id: String,
+        /// The posted lines.
+        lines: Vec<DemoLine>,
+    },
+    /// Payment of one party's items from a bank account, through
+    /// `subledger.allocate`. `items` are `(external_id of the item entry,
+    /// amount)`; `lines` are the bank and control lines it posts.
+    Allocate {
+        /// `ar` or `ap`.
+        ledger: &'static str,
+        /// The customer or vendor paying or paid.
+        party: &'static str,
+        /// The bank account, `1020` in the demo.
+        bank: &'static str,
+        /// The items allocated: `(external_id of the item entry, amount)`.
+        items: Vec<(String, i64)>,
+        /// The posted lines.
+        lines: Vec<DemoLine>,
+    },
+    /// Clears a credit item against a debit item of the same party, through
+    /// `subledger.offset`. `credit` and `debit` are the `external_id`s of the
+    /// item entries. A link only: with no exchange difference it posts no
+    /// journal entry, so it has no lines.
+    Offset {
+        /// `ar` or `ap`.
+        ledger: &'static str,
+        /// The customer or vendor.
+        party: &'static str,
+        /// The `external_id` of the credit item entry.
+        credit: String,
+        /// The `external_id` of the debit item entry.
+        debit: String,
+        /// The amount cleared, in minor units.
+        amount: i64,
+    },
+}
+
+impl EntryKind {
+    /// The journal lines the entry posts, for every kind that posts its own
+    /// lines. `None` for a reversal (its lines come from its target) and for a
+    /// link-only offset (it posts none).
+    #[must_use]
+    pub fn lines(&self) -> Option<&[DemoLine]> {
+        match self {
+            Self::Post { lines } | Self::Item { lines, .. } | Self::Allocate { lines, .. } => {
+                Some(lines)
+            }
+            Self::Offset { .. } | Self::Reverse { .. } => None,
+        }
+    }
 }
 
 /// One demo entry in posting order.
@@ -166,12 +227,11 @@ pub const INTERCOMPANY_ACCOUNTS: [&str; 2] = ["1070", "2050"];
 /// Whether an entry is intercompany (touches an inter-unit account).
 #[must_use]
 pub fn is_intercompany(entry: &DemoEntry) -> bool {
-    match &entry.kind {
-        EntryKind::Post { lines } => lines
+    entry.kind.lines().is_some_and(|lines| {
+        lines
             .iter()
-            .any(|line| INTERCOMPANY_ACCOUNTS.contains(&line.account)),
-        EntryKind::Reverse { .. } => false,
-    }
+            .any(|line| INTERCOMPANY_ACCOUNTS.contains(&line.account))
+    })
 }
 
 /// The signed total of an entry's lines in minor units: debits minus
@@ -199,14 +259,11 @@ impl DemoBook {
     #[must_use]
     pub fn posted_lines(&self, entry: &DemoEntry) -> Option<Vec<DemoLine>> {
         match &entry.kind {
-            EntryKind::Post { lines } => Some(lines.clone()),
             EntryKind::Reverse { of } => {
                 let original = self.entry(of)?;
-                match &original.kind {
-                    EntryKind::Post { lines } => Some(mirror_of(lines)),
-                    EntryKind::Reverse { .. } => None,
-                }
+                original.kind.lines().map(mirror_of)
             }
+            kind => kind.lines().map(<[DemoLine]>::to_vec),
         }
     }
 

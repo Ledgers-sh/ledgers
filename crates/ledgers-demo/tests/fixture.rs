@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 fn every_entry_balances() {
     let book = halden::book(2026);
     for entry in &book.entries {
-        if let EntryKind::Post { lines } = &entry.kind {
+        if let Some(lines) = entry.kind.lines() {
             assert_eq!(
                 balance_of(lines),
                 0,
@@ -47,14 +47,29 @@ fn every_reversal_targets_an_earlier_posted_entry() {
                 entry.external_id
             );
             let original = book.entry(of).expect("target exists");
-            assert!(
-                matches!(original.kind, EntryKind::Post { .. }),
-                "{of} is itself a reversal"
-            );
+            assert!(original.kind.lines().is_some(), "{of} is itself a reversal");
         }
         seen.insert(entry.external_id.as_str());
     }
-    assert!(reversals >= 2, "the fixture shows reversals: {reversals}");
+    // The duplicate invoice is corrected by a credit note cleared through an
+    // offset, not by a reversal entry: count those as reversals too.
+    let credit_notes = book
+        .entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                &entry.kind,
+                EntryKind::Item {
+                    kind: "credit-note",
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(
+        reversals + credit_notes >= 2,
+        "the fixture shows reversals: {reversals} and credit notes: {credit_notes}"
+    );
 }
 
 #[test]
@@ -81,8 +96,8 @@ fn every_standard_rate_line_carries_the_vat_it_should() {
     let invoice = book
         .entry("halden-03-invoice-nordstrand")
         .expect("March frames invoice");
-    let EntryKind::Post { lines } = &invoice.kind else {
-        panic!("invoice is a post");
+    let Some(lines) = invoice.kind.lines() else {
+        panic!("invoice posts lines");
     };
     let net = lines
         .iter()

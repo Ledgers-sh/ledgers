@@ -338,7 +338,9 @@ impl Command for SubledgerOffset {
                     Value::from(debit_item.id.as_str()),
                     Value::from(input.date.as_str()),
                     Value::from(-input.amount),
-                    Value::from(-credit_base_cleared),
+                    // The credit side carries the sign of its transaction amount
+                    // (a credit item is negative), so its base is negative too.
+                    Value::from(credit_base_cleared),
                     Value::from(0i64), // No FX on the offset itself, FX is in the entry
                     Value::from(ctx.now.as_str()),
                 ],
@@ -346,7 +348,7 @@ impl Command for SubledgerOffset {
 
             statements.push(Statement::with_values(
                 "UPDATE open_item SET tx_remaining_minor = tx_remaining_minor + ?, \
-                 base_remaining_minor = base_remaining_minor + ?, updated_at = ? \
+                 base_remaining_minor = base_remaining_minor - ?, updated_at = ? \
                  WHERE id = ? AND company_id = ? AND ledger = ? AND party_id = ?"
                     .to_owned(),
                 vec![
