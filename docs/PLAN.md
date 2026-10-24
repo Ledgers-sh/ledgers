@@ -168,7 +168,7 @@ in `ledgers-cloud`.
 | `ledgers-bills` | Vendor bills from upload or email, to draft entries |
 | `ledgers-invoice` | Sales invoices, credit notes, e-invoice formats (UBL, CII, XRechnung) |
 | `ledgers-matching` | 2-way and 3-way matching (order, receipt, invoice, payment) with confidence |
-| `ledgers-bank` | Bank accounts, statement import (CAMT.053, MT940, OFX, CSV), reconciliation |
+| `ledgers-bank` | Bank accounts, statement import (CAMT.053, CAMT.052, MT940, OFX, QFX, CSV), reconciliation |
 | `ledgers-tax` | Tax codes, rates as data, line calculation (M0); VAT/GST return preparation, EC Sales List, OSS (M3) |
 | `ledgers-subledger` | Parties, open items, AR/AP subledgers, allocations, payments and payment runs |
 | `ledgers-reports` | Trial balance, P&L, balance sheet, GL detail, aged AR/AP, per unit |

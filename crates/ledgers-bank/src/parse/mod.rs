@@ -7,6 +7,7 @@
 pub mod camt053;
 pub mod csv;
 pub mod mt940;
+pub mod ofx;
 
 use crate::statement::{Format, ParseError, ParsedStatement};
 use ledgers_money::Currency;
@@ -60,10 +61,19 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
         Err(_) => return None,
     };
     let trimmed = head.trim_start_matches('\u{feff}').trim_start();
-    if trimmed.starts_with('<')
-        && (trimmed.contains("camt.053") || trimmed.contains("BkToCstmrStmt"))
-    {
-        return Some(Format::Camt053);
+    if trimmed.starts_with('<') {
+        if trimmed.contains("camt.053") || trimmed.contains("BkToCstmrStmt") {
+            return Some(Format::Camt053);
+        }
+        if trimmed.contains("camt.052") || trimmed.contains("BkToCstmrAcctRpt") {
+            return Some(Format::Camt052);
+        }
+        if trimmed.starts_with("<?OFX") || trimmed.contains("<OFX>") {
+            return Some(Format::Ofx);
+        }
+    }
+    if trimmed.starts_with("OFXHEADER:") {
+        return Some(Format::Ofx);
     }
     if trimmed.starts_with("{1:") || trimmed.starts_with(":20:") || trimmed.contains("\n:20:") {
         return Some(Format::Mt940);
@@ -89,8 +99,9 @@ pub fn parse(
     // A byte-order mark is not part of the content, so it never reaches a reader.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match format {
-        Format::Camt053 => camt053::parse(text),
+        Format::Camt053 | Format::Camt052 => camt053::parse(text),
         Format::Mt940 => mt940::parse(text),
+        Format::Ofx => ofx::parse(text, currency),
         Format::Csv => {
             let mapping = csv_mapping.ok_or_else(|| {
                 ParseError::Malformed("a CSV import needs a column mapping".to_owned())

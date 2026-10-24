@@ -14355,9 +14355,19 @@
             "const": "camt053"
           },
           {
+            "description": "ISO 20022 `camt.052` intraday account report (XML).",
+            "type": "string",
+            "const": "camt052"
+          },
+          {
             "description": "SWIFT MT940 customer statement message.",
             "type": "string",
             "const": "mt940"
+          },
+          {
+            "description": "OFX/QFX bank statement (SGML 1.x or XML 2.x).",
+            "type": "string",
+            "const": "ofx"
           },
           {
             "description": "A delimited text export with a saved column mapping.",
