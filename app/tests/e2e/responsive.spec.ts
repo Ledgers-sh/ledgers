@@ -30,6 +30,8 @@ const ROUTES: { name: string; hash: string; company?: string }[] = [
   { name: 'bank', hash: '#/bank' },
   { name: 'parties', hash: '#/parties' },
   { name: 'party page', hash: '#/parties/party-halden' },
+  { name: 'party edit', hash: '#/parties/party-halden/edit' },
+  { name: 'party import', hash: '#/parties/import' },
   { name: 'group directory', hash: '#/group', company: 'HALDEN01' },
   { name: 'group', hash: '#/group', company: 'FZIP01' },
   { name: 'group view', hash: '#/group/view', company: 'FZIP01' },

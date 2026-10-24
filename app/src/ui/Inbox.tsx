@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { billsList, type Bill, type BillStatus } from '../api/bills';
+import { Avatar } from './Avatar';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { buildPdf, imageToJpeg, MAX_SCAN_PAGES, needsConversion, quickCheck, sha256Hex, type ScanPage } from '../lib/documents';
@@ -270,7 +271,10 @@ function BillTable({ title, bills }: { title: string; bills: Bill[] }) {
                 <td>
                   <span class={`badge bill-status bill-status-${bill.status}`}>{t(STATUS_KEY[bill.status])}</span>
                 </td>
-                <td>{bill.vendor.name}</td>
+                <td>
+                  <Avatar name={bill.vendor.name} logo={bill.vendor.logo_document_id ? { documentId: bill.vendor.logo_document_id } : null} size="xs" />{' '}
+                  {bill.vendor.name}
+                </td>
                 <td class="mono col-invoice">{bill.invoice_number ?? '—'}</td>
                 <td class="mono col-date">{bill.invoice_date ?? '—'}</td>
                 <td class="num">

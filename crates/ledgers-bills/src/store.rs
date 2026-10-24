@@ -68,7 +68,7 @@ pub const BILL_SELECT: &str = "SELECT b.id, b.document_id, b.vendor_id, b.invoic
      b.due_date, b.currency, b.net_minor, b.vat_minor, b.gross_minor, b.paid_minor, b.lines_json, b.confidence_json, b.checks_json, \
      b.instruction_flags, b.iban_changed, b.iban_confirmed, b.source, b.reader, b.unit_code, b.posted_entry_id, b.discarded_at, b.created_by, \
      b.created_at, b.updated_at, v.name AS vendor_name, v.vat_id AS vendor_vat_id, v.iban AS vendor_iban, \
-     v.needs_review AS vendor_needs_review FROM bill b JOIN vendor v ON v.id = b.vendor_id";
+     v.needs_review AS vendor_needs_review, v.logo_document_id AS vendor_logo_document_id FROM bill b JOIN vendor v ON v.id = b.vendor_id";
 
 fn text(row: &Row, column: &str) -> Result<String, DbError> {
     row.get::<String>(column)
@@ -91,6 +91,9 @@ fn from_row(row: &Row) -> Result<BillRow, DbError> {
             vat_id: row.get::<Option<String>>("vendor_vat_id").flatten(),
             iban: row.get::<Option<String>>("vendor_iban").flatten(),
             needs_review: row.get::<i64>("vendor_needs_review").unwrap_or(0) == 1,
+            logo_document_id: row
+                .get::<Option<String>>("vendor_logo_document_id")
+                .flatten(),
         },
         vendor_id,
         invoice_number: row.get::<Option<String>>("invoice_number").flatten(),
@@ -209,7 +212,7 @@ pub async fn bill_for_invoice(
 /// A database error.
 pub async fn vendors(db: &dyn Database, company_id: &str) -> Result<Vec<VendorView>, DbError> {
     let stmt = Statement::with_values(
-        "SELECT id, name, vat_id, iban, needs_review FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY name, id".to_owned(),
+        "SELECT id, name, vat_id, iban, needs_review, logo_document_id FROM vendor WHERE company_id = ? AND merged_into IS NULL ORDER BY name, id".to_owned(),
         vec![Value::from(company_id)],
     );
     let rows = db.query(&stmt).await?;
@@ -223,6 +226,7 @@ fn vendor_from_row(row: &Row) -> Result<VendorView, DbError> {
         vat_id: row.get::<Option<String>>("vat_id").flatten(),
         iban: row.get::<Option<String>>("iban").flatten(),
         needs_review: row.get::<i64>("needs_review").unwrap_or(0) == 1,
+        logo_document_id: row.get::<Option<String>>("logo_document_id").flatten(),
     })
 }
 

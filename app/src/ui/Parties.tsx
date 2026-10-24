@@ -13,6 +13,8 @@ import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
 import { Select } from './Select';
 import { PAGE_SIZE, REVIEW_FILTERS, ROLE_FILTERS, listQuery, roleLabelKey, vatStatus, type ReviewFilter, type RoleFilter } from '../lib/parties';
 import { VatChip } from './PartyParts';
+import { Avatar } from './Avatar';
+import { partyExport } from '../api/parties';
 
 /** A search that waits for a pause in typing before it asks the server. */
 function useDebounced(value: string, ms: number): string {
@@ -30,7 +32,7 @@ export function payablesByCurrency(balances: PartyBalance[], partyId: string): {
 }
 
 export function Parties() {
-  const { client } = useSession();
+  const { client, toast } = useSession();
   const [search, setSearch] = useState('');
   const [roles, setRoles] = useState<RoleFilter>('all');
   const [review, setReview] = useState<ReviewFilter>('all');
@@ -48,10 +50,47 @@ export function Parties() {
   const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const to = Math.min(total, (page + 1) * PAGE_SIZE);
   const balanceRows = balances.data?.balances ?? [];
+  const [exporting, setExporting] = useState(false);
+
+  /** Downloads every party as CSV, in the columns the import reads. */
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const out = await partyExport(client);
+      const url = URL.createObjectURL(new Blob([out.csv], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'parties.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(t('parties.export_done'), 'ok');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : t('parties.export_done'), 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <>
-      <PageHead title={t('parties.title')} actions={<a class="btn btn-primary" href="#/parties/new">{t('parties.new')}</a>}>
+      <PageHead
+        title={t('parties.title')}
+        actions={
+          <>
+            <button type="button" class="btn" onClick={() => void exportCsv()} disabled={exporting}>
+              {t('parties.export')}
+            </button>
+            <a class="btn" href="#/parties/import">
+              {t('parties.import')}
+            </a>
+            <a class="btn btn-primary" href="#/parties/new">
+              {t('parties.new')}
+            </a>
+          </>
+        }
+      >
         {t('parties.intro')}
       </PageHead>
 
@@ -165,6 +204,7 @@ function PartyRow({ party, balances, balancesLoading }: { party: Party; balances
     <tr>
       <td class="main" data-label={t('parties.col_name')}>
         <a class="party-name" href={`#/parties/${encodeURIComponent(party.id)}`}>
+          <Avatar name={party.name} logo={party.logo_document_id ? { documentId: party.logo_document_id } : null} size="sm" />
           <Ltr>{party.name}</Ltr>
         </a>
         {party.merged_into && <span class="badge state-soft">{t('parties.merged')}</span>}

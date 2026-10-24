@@ -5,14 +5,16 @@
  * Bank details are not on this form: they change on the party page, by a person.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { partyCreate, partyGet, partyUpdate, partyValidate, type Party, type PartyDetail } from '../api/parties';
+import { partyCreate, partyGet, partySetLogo, partyUpdate, partyValidate, type Party, type PartyDetail } from '../api/parties';
 import { useAsync } from '../hooks';
-import { t } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { useSession } from '../session';
 import { ErrorBanner, PageHead, Skeleton } from './common';
 import { FormProblem } from './settings/common';
 import { Select } from './Select';
-import { AddressEditor, ContactEditor, Field } from './PartyFields';
+import { AddressEditor, ContactEditor, Field, TaxIdEditor } from './PartyFields';
+import { LogoField } from './LogoField';
+import { partyProblemKey } from '../lib/problems';
 import {
   createInputFromDraft,
   draftFromParty,
@@ -46,7 +48,34 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<unknown>(null);
+  const [problemKey, setProblemKey] = useState<MessageKey | null>(null);
+  const [logoDoc, setLogoDoc] = useState<string | null>(party?.logo_document_id ?? null);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+
+  /** Shows a refusal: the app's own words for a known problem, the server's otherwise. */
+  const refuse = (error: unknown) => {
+    const key = partyProblemKey(error);
+    setProblemKey(key);
+    setProblem(key ? null : error);
+  };
+
+  /** The logo: in edit mode it is saved as soon as it is picked; in create mode it is saved with the party. */
+  const pickLogo = async (documentId: string | null) => {
+    setLogoError(null);
+    if (mode === 'create' || !party) {
+      setLogoDoc(documentId);
+      return;
+    }
+    try {
+      const saved = await partySetLogo(client, party.id, documentId);
+      setLogoDoc(saved.party.logo_document_id);
+      toast(t('parties.logo_saved'), 'ok');
+    } catch (error) {
+      const key = partyProblemKey(error);
+      setLogoError(key ? t(key) : t('parties.logo_failed'));
+    }
+  };
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -82,11 +111,13 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
   const submit = async (event: Event) => {
     event.preventDefault();
     setProblem(null);
+    setProblemKey(null);
     if (!(await check())) return;
     setSaving(true);
     try {
       if (mode === 'create') {
         const made = await partyCreate(client, createInputFromDraft(draft));
+        if (logoDoc) await partySetLogo(client, made.party.id, logoDoc);
         toast(t('parties.saved_created'), 'ok');
         location.hash = `#/parties/${encodeURIComponent(made.party.id)}`;
       } else if (party) {
@@ -95,7 +126,7 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
         location.hash = `#/parties/${encodeURIComponent(party.id)}`;
       }
     } catch (error) {
-      setProblem(error);
+      refuse(error);
     } finally {
       setSaving(false);
     }
@@ -117,14 +148,16 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
         <h2 id="party-form-title" tabIndex={-1} ref={headingRef} class="sr-only">
           {heading}
         </h2>
+        {problemKey && <p class="field-error party-problem" role="alert">{t(problemKey)}</p>}
         <FormProblem error={problem} />
 
         <fieldset class="party-group">
           <legend>{t('parties.group_basics')}</legend>
           <div class="party-grid">
             <div id="party-name-wrap" class="party-span">
-              <Field id="party-name" label={t('parties.name')} value={draft.name} onInput={(v) => setField('name', v)} onBlur={check} error={errorFor('name')} required />
+              <Field id="party-name" label={t('parties.legal_name')} value={draft.name} onInput={(v) => setField('name', v)} onBlur={check} error={errorFor('name')} required />
             </div>
+            <Field id="party-trading" label={t('parties.trading_name')} value={draft.trading_name} onInput={(v) => setField('trading_name', v)} error={errorFor('trading_name')} />
             <div class="field party-field">
               <label id="party-roles-label" for="party-roles">
                 {t('parties.roles')}
@@ -143,11 +176,16 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
             </div>
             <Field id="party-vat" label={t('parties.vat_id')} value={draft.vat_id} onInput={(v) => setField('vat_id', v)} onBlur={check} error={errorFor('vat_id')} hint={t('parties.vat_hint')} mono ltr />
             <Field id="party-tax" label={t('parties.tax_number')} value={draft.tax_number} onInput={(v) => setField('tax_number', v)} mono ltr />
+            <Field id="party-registration" label={t('parties.registration_number')} value={draft.registration_number} onInput={(v) => setField('registration_number', v)} onBlur={check} error={errorFor('registration_number')} mono ltr />
+            <Field id="party-website" label={t('parties.website')} type="text" value={draft.website} onInput={(v) => setField('website', v)} onBlur={check} error={errorFor('website')} ltr autoComplete="url" />
+            <Field id="party-email" label={t('parties.email')} type="email" value={draft.email} onInput={(v) => setField('email', v)} onBlur={check} error={errorFor('email')} ltr autoComplete="email" />
+            <Field id="party-phone" label={t('parties.phone')} type="text" inputMode="text" value={draft.phone} onInput={(v) => setField('phone', v)} onBlur={check} error={errorFor('phone')} ltr autoComplete="tel" />
             <Field id="party-terms" label={t('parties.payment_terms')} type="number" inputMode="numeric" value={draft.payment_terms_days} onInput={(v) => setField('payment_terms_days', v)} onBlur={check} error={errorFor('payment_terms_days')} hint={t('parties.payment_terms_hint')} />
-            <Field id="party-currency" label={t('parties.currency')} value={draft.currency} onInput={(v) => setField('currency', v)} mono ltr hint={t('parties.currency_hint')} />
-            <Field id="party-language" label={t('parties.language')} value={draft.language} onInput={(v) => setField('language', v)} ltr />
+            <Field id="party-currency" label={t('parties.currency')} value={draft.currency} onInput={(v) => setField('currency', v)} onBlur={check} error={errorFor('currency')} mono ltr hint={t('parties.currency_hint')} />
+            <Field id="party-language" label={t('parties.language')} value={draft.language} onInput={(v) => setField('language', v)} onBlur={check} error={errorFor('language')} ltr />
             <Field id="party-account" label={t('parties.default_account')} value={draft.default_account} onInput={(v) => setField('default_account', v)} mono ltr />
             <Field id="party-tax-code" label={t('parties.default_tax_code')} value={draft.default_tax_code} onInput={(v) => setField('default_tax_code', v)} mono ltr />
+            <Field id="party-unit" label={t('parties.default_unit')} value={draft.default_unit} onInput={(v) => setField('default_unit', v)} onBlur={check} error={errorFor('default_unit')} mono ltr />
           </div>
           <label class="check-row party-check">
             <input type="checkbox" checked={draft.personal_data} onChange={(event) => setField('personal_data', (event.target as HTMLInputElement).checked)} />
@@ -155,8 +193,34 @@ function PartyFormPage({ mode, party }: { mode: 'create' | 'edit'; party?: Party
           </label>
         </fieldset>
 
+        <fieldset class="party-group party-logo-group">
+          <legend>{t('parties.logo')}</legend>
+          <LogoField labelId="party-logo-label" name={draft.name || t('parties.new')} logo={logoDoc ? { documentId: logoDoc } : null} onChange={(id) => void pickLogo(id)} />
+          {logoError && <span class="field-error">{logoError}</span>}
+        </fieldset>
+
+        <TaxIdEditor idPrefix="party" taxIds={draft.tax_ids} onChange={(next) => setField('tax_ids', next)} error={errorFor('tax_ids')} disabled={saving} />
+
         <AddressEditor idPrefix="party" addresses={draft.addresses} onChange={(next) => setField('addresses', next)} error={errorFor('addresses')} disabled={saving} />
         <ContactEditor idPrefix="party" contacts={draft.contacts} onChange={(next) => setField('contacts', next)} error={errorFor('contacts')} disabled={saving} />
+
+        <fieldset class="party-group">
+          <legend>{t('parties.notes')}</legend>
+          <Field id="party-tags" label={t('parties.tags')} value={draft.tags} onInput={(v) => setField('tags', v)} onBlur={check} error={errorFor('tags')} hint={t('parties.tags_hint')} />
+          <div class="field party-field party-notes">
+            <label for="party-notes">{t('parties.notes')}</label>
+            <textarea
+              id="party-notes"
+              class="input"
+              rows={4}
+              value={draft.notes}
+              aria-invalid={errorFor('notes') ? 'true' : undefined}
+              onInput={(event) => setField('notes', (event.target as HTMLTextAreaElement).value)}
+              onBlur={check}
+            />
+            {errorFor('notes') && <span class="field-error">{errorFor('notes')}</span>}
+          </div>
+        </fieldset>
 
         <div class="form-actions">
           <a class="btn" href={cancelHref}>

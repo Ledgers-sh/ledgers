@@ -267,6 +267,7 @@ async fn resolve_vendor(
             .filter(|v| !v.is_empty()),
         iban: input.vendor_iban.clone(),
         needs_review: true,
+        logo_document_id: None,
     };
     Ok((vendor.clone(), Some(vendor), false))
 }

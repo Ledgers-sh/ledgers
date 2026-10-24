@@ -2,6 +2,8 @@
  * Customers and vendors: the pure rules the screens share. Nothing here calls
  * the server; the server's validators decide what is valid (see parties.validate).
  */
+import { t } from '../i18n';
+import { slugMessageKey } from './problems';
 import type {
   Party,
   PartyAddress,
@@ -10,6 +12,7 @@ import type {
   PartyDetail,
   PartyListQuery,
   PartyRoles,
+  PartyTaxId,
   PartyUpdateInput,
   PartyValidateInput,
 } from '../api/parties';
@@ -101,19 +104,37 @@ export interface ContactDraft {
   email: string;
   phone: string;
   role: string;
+  primary: boolean;
+}
+
+/** A further tax identifier as the form holds it. */
+export interface TaxIdDraft {
+  country: string;
+  kind: PartyTaxId['kind'];
+  value: string;
 }
 
 /** The form's state. Numbers and lists are text until they are sent. */
 export interface PartyDraft {
   name: string;
+  trading_name: string;
   roles: PartyRoles;
   vat_id: string;
+  tax_ids: TaxIdDraft[];
   tax_number: string;
+  registration_number: string;
+  website: string;
+  email: string;
+  phone: string;
   language: string;
   currency: string;
   payment_terms_days: string;
   default_account: string;
   default_tax_code: string;
+  default_unit: string;
+  /** Tags as the person typed them: separated by commas or semicolons. */
+  tags: string;
+  notes: string;
   personal_data: boolean;
   addresses: AddressDraft[];
   contacts: ContactDraft[];
@@ -124,37 +145,69 @@ export function emptyAddress(): AddressDraft {
 }
 
 export function emptyContact(): ContactDraft {
-  return { name: '', email: '', phone: '', role: '' };
+  return { name: '', email: '', phone: '', role: '', primary: false };
+}
+
+export function emptyTaxId(): TaxIdDraft {
+  return { country: '', kind: 'vat', value: '' };
 }
 
 export function emptyDraft(roles: PartyRoles = 'vendor', name = ''): PartyDraft {
   return {
     name,
+    trading_name: '',
     roles,
     vat_id: '',
+    tax_ids: [],
     tax_number: '',
+    registration_number: '',
+    website: '',
+    email: '',
+    phone: '',
     language: '',
     currency: '',
     payment_terms_days: '',
     default_account: '',
     default_tax_code: '',
+    default_unit: '',
+    tags: '',
+    notes: '',
     personal_data: false,
     addresses: [],
     contacts: [],
   };
 }
 
+/** Tags as the server keeps them: trimmed, lower-cased, without repeats, split on commas or semicolons. */
+export function splitTags(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/[,;]/)) {
+    const tag = raw.trim().toLowerCase();
+    if (tag !== '' && !out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
 export function draftFromParty(party: Party): PartyDraft {
   return {
     name: party.name,
+    trading_name: party.trading_name ?? '',
     roles: party.roles,
     vat_id: party.vat_id ?? '',
+    tax_ids: party.tax_ids.map((t) => ({ country: t.country, kind: t.kind, value: t.value })),
     tax_number: party.tax_number ?? '',
+    registration_number: party.registration_number ?? '',
+    website: party.website ?? '',
+    email: party.email ?? '',
+    phone: party.phone ?? '',
     language: party.language ?? '',
     currency: party.currency ?? '',
     payment_terms_days: party.payment_terms_days === null ? '' : String(party.payment_terms_days),
     default_account: party.default_account ?? '',
     default_tax_code: party.default_tax_code ?? '',
+    default_unit: party.default_unit ?? '',
+    tags: party.tags.join(', '),
+    notes: party.notes ?? '',
     personal_data: party.personal_data,
     addresses: party.addresses.map((a) => ({
       kind: a.kind ?? '',
@@ -164,7 +217,7 @@ export function draftFromParty(party: Party): PartyDraft {
       city: a.city,
       country: a.country,
     })),
-    contacts: party.contacts.map((c) => ({ name: c.name, email: c.email ?? '', phone: c.phone ?? '', role: c.role ?? '' })),
+    contacts: party.contacts.map((c) => ({ name: c.name, email: c.email ?? '', phone: c.phone ?? '', role: c.role ?? '', primary: c.primary })),
   };
 }
 
@@ -192,22 +245,39 @@ function contactOut(c: ContactDraft): PartyContact {
     email: c.email.trim() || null,
     phone: c.phone.trim() || null,
     role: c.role.trim() || null,
+    primary: c.primary,
   };
+}
+
+/** The further tax IDs that have any text, as the server names them. */
+function taxIdsOut(list: TaxIdDraft[]): PartyTaxId[] {
+  return list
+    .filter((t) => t.country.trim() !== '' || t.value.trim() !== '')
+    .map((t) => ({ country: t.country.trim().toUpperCase(), kind: t.kind, value: t.value.trim() }));
 }
 
 /** The full party a create sends. Blank optional text is sent as none. */
 export function createInputFromDraft(draft: PartyDraft): PartyCreateInput {
   return {
     name: draft.name.trim(),
+    trading_name: draft.trading_name.trim() || null,
     roles: draft.roles,
     vat_id: compactVat(draft.vat_id) || null,
+    tax_ids: taxIdsOut(draft.tax_ids),
     tax_number: draft.tax_number.trim() || null,
+    registration_number: draft.registration_number.trim() || null,
+    website: draft.website.trim() || null,
+    email: draft.email.trim() || null,
+    phone: draft.phone.trim() || null,
     language: draft.language.trim() || null,
     currency: draft.currency.trim().toUpperCase() || null,
     personal_data: draft.personal_data,
     payment_terms_days: termsValue(draft.payment_terms_days),
     default_account: draft.default_account.trim() || null,
     default_tax_code: draft.default_tax_code.trim() || null,
+    default_unit: draft.default_unit.trim() || null,
+    tags: splitTags(draft.tags),
+    notes: draft.notes.trim() || null,
     addresses: draft.addresses.map(addressOut),
     contacts: draft.contacts.map(contactOut),
   };
@@ -222,15 +292,24 @@ export function updateInputFromDraft(draft: PartyDraft): PartyUpdateInput {
   const created = createInputFromDraft(draft);
   return {
     name: draft.name.trim(),
+    trading_name: draft.trading_name.trim(),
     roles: draft.roles,
     vat_id: compactVat(draft.vat_id),
+    tax_ids: created.tax_ids,
     tax_number: draft.tax_number.trim(),
+    registration_number: draft.registration_number.trim(),
+    website: draft.website.trim(),
+    email: draft.email.trim(),
+    phone: draft.phone.trim(),
     language: draft.language.trim(),
     currency: draft.currency.trim().toUpperCase(),
     personal_data: draft.personal_data,
     payment_terms_days: created.payment_terms_days,
     default_account: draft.default_account.trim(),
     default_tax_code: draft.default_tax_code.trim(),
+    default_unit: draft.default_unit.trim(),
+    tags: created.tags,
+    notes: draft.notes.trim(),
     addresses: created.addresses,
     contacts: created.contacts,
   };
@@ -247,14 +326,29 @@ export function validateInputFromDraft(draft: PartyDraft, id?: string): PartyVal
     ...(terms === null ? {} : { payment_terms_days: terms }),
     addresses: draft.addresses.map(addressOut),
     contacts: draft.contacts.map(contactOut),
+    registration_number: draft.registration_number,
+    website: draft.website,
+    email: draft.email,
+    phone: draft.phone,
+    currency: draft.currency,
+    language: draft.language,
+    default_unit: draft.default_unit,
+    notes: draft.notes,
+    tags: splitTags(draft.tags),
+    tax_ids: taxIdsOut(draft.tax_ids),
   };
 }
 
-/** A map from a form field to the server's message for it. */
-export function fieldErrors(errors: { field: string; message: string }[]): Record<string, string> {
+/**
+ * A map from a form field to its message: the app's own words for the
+ * refusal's problem slug when it has them, the server's message otherwise.
+ */
+export function fieldErrors(errors: { field: string; message: string; slug?: string | null }[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const error of errors) {
-    if (!(error.field in out)) out[error.field] = error.message;
+    if (error.field in out) continue;
+    const key = error.slug ? slugMessageKey(error.slug) : null;
+    out[error.field] = key ? t(key) : error.message;
   }
   return out;
 }

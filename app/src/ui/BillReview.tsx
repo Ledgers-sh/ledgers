@@ -23,6 +23,7 @@ import { accountNameFromCatalogue } from '../i18n/chart';
 import { ConfirmDialog, ErrorBanner, Money, PageHead, Skeleton, useToasts, Toasts } from './common';
 import { Select } from './Select';
 import { PartyPicker } from './PartyPicker';
+import { Avatar } from './Avatar';
 import { ReadValue } from './PartyFields';
 import { formatIban } from '../lib/parties';
 import { t, useLocale, type MessageKey } from '../i18n';
@@ -254,6 +255,7 @@ export function BillReview({ billId }: { billId: string }) {
   return (
     <>
       <PageHead title={t('bills.review_title')}>
+        <Avatar name={current.vendor.name} logo={current.vendor.logo_document_id ? { documentId: current.vendor.logo_document_id } : null} size="xs" />{' '}
         {current.vendor.name}
         {current.invoice_number ? ` · ${current.invoice_number}` : ''}
       </PageHead>
