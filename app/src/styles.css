@@ -1359,3 +1359,24 @@ tr.open-month { background: var(--human-bg); }
   .logo-field input[type='file'] { min-height: 40px; }
   .dimension-switch button { min-height: 40px; }
 }
+
+/* Tab rows that scroll sideways: the cut edge fades so it is clear the row goes on. The fade is physical
+   in the gradient, so RTL gets its own rules (the tab row lives under the dir attribute set on main). */
+.tabs[data-fade='end'] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+.tabs[data-fade='start'] { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px); mask-image: linear-gradient(to right, transparent, #000 36px); }
+.tabs[data-fade='both'] { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+[dir='rtl'] .tabs[data-fade='end'] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); }
+[dir='rtl'] .tabs[data-fade='start'] { -webkit-mask-image: linear-gradient(to left, transparent, #000 36px); mask-image: linear-gradient(to left, transparent, #000 36px); }
+[dir='rtl'] .tabs[data-fade='both'] { -webkit-mask-image: linear-gradient(to left, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to left, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.tabs { scroll-padding-inline: 24px; }
+
+/* Phones: figures sit two to a row, with long amounts wrapping inside their tile rather than overflowing it.
+   One column only on the narrowest phones (under 340px). */
+@media (max-width: 640px) {
+  .figures, .unit-figure-values { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .figure, .unit-figure-values > div { min-width: 0; }
+  .figure .num, .unit-figure-values .num { white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+}
+@media (max-width: 339px) {
+  .figures, .unit-figure-values { grid-template-columns: minmax(0, 1fr); }
+}
