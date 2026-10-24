@@ -55,6 +55,7 @@ use ledgers_documents::commands::{
     DocumentsSetAnchors,
 };
 use ledgers_extract::provider::ModelSettings;
+use ledgers_invoice::commands::{CreditInvoice, IssueInvoice};
 use ledgers_ledger::journal::{JournalDraft, JournalKind};
 use ledgers_ledger::query::{self, EntryRecord};
 use ledgers_ledger::report;
@@ -996,6 +997,14 @@ impl Dispatch for ServerDispatch {
             "bills.confirm" => self.bills_confirm(deps, presented, request_id, input).await,
             "bills.discard" => {
                 self.execute(deps, &BillsDiscard, presented, request_id, input)
+                    .await
+            }
+            "invoices.issue" => {
+                self.execute(deps, &IssueInvoice, presented, request_id, input)
+                    .await
+            }
+            "invoices.credit" => {
+                self.execute(deps, &CreditInvoice, presented, request_id, input)
                     .await
             }
             "parties.list" => {

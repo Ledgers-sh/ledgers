@@ -2471,6 +2471,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "ledgers-invoice"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cratefield-core",
+ "cratefield-testing",
+ "ledgers-audit",
+ "ledgers-bills",
+ "ledgers-commands",
+ "ledgers-db",
+ "ledgers-demo",
+ "ledgers-ledger",
+ "ledgers-money",
+ "ledgers-storage",
+ "ledgers-subledger",
+ "ledgers-tax",
+ "pollster",
+ "schemars 1.2.3",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+]
+
+[[package]]
 name = "ledgers-ledger"
 version = "0.1.0"
 dependencies = [
@@ -2565,6 +2591,7 @@ dependencies = [
  "ledgers-extract",
  "ledgers-fx",
  "ledgers-group",
+ "ledgers-invoice",
  "ledgers-ledger",
  "ledgers-money",
  "ledgers-policy",

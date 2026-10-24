@@ -8639,6 +8639,134 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/invoices/{id}/credit-notes": {
+      "post": {
+        "operationId": "invoices_credit",
+        "description": "Execute command: invoices.credit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "invoices"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "invoices.credit",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers invoices credit",
+        "x-ledgers-mcp": "invoices_credit",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/invoices/{id}/credit-notes\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/invoices": {
+      "post": {
+        "operationId": "invoices_issue",
+        "description": "Execute command: invoices.issue",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "invoices"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "invoices.issue",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers invoices issue",
+        "x-ledgers-mcp": "invoices_issue",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/invoices\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/keys": {
       "post": {
         "operationId": "keys_create",

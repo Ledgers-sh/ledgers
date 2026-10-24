@@ -52,6 +52,8 @@ test('choosing a company writes it to the URL, resets the unit and period, and r
 
 test('every request after a switch carries the company header', async ({ page }) => {
   await openAs(page, '/?company=HALDEN01#/overview', 'many');
+  // Let the HALDEN01 page finish its own reads, so none of them is counted as a request after the switch.
+  await page.waitForLoadState('networkidle');
   const seen: { path: string; company: string | null }[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());

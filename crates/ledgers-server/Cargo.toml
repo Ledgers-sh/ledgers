@@ -30,6 +30,7 @@ ledgers-bank = { workspace = true }
 ledgers-bills = { workspace = true }
 ledgers-connect = { workspace = true }
 ledgers-subledger = { workspace = true }
+ledgers-invoice = { workspace = true }
 ledgers-group = { workspace = true }
 ledgers-extract = { workspace = true }
 hex = { workspace = true }

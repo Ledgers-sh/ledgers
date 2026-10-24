@@ -189,6 +189,8 @@ fn books_class(command: &str) -> Option<Class> {
         | "subledger.post-item"
         | "subledger.offset"
         | "subledger.write-off"
+        | "invoices.issue"
+        | "invoices.credit"
         | "parties.create"
         | "parties.update"
         | "parties.check_vat"
@@ -344,6 +346,8 @@ mod tests {
         ("subledger.offset", Class::Post),
         ("subledger.write-off", Class::Post),
         ("subledger.allocate", Class::MoneyOut),
+        ("invoices.issue", Class::Post),
+        ("invoices.credit", Class::Post),
         ("documents.register", Class::Post),
         ("documents.set_anchors", Class::Post),
         ("documents.delete", Class::Post),

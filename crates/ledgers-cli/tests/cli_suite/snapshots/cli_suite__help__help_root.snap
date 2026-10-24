@@ -25,6 +25,7 @@ Commands:
   entries            Commands under `ledgers entries`
   fiscal-years       Commands under `ledgers fiscal-years`
   groups             Commands under `ledgers groups`
+  invoices           Commands under `ledgers invoices`
   keys               Commands under `ledgers keys`
   numbering          Commands under `ledgers numbering`
   parties            Commands under `ledgers parties`
