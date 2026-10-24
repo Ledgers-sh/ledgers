@@ -15,5 +15,8 @@
 /.vscode/
 /.mcp.json
 
+# E-invoice validator downloads and samples (tools/einvoice-validate.sh)
+/.kosit/
+
 # Stray run logs (never part of the repo)
 *.log
