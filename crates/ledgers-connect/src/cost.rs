@@ -50,6 +50,26 @@ pub fn micro_of(text: &str) -> Result<i128, AmountError> {
     parse_decimal(text, MICRO_SCALE)
 }
 
+/// Parses a vendor amount that is either a decimal string or a JSON number, at
+/// [`MICRO_SCALE`]. A number is printed in fixed notation first, so an exponent
+/// form (`1e-7`) never reaches the decimal reader.
+///
+/// # Errors
+/// A sentence when the value is neither a number nor a plain decimal.
+pub fn micro_of_value(value: &serde_json::Value) -> Result<i128, String> {
+    match value {
+        serde_json::Value::String(text) => micro_of(text).map_err(|err| err.to_string()),
+        serde_json::Value::Number(number) => {
+            let fixed = format!(
+                "{:.9}",
+                number.as_f64().ok_or("a number that is not finite")?
+            );
+            micro_of(&fixed).map_err(|err| err.to_string())
+        }
+        _ => Err("an amount is a number or a decimal string".to_owned()),
+    }
+}
+
 /// Rounds `micro` (millionths) half up to the currency's minor units.
 #[must_use]
 pub fn to_minor(micro: i128, exponent: u32) -> i128 {
@@ -154,8 +174,25 @@ pub fn output(
             hosted_url: None,
         });
     }
+    // Usage weights are per period, not per currency, so a period with more
+    // than one booked currency has no single weight basis. Its usage is not
+    // written, and the split falls back to the default unit, with a note.
+    let mut multi_currency: Vec<String> = Vec::new();
+    for (period, _) in totals.keys() {
+        let currencies = totals.keys().filter(|(p, _)| p == period).count();
+        if currencies > 1 && !multi_currency.contains(period) {
+            multi_currency.push(period.clone());
+        }
+    }
+    for period in &multi_currency {
+        notes.push(format!(
+            "{period} has costs in more than one currency: resource weights are not written for it, so its cost books to the default unit"
+        ));
+    }
     for ((period, currency, kind, id), (micro, name)) in resources {
-        if !totals.contains_key(&(period.clone(), currency.clone())) {
+        if !totals.contains_key(&(period.clone(), currency.clone()))
+            || multi_currency.contains(&period)
+        {
             continue;
         }
         let quantity = to_minor(micro, exponent_of(&currency));
@@ -250,7 +287,27 @@ mod tests {
             .find(|i| i.currency == "USD")
             .expect("USD invoice");
         assert_eq!(usd.total_minor, 4000);
-        assert_eq!(out.usage.len(), 3);
+        // July has two currencies: weights are per period, so none are written.
+        assert!(out.usage.is_empty());
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("more than one currency"))
+        );
+
+        // A single-currency period keeps its weights.
+        let mut notes = Vec::new();
+        let single = output(
+            "aws",
+            "AWS",
+            &[
+                line("2026-07", "USD", "ledgers", 10_000_000),
+                line("2026-07", "USD", "sqeezin", 30_000_000),
+            ],
+            "2026-10-24",
+            &mut notes,
+        );
+        assert_eq!(single.usage.len(), 2);
         assert!(notes.is_empty());
     }
 
@@ -274,6 +331,23 @@ mod tests {
         assert_eq!(epoch_seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
         assert_eq!(epoch_seconds("2026-10-24T10:00:00Z"), Some(1_792_836_000));
         assert_eq!(epoch_seconds("nope"), None);
+    }
+
+    #[test]
+    fn numbers_and_strings_read_the_same_amount() {
+        assert_eq!(
+            micro_of_value(&serde_json::json!(12.5)).ok(),
+            Some(12_500_000)
+        );
+        assert_eq!(
+            micro_of_value(&serde_json::json!("12.5")).ok(),
+            Some(12_500_000)
+        );
+        assert_eq!(
+            micro_of_value(&serde_json::json!(0.000_000_1)).ok(),
+            Some(0)
+        );
+        assert!(micro_of_value(&serde_json::json!(true)).is_err());
     }
 
     #[test]

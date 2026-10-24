@@ -13,11 +13,13 @@
 pub mod allocation;
 pub mod anthropic;
 pub mod aws;
+pub mod azure;
 pub mod cloudflare;
 pub mod commands;
 pub mod connector;
 pub mod cost;
 pub mod demo;
+pub mod gcp;
 pub mod http;
 pub mod model;
 pub mod module;
@@ -27,6 +29,7 @@ pub mod secret;
 pub mod sigv4;
 pub mod split;
 pub mod store;
+pub mod supabase;
 pub mod vercel;
 
 /// The connections schema migrations, in apply order.
@@ -40,6 +43,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "connect_providers",
         include_str!("../migrations/sqlite/0002_connect_providers.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "connect_cloud",
+        include_str!("../migrations/sqlite/0003_connect_cloud.sql"),
     ),
 ];
 
@@ -55,6 +63,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0002",
         "connect_providers",
         include_str!("../migrations/postgres/0002_connect_providers.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0003",
+        "connect_cloud",
+        include_str!("../migrations/postgres/0003_connect_cloud.sql"),
     ),
 ];
 

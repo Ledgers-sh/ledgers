@@ -78,3 +78,60 @@ test('a failed connection test names the refusal and never shows the token', asy
   await expect(page.getByRole('alert').filter({ hasText: 'The test failed' })).toContainText('refused the token (403)');
   expect(await page.content()).not.toContain('vercel_TEST_TOKEN_0002');
 });
+
+test('Google Cloud takes the service account key as JSON and the export table, and sends the key once', async ({ page }) => {
+  const key = '{"client_email":"ledgers@billing-proj-test.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\\nTEST\\n-----END PRIVATE KEY-----\\n"}';
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Google Cloud' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('BigQuery Data Viewer');
+  await expect(form.getByLabel('Service account key (JSON)').first()).toHaveJSProperty('tagName', 'TEXTAREA');
+  await form.getByLabel('Name').fill('Google Cloud (test)');
+  await form.getByLabel('Project that runs the query').fill('billing-proj-test');
+  await form.getByLabel('Billing export dataset').fill('billing_export');
+  await form.getByLabel('Billing export table').fill('gcp_billing_export_v1');
+  await form.getByLabel('Service account key (JSON)').fill(key);
+  await form.getByLabel('Expense account').fill('6100');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Google Cloud (test) is connected' })).toBeVisible();
+  expect(connectState.credentialsReceived.at(-1)).toEqual({ service_account_json: key });
+  expect(await page.content()).not.toContain('BEGIN PRIVATE KEY');
+});
+
+test('Azure takes the client secret, and names the tenant, client and subscription IDs', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Microsoft Azure' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('Cost Management Reader');
+  await expect(form.getByLabel('Client secret')).toHaveAttribute('type', 'password');
+  await form.getByLabel('Name').fill('Azure (test)');
+  await form.getByLabel('Tenant ID').fill('11111111-2222-3333-4444-555555555555');
+  await form.getByLabel('Client (app) ID').fill('66666666-7777-8888-9999-aaaaaaaaaaaa');
+  await form.getByLabel('Subscription ID').fill('bbbbbbbb-cccc-dddd-eeee-ffffffffffff');
+  await form.getByLabel('Client secret').fill('AZURE_SECRET_TEST_0001');
+  await form.getByLabel('Expense account').fill('6100');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Azure (test) is connected' })).toBeVisible();
+  expect(connectState.credentialsReceived.at(-1)).toEqual({ client_secret: 'AZURE_SECRET_TEST_0001' });
+  await expect(page.locator('body')).not.toContainText('AZURE_SECRET_TEST_0001');
+});
+
+test('Supabase takes a personal access token and says that its prices are not booked', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Supabase' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('books no bills');
+  await form.getByLabel('Name').fill('Supabase (test)');
+  await form.getByLabel('Organization').fill('acme-labs');
+  await form.getByLabel('Token').fill('sbp_TEST_TOKEN_0001');
+  await form.getByLabel('Expense account').fill('6100');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Supabase (test) is connected' })).toBeVisible();
+  expect(connectState.tokensReceived).toContain('sbp_TEST_TOKEN_0001');
+});

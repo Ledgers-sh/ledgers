@@ -26,6 +26,8 @@ pub struct Recorded {
     routes: Vec<Route>,
     queue: Mutex<VecDeque<(u16, String)>>,
     pub requests: Mutex<Vec<(String, String, String)>>,
+    /// The body of each request, in order (empty for a GET).
+    pub bodies: Mutex<Vec<String>>,
 }
 
 impl Recorded {
@@ -34,6 +36,7 @@ impl Recorded {
             routes,
             queue: Mutex::new(VecDeque::new()),
             requests: Mutex::new(Vec::new()),
+            bodies: Mutex::new(Vec::new()),
         })
     }
 
@@ -49,6 +52,7 @@ impl Recorded {
                     .collect(),
             ),
             requests: Mutex::new(Vec::new()),
+            bodies: Mutex::new(Vec::new()),
         })
     }
 
@@ -76,6 +80,7 @@ impl HttpClient for Recorded {
             .lock()
             .unwrap()
             .push((request.method().to_string(), uri.clone(), auth));
+        self.bodies.lock().unwrap().push(body.clone());
         if let Some((status, answer)) = self.queue.lock().unwrap().pop_front() {
             return Ok(response(status, answer));
         }

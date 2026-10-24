@@ -1,0 +1,20 @@
+{
+  "kind": "bigquery#queryResponse",
+  "jobReference": {"projectId": "billing-proj-test", "jobId": "job_test_0001", "location": "US"},
+  "schema": {"fields": [
+    {"name": "period", "type": "STRING"},
+    {"name": "currency", "type": "STRING"},
+    {"name": "project_id", "type": "STRING"},
+    {"name": "project_name", "type": "STRING"},
+    {"name": "net_cost", "type": "STRING"}
+  ]},
+  "jobComplete": true,
+  "totalRows": "3",
+  "rows": [
+    {"f": [{"v": "2026-07"}, {"v": "USD"}, {"v": "ledgers-prod"}, {"v": "Ledgers production"}, {"v": "30.623456"}]},
+    {"f": [{"v": "2026-07"}, {"v": "USD"}, {"v": null}, {"v": null}, {"v": "1.5"}]},
+    {"f": [{"v": "2026-07"}, {"v": "EUR"}, {"v": "ledgers-prod"}, {"v": "Ledgers production"}, {"v": "-0.25"}]}
+  ],
+  "totalBytesProcessed": "1024",
+  "cacheHit": false
+}
