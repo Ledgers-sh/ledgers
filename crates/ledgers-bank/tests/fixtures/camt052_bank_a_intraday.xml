@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.08">
+  <BkToCstmrAcctRpt>
+    <Rpt>
+      <Id>INTRA-2026-03-15-A</Id>
+      <Acct>
+        <Id><IBAN>DE64100200300400500600</IBAN></Id>
+        <Ccy>EUR</Ccy>
+        <Svcr><FinInstnId><BIC>EXMPDEFFXXX</BIC></FinInstnId></Svcr>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">14285.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-03-14</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">14050.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-03-15</Dt></Dt>
+      </Bal>
+    <Ntry>
+      <NtryRef>001</NtryRef>
+      <Amt Ccy="EUR">500.00</Amt>
+      <CdtDbtInd>CRDT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-15</Dt></BookgDt>
+      <ValDt><Dt>2026-03-15</Dt></ValDt>
+      <AcctSvcrRef>INT260315001</AcctSvcrRef>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>PAY001</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">500.00</Amt></TxAmt></AmtDtls>
+        <RltdPties><Dbtr><Nm>Acme GmbH</Nm></Dbtr><DbtrAcct><Id><IBAN>DE25770880990011022033</IBAN></Id></DbtrAcct></RltdPties>
+        <RmtInf><Ustrd>Rechnung 4750 Lieferung</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <NtryRef>002</NtryRef>
+      <Amt Ccy="EUR">1234.50</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-15</Dt></BookgDt>
+      <ValDt><Dt>2026-03-15</Dt></ValDt>
+      <AcctSvcrRef>INT260315002</AcctSvcrRef>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>PAY002</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">1234.50</Amt></TxAmt></AmtDtls>
+        <RltdPties><Cdtr><Nm>Halden Supplies GmbH</Nm></Cdtr><CdtrAcct><Id><IBAN>DE60220330440550660770</IBAN></Id></CdtrAcct></RltdPties>
+        <RmtInf><Ustrd>Rechnung 4710 Material</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <NtryRef>003</NtryRef>
+      <Amt Ccy="EUR">500.00</Amt>
+      <CdtDbtInd>CRDT</CdtDbtInd>
+      <RvslInd>false</RvslInd>
+      <Sts><Cd>BOOK</Cd></Sts>
+      <BookgDt><Dt>2026-03-15</Dt></BookgDt>
+      <ValDt><Dt>2026-03-15</Dt></ValDt>
+      <AcctSvcrRef>INT260315003</AcctSvcrRef>
+      <NtryDtls><TxDtls>
+        <Refs><EndToEndId>DUP001</EndToEndId></Refs>
+        <AmtDtls><TxAmt><Amt Ccy="EUR">500.00</Amt></TxAmt></AmtDtls>
+        <RltdPties><Dbtr><Nm>Acme GmbH</Nm></Dbtr><DbtrAcct><Id><IBAN>DE25770880990011022033</IBAN></Id></DbtrAcct></RltdPties>
+        <RmtInf><Ustrd>Rechnung 4750 Lieferung</Ustrd></RmtInf>
+      </TxDtls></NtryDtls>
+    </Ntry>
+    </Rpt>
+  </BkToCstmrAcctRpt>
+</Document>

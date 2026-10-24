@@ -13,8 +13,12 @@ use serde::{Deserialize, Serialize};
 pub enum Format {
     /// ISO 20022 `camt.053` bank-to-customer statement (XML).
     Camt053,
+    /// ISO 20022 `camt.052` intraday account report (XML).
+    Camt052,
     /// SWIFT MT940 customer statement message.
     Mt940,
+    /// OFX/QFX bank statement (SGML 1.x or XML 2.x).
+    Ofx,
     /// A delimited text export with a saved column mapping.
     Csv,
 }
@@ -25,7 +29,9 @@ impl Format {
     pub const fn as_str(self) -> &'static str {
         match self {
             Format::Camt053 => "camt053",
+            Format::Camt052 => "camt052",
             Format::Mt940 => "mt940",
+            Format::Ofx => "ofx",
             Format::Csv => "csv",
         }
     }
@@ -35,7 +41,9 @@ impl Format {
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "camt053" => Some(Format::Camt053),
+            "camt052" => Some(Format::Camt052),
             "mt940" => Some(Format::Mt940),
+            "ofx" | "qfx" => Some(Format::Ofx),
             "csv" => Some(Format::Csv),
             _ => None,
         }
@@ -212,9 +220,16 @@ mod tests {
 
     #[test]
     fn format_names_round_trip() {
-        for format in [Format::Camt053, Format::Mt940, Format::Csv] {
+        for format in [
+            Format::Camt053,
+            Format::Camt052,
+            Format::Mt940,
+            Format::Ofx,
+            Format::Csv,
+        ] {
             assert_eq!(Format::parse(format.as_str()), Some(format));
         }
-        assert_eq!(Format::parse("ofx"), None);
+        // QFX is an alias for OFX
+        assert_eq!(Format::parse("qfx"), Some(Format::Ofx));
     }
 }

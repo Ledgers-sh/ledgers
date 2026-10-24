@@ -46,7 +46,9 @@ proptest! {
     #[test]
     fn arbitrary_bytes_never_panic_any_reader(bytes in proptest::collection::vec(any::<u8>(), 0..2048)) {
         let _ = parse::parse(Format::Camt053, &bytes, None, "EUR");
+        let _ = parse::parse(Format::Camt052, &bytes, None, "EUR");
         let _ = parse::parse(Format::Mt940, &bytes, None, "EUR");
+        let _ = parse::parse(Format::Ofx, &bytes, None, "EUR");
         let _ = parse::parse(Format::Csv, &bytes, Some(&mapping()), "EUR");
         let _ = parse::detect(&bytes);
     }
@@ -55,6 +57,8 @@ proptest! {
     fn arbitrary_text_never_panics_the_readers(text in "\\PC{0,400}") {
         let _ = parse::parse(Format::Mt940, text.as_bytes(), None, "EUR");
         let _ = parse::parse(Format::Camt053, text.as_bytes(), None, "EUR");
+        let _ = parse::parse(Format::Camt052, text.as_bytes(), None, "EUR");
+        let _ = parse::parse(Format::Ofx, text.as_bytes(), None, "EUR");
         let _ = parse::parse(Format::Csv, text.as_bytes(), Some(&mapping()), "EUR");
     }
 
