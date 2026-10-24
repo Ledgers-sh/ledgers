@@ -11145,6 +11145,318 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/units-summary\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/subledger/allocate": {
+      "post": {
+        "operationId": "subledger_allocate",
+        "description": "Execute command: subledger.allocate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.allocate",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger allocate",
+        "x-ledgers-mcp": "subledger_allocate",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/allocate\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/offset": {
+      "post": {
+        "operationId": "subledger_offset",
+        "description": "Execute command: subledger.offset",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.offset",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger offset",
+        "x-ledgers-mcp": "subledger_offset",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/offset\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/post-item": {
+      "post": {
+        "operationId": "subledger_post-item",
+        "description": "Execute command: subledger.post-item",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.post-item",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger post-item",
+        "x-ledgers-mcp": "subledger_post-item",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/post-item\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/reconcile": {
+      "get": {
+        "operationId": "subledger_reconcile",
+        "description": "Execute command: subledger.reconcile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.reconcile",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers subledger reconcile",
+        "x-ledgers-mcp": "subledger_reconcile",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/subledger/reconcile\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/subledger/write-off": {
+      "post": {
+        "operationId": "subledger_write-off",
+        "description": "Execute command: subledger.write-off",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.write-off",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger write-off",
+        "x-ledgers-mcp": "subledger_write-off",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/write-off\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/tax-settings": {
       "get": {
         "operationId": "tax_settings_get",

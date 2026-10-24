@@ -867,6 +867,44 @@ fn guard_statements(
     statements
 }
 
+/// The typed refusal for a manual post that touches an ar or ap account:
+/// the lines' accounts that carry the `ar` or `ap` tag, if any.
+///
+/// # Errors
+/// [`JournalError::ControlAccountPosting`] naming the accounts, or a read
+/// failure as [`JournalError::Database`].
+async fn reject_control_accounts(
+    db: &dyn Database,
+    company_id: &str,
+    raw: &RawEntry,
+) -> Result<(), JournalError> {
+    let mut control_accounts = Vec::new();
+    for line in &raw.lines {
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT number FROM account\n\
+                     WHERE company_id = ? AND number = ?\n\
+                     AND ((' ' || tags || ' ') LIKE '% ar %' OR (' ' || tags || ' ') LIKE '% ap %')"
+                    .to_owned(),
+                vec![
+                    SeaValue::from(company_id),
+                    SeaValue::from(line.account_number.as_str()),
+                ],
+            ))
+            .await?;
+        if rows.first().is_some() {
+            control_accounts.push(line.account_number.clone());
+        }
+    }
+    if control_accounts.is_empty() {
+        Ok(())
+    } else {
+        Err(JournalError::ControlAccountPosting {
+            accounts: control_accounts.join(", "),
+        })
+    }
+}
+
 /// Plans one validated entry for the executor: converts it to statements,
 /// returning just the statements (no execution). The executor appends the
 /// audit record and executes the combined batch.
@@ -901,6 +939,10 @@ pub async fn plan_post_entry(
 
     // The executor has already determined the company and fiscal year context.
     // We just plan the statements here. The executor will append the Allowed audit event.
+    // A manual post to an ar/ap account is refused here with the typed error,
+    // before the guard probe would abort the batch with a bare NOT NULL failure.
+    reject_control_accounts(db, company_id, &raw).await?;
+
     let ctx = PostContext {
         fiscal_year,
         entry_id: entry_id.to_string(),
