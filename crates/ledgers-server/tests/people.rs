@@ -77,7 +77,7 @@ fn rogue_key() -> SigningKey {
 
 fn jwks_for(key: &SigningKey, kid: &str) -> String {
     let verifying = VerifyingKey::from(key);
-    let point = verifying.to_encoded_point(false);
+    let point = verifying.to_sec1_point(false);
     json!({"keys": [{
         "kty": "EC", "crv": "P-256", "kid": kid, "alg": "ES256", "use": "sig",
         "x": b64url(point.x().expect("x")), "y": b64url(point.y().expect("y")),

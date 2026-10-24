@@ -14,7 +14,6 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, Mac};
-use p256::EncodedPoint;
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -260,8 +259,12 @@ pub fn parse_jwks(body: &[u8]) -> Result<Vec<PublishedKey>, OidcError> {
             .y
             .and_then(|v| decode_coordinate(&v))
             .ok_or_else(|| OidcError::Jwks(format!("key {kid} has a bad y coordinate")))?;
-        let point = EncodedPoint::from_affine_coordinates(&x.into(), &y.into(), false);
-        let key = VerifyingKey::from_encoded_point(&point)
+        // SEC1 uncompressed point: 0x04, then x and y.
+        let mut point = Vec::with_capacity(65);
+        point.push(0x04);
+        point.extend_from_slice(&x);
+        point.extend_from_slice(&y);
+        let key = VerifyingKey::from_sec1_bytes(&point)
             .map_err(|_| OidcError::Jwks(format!("key {kid} is not a point on P-256")))?;
         keys.push((kid, key));
     }
@@ -504,7 +507,7 @@ mod tests {
     }
 
     fn keys_for(signing: &SigningKey, kid: &str) -> Vec<PublishedKey> {
-        let point = VerifyingKey::from(signing).to_encoded_point(false);
+        let point = VerifyingKey::from(signing).to_sec1_point(false);
         let jwks = json!({"keys": [{
             "kty": "EC", "crv": "P-256", "kid": kid, "alg": "ES256", "use": "sig",
             "x": b64url(point.x().unwrap()), "y": b64url(point.y().unwrap()),

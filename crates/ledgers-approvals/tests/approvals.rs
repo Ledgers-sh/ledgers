@@ -206,7 +206,7 @@ impl VirtualAuthenticator {
 
     fn public_key_sec1_uncompressed(&self) -> Vec<u8> {
         let verifying_key = p256::ecdsa::VerifyingKey::from(&self.signer);
-        verifying_key.to_encoded_point(false).as_bytes().to_vec()
+        verifying_key.to_sec1_point(false).as_bytes().to_vec()
     }
 
     fn assert(&self, challenge: &[u8], rp_id: &str, origin: &str, flags: u8) -> PasskeyProof {
