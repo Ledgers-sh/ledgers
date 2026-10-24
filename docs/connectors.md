@@ -1,0 +1,300 @@
+# Connected sources
+
+Connected sources import what a vendor charges (invoices, cost, or usage) as
+draft bills, split across business units. The framework is in
+`crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
+`planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
+`supabase`, `openai` and `openrouter`, and `stripe`. Supabase books no money;
+OpenRouter books one invoice per day with no allocation; Stripe posts journal entries
+(not bills); the others book bills by month.
+
+## How a sync books money
+
+- **Credentials.** A connector with one field takes a `token`. A connector
+  with several takes a `credential` object holding exactly its fields. The
+  server seals the credential with `LEDGERS_CONNECT_KEY`, bound to the
+  connection id. The token is never returned, never logged and never echoed
+  in an error. A refused credential names the field, never the value.
+- **Test connection.** `connections.test` (in the app, the Test connection
+  button) reads the vendor for today with the stored credential and reports
+  whether it answered, with a sentence when it did not. It writes nothing: no
+  run, no bill, no usage.
+- **Sync window.** The first sync reads three calendar months. Vendors whose
+  totals move until the month closes (AWS, Vercel, Anthropic) book only months
+  that have ended, so a month is imported once, complete.
+- **Idempotent import.** Each invoice has a stable external id (for cost
+  connectors `aws-cost:{period}:{currency}`). A repeated sync of the same id
+  creates nothing; usage snapshots are replaced for each period read.
+- **Allocation.** Usage rows are the allocation key. A usage row's `quantity`
+  is its weight, and the invoice total splits across units in proportion to
+  the weight of each unit's resources (largest remainder, exact). A resource
+  with no allocation rule books to the connection's default unit and is listed
+  in the mapping queue, so nothing is silently lost to the wrong unit.
+- **Several currencies in one period.** Usage weights are kept per period, not per
+  currency. A period whose costs are in more than one currency therefore writes no
+  weights, and its invoices book to the default unit with a note, instead of letting
+  one currency's amounts distort another's split.
+- **Currency.** Amounts are read as exact decimals and summed at six decimals,
+  then rounded half up once to the currency's minor units. Any ISO 4217 code
+  Ledgers knows is booked in that currency; an unknown code is not booked and
+  a note says so.
+- **Errors.** A 401 or 403 is "refused the token", not retried. A 429 or 5xx is
+  retried up to three attempts with backoff, then reported. A timeout or
+  connection failure is retried the same way. A malformed answer is reported
+  with the field it failed on. A failed sync is recorded as a failed run.
+
+## AWS (`aws`)
+
+Cost Explorer `GetCostAndUsage`, daily, metric `UnblendedCost`, grouped by
+`SERVICE` and, with `tag_key`, by that tag. Source:
+<https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetCostAndUsage.html>
+
+**Create this IAM user and nothing else.** Cost Explorer does not support
+resource-level permissions, so the resource is `*`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "ce:GetCostAndUsage", "Resource": "*" }
+  ]
+}
+```
+
+Create one access key for that user and enter the key ID and the secret. No
+other permission is needed or should be granted.
+
+- **Config.** `tag_key` (optional): allocate by this tag's value instead of by
+  service. A cost with no value books to the resource `untagged`.
+- **Allocation keys.** `service` (the AWS service name) or `tag` (the tag value).
+- **Signing.** AWS Signature Version 4, written in `crates/ledgers-connect/src/sigv4.rs`
+  so the crate builds for wasm32 without the AWS SDK. The signer is checked
+  against the AWS signature test suite's `get-vanilla` vector.
+- **Throttling.** Cost Explorer can answer a throttled request with HTTP 400 and
+  a `ThrottlingException` body. The connector does not retry a 400, so a
+  throttled sync is a failed run to rerun later; it never books a partial month.
+
+## Vercel (`vercel`)
+
+The FOCUS billing charges, `GET https://api.vercel.com/v1/billing/charges`
+with `from` and `to` as ISO 8601 UTC. The answer is newline-delimited JSON,
+one FOCUS 1.3 charge per line. Source:
+<https://vercel.com/docs/rest-api/reference/endpoints/billing/list-focus-billing-charges>
+
+- **Token.** A personal access token of a team member with the **Billing**
+  (or Enterprise Viewer) role. The REST API documents no narrower token scope,
+  so this is the least privilege available today.
+- **Config.** `team_id` (optional): the team to bill, such as `team_abc123`.
+  Leave it empty for a personal account.
+- **What is booked.** `Usage`, `Tax`, `Adjustment` and `Credit` charges, in
+  `BillingCurrency`. A `Purchase` is prepaid credit bought; it is cash, not an
+  expense, so it is counted in a note and not booked.
+- **Allocation key.** The project, from `Tags.ProjectId`. A charge with no
+  project tag books to `unattributed`.
+- **Invoices.** Vercel invoices are not in the REST API, so no invoice is
+  imported. The charges are the source of truth.
+- **Not yet verified against a live account.** The schema documents `BilledCost`
+  as a number; the reader accepts a number or a decimal string. Check the first
+  live answer before relying on it.
+
+## Google Cloud (`gcp`)
+
+The Cloud Billing API cannot return costs, so the cost comes from the **Cloud
+Billing export to BigQuery** (the standard usage cost table). The connection names
+the table: `project` (the project that runs the query), `dataset` and `table`.
+Ledgers runs the query with the BigQuery REST `jobs.query` and reads the rows with
+`getQueryResults`, following page tokens and waiting for a job that is still
+running. Source: <https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query>
+
+- **Credential.** A service account JSON key. Create one key for a service account
+  with **BigQuery Data Viewer** on the export dataset and **BigQuery Job User** on
+  the project that runs the query, and paste the whole JSON file.
+- **Auth.** Ledgers signs an RS256 JWT with the key (`ring`, built for wasm32 with
+  `wasm32_unknown_unknown_js`) and exchanges it at `https://oauth2.googleapis.com/token`
+  for a token with the `bigquery.readonly` scope. The key is never sent anywhere else.
+- **What is booked.** Each month's net cost per project: `cost` plus `credits`,
+  summed as NUMERIC (the export's `cost` is a FLOAT64, so each row is converted first).
+- **Allocation key.** The project id. A row with no project books as `unattributed`.
+- **Export lag.** The export lags usage by hours; only completed months are booked.
+
+## Microsoft Azure (`azure`)
+
+The Cost Management query at subscription scope,
+`POST https://management.azure.com/subscriptions/{id}/providers/Microsoft.CostManagement/query?api-version=2025-03-01`,
+one request per calendar month: `type: Usage` (actual cost), `granularity: None`,
+`PreTaxCost` summed, grouped by `ResourceGroup`. The answer's columns are matched by
+name and `properties.nextLink` pages. Source:
+<https://learn.microsoft.com/rest/api/cost-management/query/usage>
+
+- **Credential.** A client secret of an app registration with the **Cost Management
+  Reader** role on the subscription (assign it on the subscription, not the tenant).
+- **Config.** `tenant_id`, `client_id` and `subscription_id`, each a GUID.
+- **Auth.** The Entra ID client-credentials flow at
+  `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` with
+  `scope=https://management.azure.com/.default`. The secret is percent-encoded in the
+  form body and never logged.
+- **Allocation key.** The resource group. A cost with no resource group books as
+  `unattributed`.
+- **Currency.** Read from the `Currency` column of each row.
+
+## Supabase (`supabase`): metrics only, no bills
+
+Supabase's Management API gives no cost in a currency for an organization, so this
+connector **books nothing** and creates no bills or usage rows. Each sync reads the
+organization's projects, then for each project (up to 25):
+
+- the add-ons it pays for (`GET /v1/projects/{ref}/billing/addons`), with their
+  price `amount` and `interval`. The API gives **no currency**, so these are shown
+  in the run notes as "amount without currency, not booked", and are never converted
+  or guessed; and
+- the last day's request counts (`usage.api-counts?interval=1day`), summed in the
+  run notes as counts, not money.
+
+The notes appear in the run history of the Connected sources screen. Because nothing
+is split, no allocation rule applies to Supabase. Source: the Management API's
+OpenAPI document at <https://api.supabase.com/api/v1-json>.
+
+- **Credential.** A personal access token with read access to the organization.
+  Supabase documents scoped tokens (limited to chosen organizations and permissions);
+  use one limited to the organization. The reference does not name the exact
+  permissions, so no permission name is given here.
+- **Config.** `organization`, the organization slug.
+- **Limit.** Projects beyond the first 25 are counted in a note, not read.
+
+## OpenAI (`openai`): needs an admin key
+
+The organization costs API, `GET https://api.openai.com/v1/organization/costs`, with
+`start_time` and `end_time` (Unix seconds), `bucket_width=1d`, `group_by=project_id`,
+paged by `page` while `has_more`. Each bucket's results carry `amount` (`value` in
+dollars, `currency` in lower case) and `project_id` (null when unattributed).
+Source: <https://platform.openai.com/docs/api-reference/usage/costs>
+
+- **Credential.** An **admin API key**, created by an organization owner or admin under
+  Settings, Organization, Admin API keys. A project key cannot read organization costs.
+- **Allocation key.** The project. A cost with no project books as `unattributed`.
+- **Months.** A month is booked once it has ended, as for the other cost connectors.
+- **Not verified live.** The costs reference page could not be checked against a live
+  admin key when this was written. If OpenAI answers 404 for a valid admin key, the
+  sync is recorded as a failed run with that status, and nothing is booked.
+
+## OpenRouter (`openrouter`)
+
+The activity endpoint, `GET https://openrouter.ai/api/v1/activity?date=YYYY-MM-DD`, one
+request per UTC day. Each row has `usage` (dollars, a number), `requests`, `model`,
+`provider_name` and `endpoint_id`. It needs a **management key** (created at
+<https://openrouter.ai/settings/management-keys>); a regular key is refused.
+Source: <https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity>
+
+- **What is booked.** Each completed UTC day in the window is one invoice,
+  `openrouter-usage:{date}:USD`, booked once and skipped on later syncs. Days with no
+  spend book nothing.
+- **Retention limit.** The endpoint keeps only the last 30 completed days, so a whole
+  month is never in reach. That is why the books are per day, not per month.
+- **Allocation.** Not yet. Allocation by model needs usage weights per day, and the
+  framework keeps usage per month. OpenRouter days therefore write no usage rows and
+  book to the connection's default unit, with a note saying so. Per-model totals per day
+  appear in the run notes.
+- **Test connection.** Today is not a completed day, so the test reads yesterday's
+  activity to prove the key, and books nothing.
+
+## Stripe (`stripe`): balance transactions as journal entries
+
+Stripe is a payment source, not a cost source. Its books are journal entries, not
+bills. The source of truth is the **balance transactions**:
+`GET https://api.stripe.com/v1/balance_transactions` with `limit=100`, `created[gte]`
+and `created[lt]` for the window, `expand[]=data.source` (so each row carries its
+charge or refund), paged by `starting_after` while `has_more`. Source:
+<https://docs.stripe.com/api/balance_transactions/list>
+
+Each balance transaction with amount `A`, fee `F` and net `N = A - F` becomes one
+balanced entry in its **settlement currency** (the balance transaction's currency):
+
+| reporting category | revenue account | fee expense | clearing account |
+|---|---|---|---|
+| `charge` | `A` credit | `F` debit | `N` debit |
+| `refund`, `dispute` | `A` (reverses revenue) | `F` debit | `N` (credit when negative) |
+| `fee` | none | `A` (the fee charged) | `A` credit |
+| anything else | suspense account | `F` debit | `N` debit |
+
+`payout` posts **no entry here**. A payout moves money from the clearing account to
+the bank, and it is booked when its bank line is matched, through the bank rule
+(`bank.transactions.post`). The clearing account reaches zero when the payout's bank
+side is booked, so a charge, then a refund, then a payout leaves it at zero. The
+server test `stripe_ledger.rs` checks exactly this, through the bank module's own
+suggestion and posting path.
+
+- **Presentment.** The presentment currency and amount (from `data.source`) go in the
+  entry's description, for example `presented as USD 11000 (minor units)`. No FX line
+  is booked: the books are in the settlement currency only.
+- **Allocation.** The line's resource is the charge's `product` (or `unit`) metadata. The
+  connection's allocation rules map it to a business unit; otherwise the default unit.
+- **Idempotency.** Each entry's id is `stripe-bt:{balance transaction id}`. The ledger
+  refuses a second entry with the same external id, the sync checks before it posts,
+  and the table `connector_ledger_line` records the link. A repeat sync posts nothing.
+- **Postings.** Entries are posted one at a time through `journal.post_entry` (exposed as
+  `entries.post`), because each posting numbers its entry from the counter it reads.
+  Refunds are their own entries, not reversals of the charge, because a Stripe refund is
+  a new event. `entries.transfer` is not used.
+- **Unknown categories.** Anything not in the table goes to the suspense account, with a
+  note in the run. It is never dropped. An approval item in the Approvals inbox is added
+  in the next release.
+- **Connect.** Set `stripe_account` to a connected account id (`acct_…`) to read that
+  account's balance transactions with the `Stripe-Account` header. Leave it empty for the
+  platform's own account.
+- **Limits and throttling.** A window of more than 20,000 transactions is read up to that
+  limit, with a note; a later sync reads the rest. A `429` is retried with backoff, up to
+  three attempts, then reported as a failed run.
+
+**Credential.** A **restricted API key** with read access only to Balance, Charges,
+Refunds, Payouts, Disputes and Invoices, and no other resource. For Connect, grant the
+key's Connect permission only when it reads connected accounts.
+
+**Config.** `clearing_account` (the Stripe balance, a postable asset),
+`revenue_account` (charges and their reversals), `suspense_account` (unknown
+categories), `expense_account` (fees), and the optional `stripe_account`. Each account is
+checked against the chart when the connection is saved: it must exist, not be archived,
+and not be a heading.
+
+**Suggested bank rule.** When the connection is created, Ledgers proposes a bank rule:
+a payout is an inflow whose description contains `stripe` (amount at least 1 minor unit),
+which books to the clearing account. The rule is proposed by the connector and waits in
+Bank, Rules until a person enables it.
+
+## Providers not built, and why
+
+- **MiniMax.** No billing or usage API is documented. Balance and usage are on the
+  console pages only, so there is nothing to read.
+- **Z.AI (GLM).** No billing or usage query API is documented (the docs point to the
+  console). Undocumented endpoints in community tools are not used.
+- **Mistral.** The admin usage endpoint (`/v1/admin/usage`) exists, but it is Enterprise
+  only and in preview, and it reports per workspace, with no split by key. It is left out
+  until it is generally available for the plans Ledgers is used on.
+- **Google Gemini.** The Gemini API has no spend API. Gemini costs appear in the Cloud
+  Billing export, so they come through the **Google Cloud** connector (`gcp`), filtered
+  to the Gemini API service. No separate Gemini connector is needed.
+- **Other providers researched** (DeepSeek, Groq, Cohere, Perplexity, xAI, Together,
+  Fireworks): the research is kept in `docs/connectors/llm-providers.md`. Each is left
+  for a later slice; the reasons are recorded there.
+
+## Open item: Supabase add-on prices
+
+Supabase add-on prices carry an amount and an interval but no currency. Nothing is
+booked in a currency until a live account's add-on response has been checked for a
+currency field. Until then, Supabase reports these prices as run notes only.
+
+## Deploy notes
+
+- Migration `0002` widens the `connector` check to include `aws` and `vercel`;
+  migration `0003` adds `gcp`, `azure` and `supabase`; migration `0004` adds `openai`
+  and `openrouter`; migration `0005` adds `stripe` and the ledger idempotency table
+  `connector_ledger_line` (D1 mirror `0044`).
+  SQLite cannot alter a check constraint, so the migration copies the rows into a
+  new table and renames it into place. It defers foreign-key checks with
+  `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores
+  `foreign_keys = OFF`. The file runs as one transaction, natively and on D1.
+- The D1 mirror (`crates/ledgers-server/d1/migrations/0041_ledgers_connect_connect_providers.sql`)
+  is the same SQL. `crates/ledgers-server/tests/d1_connect_rebuild.rs` applies it, as one
+  batch in a transaction, to a database holding a connection, a credential and a run, and
+  checks that the rows survive and the foreign-key check is empty.
+- `LEDGERS_CONNECT_KEY` must be set on the server for any connection to hold a
+  credential.

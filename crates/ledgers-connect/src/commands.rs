@@ -38,6 +38,17 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
     match connector {
         "cloudflare" => &["account_id"],
         "planetscale" => &["organization", "currency"],
+        "aws" => &["tag_key"],
+        "vercel" => &["team_id"],
+        "stripe" => &[
+            "clearing_account",
+            "revenue_account",
+            "suspense_account",
+            "stripe_account",
+        ],
+        "gcp" => &["project", "dataset", "table"],
+        "azure" => &["tenant_id", "client_id", "subscription_id"],
+        "supabase" => &["organization"],
         _ => &[],
     }
 }
@@ -244,6 +255,50 @@ fn check_config(connector: &dyn Connector, config: &Value) -> Result<(), Command
     connector.validate_config(config).map_err(invalid)
 }
 
+/// The ledger accounts a connector posts to, by config key, for connectors that post entries.
+fn ledger_account_keys(connector: &str) -> &'static [&'static str] {
+    match connector {
+        "stripe" => &[
+            "clearing_account",
+            "revenue_account",
+            "suspense_account",
+            "expense_account",
+        ],
+        _ => &[],
+    }
+}
+
+/// Checks that each ledger account a connection names exists, is not archived,
+/// and is postable (a leaf of the chart, not a heading).
+async fn check_accounts(
+    db: &dyn Database,
+    company_id: &str,
+    connector: &dyn Connector,
+    config: &Value,
+) -> Result<(), CommandError> {
+    for key in ledger_account_keys(connector.id()) {
+        let Some(number) = config.get(*key).and_then(Value::as_str) else {
+            continue;
+        };
+        let account = ledgers_ledger::store::find_account(db, company_id, number)
+            .await
+            .map_err(|err| invalid(err.to_string()))?
+            .ok_or_else(|| invalid(format!("{key}: account {number} does not exist")))?;
+        if account.archived {
+            return Err(invalid(format!("{key}: account {number} is archived")));
+        }
+        let heading = ledgers_ledger::store::has_children(db, company_id, number)
+            .await
+            .map_err(|err| invalid(err.to_string()))?;
+        if heading {
+            return Err(invalid(format!(
+                "{key}: account {number} is a heading; post to a leaf account"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn check_name(name: &str) -> Result<String, CommandError> {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed.chars().count() > MAX_NAME {
@@ -376,6 +431,7 @@ impl Command for ConnectionsCreate {
         let connector = connector_or_refuse(&input.connector)?;
         check_name(&input.name)?;
         check_config(connector.as_ref(), &input.config)?;
+        check_accounts(db, &ctx.company_id, connector.as_ref(), &input.config).await?;
         require_unit(db, &ctx.company_id, &input.default_unit).await?;
         if input.demo {
             if !input.sealed_credential.is_empty() {
@@ -509,6 +565,7 @@ impl Command for ConnectionsUpdate {
         if let Some(config) = &input.config {
             let connector = connector_or_refuse(&current.connector)?;
             check_config(connector.as_ref(), config)?;
+            check_accounts(db, &ctx.company_id, connector.as_ref(), config).await?;
         }
         if let Some(unit) = &input.default_unit {
             require_unit(db, &ctx.company_id, unit).await?;
@@ -677,6 +734,21 @@ pub struct SyncInput {
     /// Who ran the sync (server-filled).
     #[serde(default)]
     pub created_by: String,
+    /// The journal entries the server posted for this sync's planned entries, to
+    /// record against their provider ids (server-filled).
+    #[serde(default)]
+    pub ledger_links: Vec<LedgerLink>,
+}
+
+/// A provider transaction and the journal entry it was posted as.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct LedgerLink {
+    /// The provider's id for the transaction (the idempotency key).
+    pub provider_id: String,
+    /// The journal entry id the transaction posted as.
+    pub entry_id: String,
+    /// The entry's posting date, `YYYY-MM-DD`.
+    pub posting_date: String,
 }
 
 /// `connections.sync_now`: a person only. Writes the run, the invoices as
@@ -937,6 +1009,43 @@ impl Command for ConnectionsSyncNow {
                 "{} resource(s) have no allocation rule and booked to the default unit: {}",
                 unmapped_seen.len(),
                 unmapped_seen.join(", ")
+            ));
+        }
+        // Ledger links: the server posted each planned entry, and records here which
+        // provider transaction it came from. A transaction already recorded is skipped.
+        let known_links: Vec<String> = db
+            .query(&Statement::with_values(
+                "SELECT provider_id FROM connector_ledger_line WHERE company_id = ? AND connection_id = ?".to_owned(),
+                vec![SeaValue::from(ctx.company_id.as_str()), SeaValue::from(connection.id.as_str())],
+            ))
+            .await?
+            .rows
+            .iter()
+            .filter_map(|row| row.get::<String>("provider_id"))
+            .collect();
+        let mut ledger_recorded = 0_usize;
+        for link in &input.ledger_links {
+            if known_links.contains(&link.provider_id) || link.entry_id.is_empty() {
+                continue;
+            }
+            statements.push(Statement::with_values(
+                "INSERT INTO connector_ledger_line (id, company_id, connection_id, provider_id, entry_id, posting_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)".to_owned(),
+                vec![
+                    SeaValue::from(derive_id(&run_id, &format!("ledger/{}", link.provider_id))),
+                    SeaValue::from(ctx.company_id.as_str()),
+                    SeaValue::from(connection.id.as_str()),
+                    SeaValue::from(link.provider_id.as_str()),
+                    SeaValue::from(link.entry_id.as_str()),
+                    SeaValue::from(link.posting_date.as_str()),
+                    SeaValue::from(ctx.now.as_str()),
+                ],
+            ));
+            ledger_recorded += 1;
+        }
+        if ledger_recorded > 0 {
+            notes.push(format!(
+                "{ledger_recorded} journal entr{} posted from this sync",
+                if ledger_recorded == 1 { "y" } else { "ies" }
             ));
         }
         statements.push(Statement::with_values(
@@ -1756,4 +1865,24 @@ impl Command for ReportsCostsByUnit {
             .collect();
         Ok(Plan::with_output(CostsOutput { lines }))
     }
+}
+
+/// The input of `connections.test`: the connection to try.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct TestInput {
+    /// The connection whose credential is tried.
+    pub connection_id: String,
+}
+
+/// The output of `connections.test`. Nothing is written: the test reads the
+/// vendor for the current day and reports whether the credential and its scope
+/// work. `error` is set when they do not, with no credential in it.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct TestOutput {
+    /// Whether the vendor answered for the test window.
+    pub ok: bool,
+    /// What the vendor said about the test, as sentences.
+    pub notes: Vec<String>,
+    /// Why the test failed, when it failed.
+    pub error: Option<String>,
 }

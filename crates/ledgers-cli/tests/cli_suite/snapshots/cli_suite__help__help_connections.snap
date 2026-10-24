@@ -12,6 +12,7 @@ Commands:
   list      connections.list
   runs      connections.runs
   sync-now  connections.sync_now
+  test      connections.test
   update    connections.update
   help      Print this message or the help of the given subcommand(s)
 

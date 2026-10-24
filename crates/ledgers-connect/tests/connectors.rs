@@ -22,6 +22,7 @@ fn ctx<'a>(
     SyncContext {
         http,
         credential,
+        now: "2026-10-24T10:00:00Z",
         config,
         since,
         until,

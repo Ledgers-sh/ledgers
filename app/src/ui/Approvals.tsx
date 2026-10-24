@@ -20,6 +20,7 @@ import {
 import { intlLocale, t, tn, tRich, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { ConfirmDialog, Empty, ErrorBanner, PageHead, Skeleton, describeError } from './common';
+import { TabRow } from './TabRow';
 
 const STATUS_KEY: Record<ApprovalStatus, MessageKey> = {
   pending: 'approvals.status_pending',
@@ -159,7 +160,7 @@ function ApprovalsInbox() {
     <>
       <PageHead title={t('approvals.title')}>{t('approvals.intro')}</PageHead>
 
-      <div class="tabs" role="tablist" aria-label={t('approvals.tabs_label')}>
+      <TabRow tablist active={tab} label={t('approvals.tabs_label')}>
         {(['pending', 'history'] as const).map((name) => (
           <button
             key={name}
@@ -177,7 +178,7 @@ function ApprovalsInbox() {
             {name === 'pending' ? t('approvals.tab_pending') : t('approvals.tab_history')}
           </button>
         ))}
-      </div>
+      </TabRow>
 
       <section id="approvals-panel" class="panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
         {notice && (

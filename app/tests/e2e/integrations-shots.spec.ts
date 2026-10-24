@@ -58,6 +58,12 @@ for (const viewport of viewports) {
       await expect(page.locator('.connect-form')).toBeVisible();
       await settle(page);
       await page.locator('.connect-form').screenshot({ path: path.join(outDir, `connect-form-${name}.png`) });
+
+      // The AWS form: two credential fields and the least-privilege IAM help.
+      await page.locator('.gallery-card', { hasText: 'Amazon Web Services' }).locator('button').first().click();
+      await expect(page.locator('.connect-form')).toContainText('ce:GetCostAndUsage');
+      await settle(page);
+      await page.locator('.connect-form').screenshot({ path: path.join(outDir, `connect-form-aws-${name}.png`) });
     });
   }
 }

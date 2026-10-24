@@ -8,11 +8,13 @@ import {
   connectionsDelete,
   connectionsList,
   connectionsSyncNow,
+  connectionsTest,
   type AllocationRule,
   type AllocationListOutput,
   type ConnectionView,
   type ConnectorView,
   type RunView,
+  type TestConnectionOutput,
 } from '../api/connect';
 import { ApiError } from '../api/client';
 import { useSession } from '../session';
@@ -43,10 +45,83 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://planetscale.com/docs/api/reference/service-tokens',
     tokenLabel: 'integrations.create_token',
   },
+  aws: {
+    imports: 'integrations.aws_imports',
+    scopes: 'integrations.scopes_aws',
+    tokenUrl: 'https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html',
+    tokenLabel: 'integrations.create_token',
+  },
+  vercel: {
+    imports: 'integrations.vercel_imports',
+    scopes: 'integrations.scopes_vercel',
+    tokenUrl: 'https://vercel.com/docs/rest-api/reference/welcome#authentication',
+    tokenLabel: 'integrations.create_token',
+  },
+  gcp: {
+    imports: 'integrations.gcp_imports',
+    scopes: 'integrations.scopes_gcp',
+    tokenUrl: 'https://cloud.google.com/iam/docs/keys-create-delete',
+    tokenLabel: 'integrations.create_key',
+  },
+  azure: {
+    imports: 'integrations.azure_imports',
+    scopes: 'integrations.scopes_azure',
+    tokenUrl: 'https://learn.microsoft.com/azure/cost-management-billing/costs/assign-access-acm-data-reader',
+    tokenLabel: 'integrations.create_token',
+  },
+  supabase: {
+    imports: 'integrations.supabase_imports',
+    scopes: 'integrations.scopes_supabase',
+    tokenUrl: 'https://supabase.com/dashboard/account/tokens',
+    tokenLabel: 'integrations.create_token',
+  },
+  stripe: {
+    imports: 'integrations.stripe_imports',
+    scopes: 'integrations.scopes_stripe',
+    tokenUrl: 'https://docs.stripe.com/keys#create-restricted-api-secret-key',
+    tokenLabel: 'integrations.create_restricted_key',
+  },
+  openai: {
+    imports: 'integrations.openai_imports',
+    scopes: 'integrations.scopes_openai',
+    tokenUrl: 'https://platform.openai.com/settings/organization/admin-keys',
+    tokenLabel: 'integrations.create_admin_key',
+  },
+  openrouter: {
+    imports: 'integrations.openrouter_imports',
+    scopes: 'integrations.scopes_openrouter',
+    tokenUrl: 'https://openrouter.ai/settings/management-keys',
+    tokenLabel: 'integrations.create_management_key',
+  },
 };
 
+/** The label of each credential field the connectors name. */
+const CREDENTIAL_LABELS: Record<string, MessageKey> = {
+  access_key_id: 'integrations.cred_access_key_id',
+  secret_access_key: 'integrations.cred_secret_access_key',
+  client_secret: 'integrations.cred_client_secret',
+  service_account_json: 'integrations.cred_service_account',
+};
+
+/** Config keys the form asks for as plain text, when a connector names them. */
+const GENERIC_CONFIG: Record<string, MessageKey> = {
+  project: 'integrations.gcp_project',
+  dataset: 'integrations.gcp_dataset',
+  table: 'integrations.gcp_table',
+  tenant_id: 'integrations.azure_tenant',
+  client_id: 'integrations.azure_client',
+  subscription_id: 'integrations.azure_subscription',
+  clearing_account: 'integrations.stripe_clearing',
+  revenue_account: 'integrations.stripe_revenue',
+  suspense_account: 'integrations.stripe_suspense',
+  stripe_account: 'integrations.stripe_connect',
+};
+
+/** Generic config keys that may stay empty. */
+const OPTIONAL_CONFIG = new Set<string>(['stripe_account']);
+
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
-const COMING_SOON = ['MiniMax', 'OpenAI', 'GitHub', 'Stripe', 'Polar', 'Google Workspace', 'AWS', 'Vercel', 'Resend'];
+const COMING_SOON = ['MiniMax', 'GitHub', 'Polar', 'Google Workspace', 'Resend'];
 
 function Mark({ connector }: { connector: string }) {
   const mark = BRAND_MARKS[connector];
@@ -221,6 +296,10 @@ function ConnectForm({
   const [vat, setVat] = useState('');
   const [defaultUnit, setDefaultUnit] = useState(units[0]?.code ?? '');
   const [token, setToken] = useState('');
+  const [credentials, setCredentials] = useState<Record<string, string>>({});
+  const [tagKey, setTagKey] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [generic, setGeneric] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -228,12 +307,23 @@ function ConnectForm({
   const needsCloudAccount = connector.config_keys.includes('account_id');
   const needsOrganization = connector.config_keys.includes('organization');
   const needsCurrency = connector.config_keys.includes('currency');
+  const needsTagKey = connector.config_keys.includes('tag_key');
+  const needsTeamId = connector.config_keys.includes('team_id');
+  const tokenMode = connector.credential_fields.length === 1 && connector.credential_fields[0].name === 'token';
+  const genericKeys = connector.config_keys.filter((key) => key in GENERIC_CONFIG);
 
   const submit = async (event: Event) => {
     event.preventDefault();
     const next: Record<string, string> = {};
     if (name.trim() === '' || name.trim().length > 80) next.name = 'integrations.name_error';
-    if (token.trim() === '') next.token = 'integrations.token_error';
+    if (tokenMode && token.trim() === '') next.token = 'integrations.token_error';
+    if (!tokenMode && connector.credential_fields.some((field) => (credentials[field.name] ?? '').trim() === '')) {
+      next.credential = 'integrations.credential_error';
+    }
+    const genericKeys = connector.config_keys.filter((key) => key in GENERIC_CONFIG);
+    if (genericKeys.some((key) => !OPTIONAL_CONFIG.has(key) && (generic[key] ?? '').trim() === '')) {
+      next.generic = 'integrations.config_required';
+    }
     if (account.trim() === '') next.account = 'integrations.expense_hint';
     if (needsCloudAccount && cloudAccount.trim() === '') next.cloudAccount = 'integrations.account_id';
     if (needsOrganization && organization.trim() === '') next.organization = 'integrations.organization';
@@ -245,6 +335,15 @@ function ConnectForm({
     if (needsCloudAccount) config.account_id = cloudAccount.trim();
     if (needsOrganization) config.organization = organization.trim();
     if (needsCurrency) config.currency = currency.trim().toUpperCase();
+    if (needsTagKey && tagKey.trim() !== '') config.tag_key = tagKey.trim();
+    if (needsTeamId && teamId.trim() !== '') config.team_id = teamId.trim();
+    for (const key of genericKeys) {
+      const value = (generic[key] ?? '').trim();
+      if (value !== '' || !OPTIONAL_CONFIG.has(key)) config[key] = value;
+    }
+    const secret = tokenMode
+      ? { token: token.trim() }
+      : { credential: Object.fromEntries(connector.credential_fields.map((field) => [field.name, (credentials[field.name] ?? '').trim()])) };
     setBusy(true);
     setFailure(null);
     try {
@@ -253,15 +352,17 @@ function ConnectForm({
         name: name.trim(),
         config,
         default_unit: defaultUnit,
-        token: token.trim(),
+        ...secret,
       });
       setToken('');
+      setCredentials({});
       onConnected(created);
     } catch (error) {
       setFailure(error);
     } finally {
       setBusy(false);
       setToken('');
+      setCredentials({});
     }
   };
 
@@ -303,6 +404,34 @@ function ConnectForm({
           <span id="connect-currency-hint" class="hint">{t('integrations.currency_hint')}</span>
         </label>
       )}
+      {genericKeys.map((key) => (
+        <label class="field" key={key}>
+          <span class="field-label">{t(GENERIC_CONFIG[key])}</span>
+          <input
+            class="input mono"
+            spellcheck={false}
+            autocomplete="off"
+            value={generic[key] ?? ''}
+            onInput={(e) => setGeneric({ ...generic, [key]: (e.target as HTMLInputElement).value })}
+            aria-invalid={errors.generic ? 'true' : undefined}
+          />
+          {errors.generic && <span class="field-error">{t(errors.generic as MessageKey)}</span>}
+        </label>
+      ))}
+      {needsTagKey && (
+        <label class="field">
+          <span class="field-label">{t('integrations.tag_key')}</span>
+          <input class="input mono" value={tagKey} onInput={(e) => setTagKey((e.target as HTMLInputElement).value)} aria-describedby="connect-tag-hint" />
+          <span id="connect-tag-hint" class="hint">{t('integrations.tag_key_hint')}</span>
+        </label>
+      )}
+      {needsTeamId && (
+        <label class="field">
+          <span class="field-label">{t('integrations.team_id')}</span>
+          <input class="input mono" value={teamId} onInput={(e) => setTeamId((e.target as HTMLInputElement).value)} aria-describedby="connect-team-hint" />
+          <span id="connect-team-hint" class="hint">{t('integrations.team_id_hint')}</span>
+        </label>
+      )}
       <label class="field">
         <span class="field-label">{t('integrations.expense_account')}</span>
         <input class="input mono" value={account} onInput={(e) => setAccount((e.target as HTMLInputElement).value)} aria-describedby="connect-account-hint" aria-invalid={errors.account ? 'true' : undefined} />
@@ -318,6 +447,35 @@ function ConnectForm({
         <Select id="connect-unit" labelledBy="connect-unit-label" value={defaultUnit} options={unitOptions} onChange={setDefaultUnit} />
         <span class="hint">{t('integrations.default_unit_hint')}</span>
       </div>
+      {!tokenMode &&
+        connector.credential_fields.map((field) => (
+          <label class="field" key={field.name}>
+            <span class="field-label">{t(CREDENTIAL_LABELS[field.name] ?? 'integrations.token')}</span>
+            {field.name === 'service_account_json' ? (
+              <textarea
+                class="input mono"
+                rows={6}
+                spellcheck={false}
+                autocomplete="off"
+                value={credentials[field.name] ?? ''}
+                onInput={(e) => setCredentials({ ...credentials, [field.name]: (e.target as HTMLTextAreaElement).value })}
+                aria-invalid={errors.credential ? 'true' : undefined}
+              />
+            ) : (
+              <input
+                class="input mono"
+                type={field.name.includes('secret') ? 'password' : 'text'}
+                autocomplete="off"
+                spellcheck={false}
+                value={credentials[field.name] ?? ''}
+                onInput={(e) => setCredentials({ ...credentials, [field.name]: (e.target as HTMLInputElement).value })}
+                aria-invalid={errors.credential ? 'true' : undefined}
+              />
+            )}
+          </label>
+        ))}
+      {!tokenMode && errors.credential && <span class="field-error">{t(errors.credential as MessageKey)}</span>}
+      {tokenMode && (
       <label class="field">
         <span class="field-label">{t('integrations.token')}</span>
         <input
@@ -333,6 +491,7 @@ function ConnectForm({
         <span id="connect-token-hint" class="hint">{t('integrations.token_hint')}</span>
         {errors.token && <span class="field-error">{t(errors.token as MessageKey)}</span>}
       </label>
+      )}
       <p class="hint">{t('integrations.key_warning')}</p>
       {failure !== null && <Notice tone="error">{describeError(failure).title}{failure instanceof ApiError && failure.detail ? `: ${failure.detail}` : ''}</Notice>}
       <div class="form-actions">
@@ -367,6 +526,9 @@ function ConnectionDetail({
   const runs = useAsync(() => connectionRuns(client, connection.id, 10), [client.baseUrl, client.apiKey, connection.id, connection.last_sync_at]);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<unknown>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionOutput | null>(null);
+  const [testError, setTestError] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>(null);
@@ -391,6 +553,19 @@ function ConnectionDetail({
     }
   };
 
+  const test = async () => {
+    setTesting(true);
+    setTestError(null);
+    setTestResult(null);
+    try {
+      setTestResult(await connectionsTest(client, connection.id));
+    } catch (error) {
+      setTestError(error);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const remove = async () => {
     setDeleting(true);
     setDeleteError(null);
@@ -409,10 +584,19 @@ function ConnectionDetail({
   return (
     <div class="connection-detail">
       {connection.is_demo && <p class="note">{t('integrations.demo_note')}</p>}
+      {testResult && (
+        <Notice tone={testResult.ok ? 'ok' : 'error'}>
+          {testResult.ok ? t('integrations.test_ok') : t('integrations.test_failed', { reason: testResult.error ?? '' })}
+        </Notice>
+      )}
+      {testError !== null && <Notice tone="error">{describeError(testError).title}</Notice>}
       {person && (
         <div class="row-actions">
           <button type="button" class="btn btn-primary" onClick={sync} disabled={syncing}>
             {syncing ? t('integrations.syncing') : t('integrations.sync_now')}
+          </button>
+          <button type="button" class="btn" onClick={test} disabled={testing || connection.is_demo}>
+            {testing ? t('integrations.testing') : t('integrations.test_connection')}
           </button>
           {!connection.is_demo && (
             <button type="button" class="btn btn-ghost" onClick={() => setConfirming(true)}>

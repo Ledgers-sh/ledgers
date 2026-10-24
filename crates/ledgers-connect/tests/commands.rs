@@ -21,6 +21,8 @@ use ledgers_ledger::LedgerModule;
 use sea_query::Value;
 use std::sync::Arc;
 
+mod support;
+
 const COMPANY: &str = "01TESTCOMPANY0000000000000A";
 const OTHER: &str = "01OTHERCOMPANY000000000000B";
 const NOW: &str = "2026-08-02T09:00:00Z";
@@ -178,11 +180,13 @@ fn sync_input(connection: &str, fetched: SyncOutput) -> SyncInput {
         fetched: Some(fetched),
         fetch_error: None,
         created_by: OWNER_ID.to_owned(),
+        ledger_links: Vec::new(),
     }
 }
 
 fn sample_answer() -> SyncOutput {
     SyncOutput {
+        entries: Vec::new(),
         invoices: vec![
             invoice("cloudflare-billing:a", "2026-07", 1_001, "Cloudflare, Inc."),
             invoice("cloudflare-billing:b", "2026-08", 2_500, "Cloudflare, Inc."),
@@ -239,6 +243,7 @@ fn every_connections_command_is_classified_for_the_registry() {
         "connections.update",
         "connections.delete",
         "connections.sync_now",
+        "connections.test",
         "allocation_rules.set",
     ] {
         assert_eq!(human_only(name), Some(true), "{name} is human only");
@@ -582,6 +587,7 @@ fn a_failed_fetch_is_a_failed_run_and_writes_no_invoice() {
                         .to_owned(),
                 ),
                 created_by: OWNER_ID.to_owned(),
+                ledger_links: Vec::new(),
             };
             let run = run_in(COMPANY, &*kit.db, &ConnectionsSyncNow, "sync-f", &failed)
                 .await
@@ -885,4 +891,79 @@ fn invoice_sources_are_content_addressed() {
     assert_eq!(sha_a, invoice_source(&a).0);
     assert!(!bytes_a.is_empty());
     let _ = Arc::new(());
+}
+
+/// The AWS connector's recorded answer for July and August, through the vendor
+/// port (no network): the same `SyncOutput` a live sync would hand the command.
+async fn recorded_aws_answer() -> SyncOutput {
+    use ledgers_connect::aws::AwsCostExplorer;
+    use ledgers_connect::connector::{Connector, SyncContext};
+    let client = support::Recorded::new(vec![support::Route {
+        url: "ce.us-east-1.amazonaws.com",
+        body: "TimePeriod",
+        status: 200,
+        answer: include_str!("../fixtures/aws_cost_2026_07.json").to_owned(),
+    }]);
+    let (http, _) = support::vendor(client);
+    let credential = serde_json::json!({"access_key_id": "AKIDEXAMPLE", "secret_access_key": "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}).to_string();
+    let config = serde_json::json!({"expense_account": "6100"});
+    AwsCostExplorer
+        .sync(&SyncContext {
+            http: &http,
+            credential: &credential,
+            now: "2026-10-24T10:00:00Z",
+            config: &config,
+            since: "2026-07-01",
+            until: "2026-08-31",
+        })
+        .await
+        .expect("the recorded answer parses")
+}
+
+#[test]
+fn an_aws_sync_books_through_the_command_and_a_repeat_creates_nothing() {
+    for kit in TestHarness::all_dialects(modules) {
+        pollster::block_on(async {
+            seed_units(
+                &*kit.db,
+                COMPANY,
+                &[("FZ", "Factory Zero"), ("LED", "Ledgers")],
+            )
+            .await;
+            let mut input = create_input("conn-aws", "AWS (test)");
+            input.connector = "aws".to_owned();
+            input.config = serde_json::json!({"expense_account": "6100", "vat_rate_bp": 0});
+            run_in(COMPANY, &*kit.db, &ConnectionsCreate, "create-aws", &input)
+                .await
+                .expect("created");
+            rules_set(&*kit.db, "conn-aws", vec![("Amazon*", "LED")]).await;
+            let answer = recorded_aws_answer().await;
+
+            let first = run_in(
+                COMPANY,
+                &*kit.db,
+                &ConnectionsSyncNow,
+                "aws-sync-1",
+                &sync_input("conn-aws", answer.clone()),
+            )
+            .await
+            .unwrap();
+            assert_eq!(first.status, "succeeded");
+            assert_eq!(first.bills_created, 2, "one bill per month");
+            let again = run_in(
+                COMPANY,
+                &*kit.db,
+                &ConnectionsSyncNow,
+                "aws-sync-2",
+                &sync_input("conn-aws", answer),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                again.bills_created, 0,
+                "a repeat of the same provider line ids creates nothing"
+            );
+            assert_eq!(count(&*kit.db, "SELECT COUNT(*) AS n FROM bill").await, 2);
+        });
+    }
 }

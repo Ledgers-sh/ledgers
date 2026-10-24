@@ -1,0 +1,7 @@
+{
+  "result": [
+    {"timestamp": "2026-10-23T09:00:00Z", "total_auth_requests": 10, "total_realtime_requests": 2, "total_rest_requests": 120, "total_storage_requests": 4},
+    {"timestamp": "2026-10-23T10:00:00Z", "total_auth_requests": 5, "total_realtime_requests": 1, "total_rest_requests": 80, "total_storage_requests": 2}
+  ],
+  "error": null
+}

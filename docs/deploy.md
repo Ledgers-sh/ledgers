@@ -15,6 +15,33 @@ Tools: Rust 1.98.1 (pinned in `rust-toolchain.toml`), `worker-build` 0.8.x,
 Node 22, and wrangler through `npx`. Every wrangler call below pins
 `wrangler@4.148.0`.
 
+## Toolchain for the Worker build
+
+The Worker links `ring` (through `ledgers-connect`), and `ring`'s C parts must be
+compiled for `wasm32-unknown-unknown` by a clang that can target wasm32 and link.
+Apple's clang compiles wasm32 objects, but the link fails with undefined `ring_core_*`
+symbols, so it cannot be used. `cargo check` never links and does not catch this.
+
+- **macOS.** `brew install llvm`. Build with Homebrew's clang and llvm-ar, for example:
+
+  ```sh
+  export CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang
+  export AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar
+  ```
+
+- **Linux.** `sudo apt-get install clang llvm`. The system `clang` and `llvm-ar` are used
+  when the variables are unset.
+
+Check the link before any deploy, from the repository root:
+
+```sh
+tools/check-wasm-link.sh
+```
+
+It finds a usable clang (Homebrew LLVM first, then a non-Apple clang on the PATH), runs the
+release build of the `ledgers-server` cdylib for wasm32, and fails if the artifact is not
+produced. CI runs the same script in the `wasm32-link` job.
+
 ## 1. Create the storage (once)
 
 ```sh

@@ -13,6 +13,7 @@ import { accountName, t, useLocale, type MessageKey } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { accountLabel, buildChart, filterChart, nonZeroBalances, type StatusFilter, type TreeRow } from '../lib/accounts';
 import { Empty, ErrorBanner, Money, PageHead, Skeleton } from './common';
+import { TabRow } from './TabRow';
 
 const CLASS_KEYS: Record<string, MessageKey> = {
   asset: 'accounts.group.asset',
@@ -94,7 +95,7 @@ export function Accounts() {
                 onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
               />
             </label>
-            <div class="tabs" role="tablist" aria-label={t('accounts.filter_label')}>
+            <TabRow tablist active={status} label={t('accounts.filter_label')}>
               {FILTERS.map((filter) => (
                 <button
                   key={filter.value}
@@ -109,7 +110,7 @@ export function Accounts() {
                   {t(filter.key)}
                 </button>
               ))}
-            </div>
+            </TabRow>
           </div>
           <div id="accounts-chart" role="tabpanel" aria-labelledby={`accounts-filter-${status}`}>
             {groups.length === 0 ? (

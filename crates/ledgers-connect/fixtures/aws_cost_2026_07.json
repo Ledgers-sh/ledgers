@@ -1,0 +1,31 @@
+{
+  "ResultsByTime": [
+    {
+      "TimePeriod": {"Start": "2026-07-01", "End": "2026-07-02"},
+      "Total": {},
+      "Groups": [
+        {"Keys": ["Amazon Elastic Compute Cloud - Compute"], "Metrics": {"UnblendedCost": {"Amount": "10.123456", "Unit": "USD"}}},
+        {"Keys": ["Amazon Relational Database Service"], "Metrics": {"UnblendedCost": {"Amount": "0.5", "Unit": "USD"}}}
+      ],
+      "Estimated": false
+    },
+    {
+      "TimePeriod": {"Start": "2026-07-02", "End": "2026-07-03"},
+      "Total": {},
+      "Groups": [
+        {"Keys": ["Amazon Elastic Compute Cloud - Compute"], "Metrics": {"UnblendedCost": {"Amount": "20", "Unit": "USD"}}}
+      ],
+      "Estimated": false
+    },
+    {
+      "TimePeriod": {"Start": "2026-08-01", "End": "2026-08-02"},
+      "Total": {},
+      "Groups": [
+        {"Keys": ["Amazon Elastic Compute Cloud - Compute"], "Metrics": {"UnblendedCost": {"Amount": "5.25", "Unit": "USD"}}}
+      ],
+      "Estimated": false
+    }
+  ],
+  "DimensionValueAttributes": [],
+  "NextPageToken": ""
+}

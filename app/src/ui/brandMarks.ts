@@ -1,8 +1,13 @@
 /**
- * Brand marks for the connectable sources (issue #142). Path data is from
+ * Brand marks for the connectable sources (issue #142). Path data for
+ * Cloudflare, Anthropic, PlanetScale, Vercel, Google Cloud, Supabase, OpenRouter
+ * and Stripe is from
  * Simple Icons 16.35.0 (CC0-1.0, https://simpleicons.org): the icon artwork is
  * public domain; the trademarks stay with their owners and the marks only
- * identify the service. Each mark has a 24-unit viewBox.
+ * identify the service. Simple Icons has no Amazon Web Services, Microsoft
+ * Azure or OpenAI mark, so those use neutral glyphs that name the service and
+ * are not the companies' logos. Each mark has a 24-unit viewBox and is drawn
+ * inline: no external images are loaded.
  */
 
 export interface BrandMark {
@@ -20,6 +25,38 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   anthropic: {
     title: 'Anthropic',
     path: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
+  },
+  aws: {
+    title: 'Amazon Web Services',
+    path: 'M7 18.5h10.2a4.3 4.3 0 0 0 .6-8.55A6.2 6.2 0 0 0 6.1 9.6 4.9 4.9 0 0 0 7 18.5Z',
+  },
+  azure: {
+    title: 'Microsoft Azure',
+    path: 'M7 18.5h10.2a4.3 4.3 0 0 0 .6-8.55A6.2 6.2 0 0 0 6.1 9.6 4.9 4.9 0 0 0 7 18.5Z',
+  },
+  gcp: {
+    title: 'Google Cloud',
+    path: 'M12.19 2.38a9.344 9.344 0 0 0-9.234 6.893c.053-.02-.055.013 0 0-3.875 2.551-3.922 8.11-.247 10.941l.006-.007-.007.03a6.717 6.717 0 0 0 4.077 1.356h5.173l.03.03h5.192c6.687.053 9.376-8.605 3.835-12.35a9.365 9.365 0 0 0-2.821-4.552l-.043.043.006-.05A9.344 9.344 0 0 0 12.19 2.38zm-.358 4.146c1.244-.04 2.518.368 3.486 1.15a5.186 5.186 0 0 1 1.862 4.078v.518c3.53-.07 3.53 5.262 0 5.193h-5.193l-.008.009v-.04H6.785a2.59 2.59 0 0 1-1.067-.23h.001a2.597 2.597 0 1 1 3.437-3.437l3.013-3.012A6.747 6.747 0 0 0 8.11 8.24c.018-.01.04-.026.054-.023a5.186 5.186 0 0 1 3.67-1.69z',
+  },
+  stripe: {
+    title: 'Stripe',
+    path: 'M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.594-7.305h.003z',
+  },
+  openai: {
+    title: 'OpenAI',
+    path: 'M12 2.5l2.2 6.3 6.3 2.2-6.3 2.2L12 19.5l-2.2-6.3-6.3-2.2 6.3-2.2z',
+  },
+  openrouter: {
+    title: 'OpenRouter',
+    path: 'M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z',
+  },
+  supabase: {
+    title: 'Supabase',
+    path: 'M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C-.33 13.427.65 15.455 2.409 15.455h9.579l.113 7.51c.014.985 1.259 1.408 1.873.636l9.262-11.653c1.093-1.375.113-3.403-1.645-3.403h-9.642z',
+  },
+  vercel: {
+    title: 'Vercel',
+    path: 'm12 1.608 12 20.784H0Z',
   },
   planetscale: {
     title: 'PlanetScale',

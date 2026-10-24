@@ -886,6 +886,10 @@ impl Dispatch for ServerDispatch {
                 self.connections_sync_now(deps, presented, request_id, input)
                     .await
             }
+            "connections.test" => {
+                self.connections_test(deps, presented, request_id, input)
+                    .await
+            }
             "connections.runs" => {
                 self.execute(
                     deps,
@@ -2197,6 +2201,13 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_connect::commands::SyncInput>(),
                 schema_of::<ledgers_connect::commands::RunView>(),
+            ),
+        ),
+        (
+            "connections.test",
+            (
+                schema_of::<ledgers_connect::commands::TestInput>(),
+                schema_of::<ledgers_connect::commands::TestOutput>(),
             ),
         ),
         (

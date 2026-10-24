@@ -184,3 +184,140 @@ fn a_sync_without_an_outbound_client_is_recorded_as_a_failed_run() {
     );
     assert!(!run.to_string().contains(TOKEN));
 }
+
+const AWS_SECRET: &str = "AWS_SERVER_TEST_SECRET_NEVER_LEAVES_THE_SERVER";
+
+fn aws_body(name: &str, credential: &Value) -> Value {
+    json!({
+        "connector": "aws",
+        "name": name,
+        "config": {"expense_account": "6100"},
+        "default_unit": "FZ",
+        "credential": credential.clone(),
+    })
+}
+
+#[test]
+fn a_multi_field_credential_is_sealed_as_one_object_with_exactly_its_fields() {
+    let fx = fixture();
+    seed_unit(&fx);
+    let key = ConnectKey::from_secret(KEY).unwrap();
+    let dispatch = ServerDispatch::new(common::COMPANY).with_connect_key(Some(key.clone()));
+    let created = pollster::block_on(dispatch.dispatch(
+        &fx.deps,
+        "connections.create",
+        aws_body(
+            "AWS server test",
+            &json!({"access_key_id": "AKIDEXAMPLE", "secret_access_key": AWS_SECRET}),
+        ),
+        "req-aws-create",
+        Some(owner()),
+    ))
+    .expect("created");
+    assert!(
+        !created.to_string().contains(AWS_SECRET),
+        "the secret never comes back"
+    );
+    let id = created["id"].as_str().unwrap().to_owned();
+    let sealed = pollster::block_on(ledgers_connect::store::sealed_credential(
+        fx.deps.db.as_ref(),
+        common::COMPANY,
+        &id,
+    ))
+    .unwrap()
+    .expect("stored");
+    let opened: Value = serde_json::from_str(&key.open(&sealed, &id).unwrap()).unwrap();
+    assert_eq!(
+        opened,
+        json!({"access_key_id": "AKIDEXAMPLE", "secret_access_key": AWS_SECRET})
+    );
+
+    // Each refusal names the problem and stores nothing.
+    let refusals = [
+        (
+            json!({"access_key_id": "AKIDEXAMPLE"}),
+            "the credential needs secret_access_key",
+        ),
+        (
+            json!({"access_key_id": "AKIDEXAMPLE", "secret_access_key": " "}),
+            "the credential needs secret_access_key",
+        ),
+        (
+            json!({"access_key_id": "AKIDEXAMPLE", "secret_access_key": AWS_SECRET, "session": "x"}),
+            "the credential of Amazon Web Services has only",
+        ),
+    ];
+    for (index, (credential, expected)) in refusals.into_iter().enumerate() {
+        let problem = pollster::block_on(dispatch.dispatch(
+            &fx.deps,
+            "connections.create",
+            aws_body("Refused", &credential),
+            &format!("req-aws-refused-{index}"),
+            Some(owner()),
+        ))
+        .expect_err("refused");
+        let detail = problem.detail.unwrap_or_default();
+        assert!(detail.contains(expected), "{detail}");
+        assert!(
+            !detail.contains(AWS_SECRET),
+            "the refusal never echoes a value"
+        );
+    }
+    let mut token_body = aws_body("Token", &json!({}));
+    token_body["token"] = json!(TOKEN);
+    let token_problem = pollster::block_on(dispatch.dispatch(
+        &fx.deps,
+        "connections.create",
+        token_body,
+        "req-aws-token",
+        Some(owner()),
+    ))
+    .expect_err("a token is refused for a multi-field connector");
+    assert!(
+        token_problem
+            .detail
+            .unwrap_or_default()
+            .contains("not a token")
+    );
+}
+
+#[test]
+fn the_connection_test_reports_a_missing_vendor_client_without_writing_anything() {
+    let fx = fixture();
+    seed_unit(&fx);
+    let key = ConnectKey::from_secret(KEY).unwrap();
+    let dispatch = ServerDispatch::new(common::COMPANY).with_connect_key(Some(key));
+    let created = pollster::block_on(dispatch.dispatch(
+        &fx.deps,
+        "connections.create",
+        create_body("Test me"),
+        "req-test-create",
+        Some(owner()),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap().to_owned();
+    let result = pollster::block_on(dispatch.dispatch(
+        &fx.deps,
+        "connections.test",
+        json!({"connection_id": id}),
+        "req-test",
+        Some(owner()),
+    ))
+    .expect("the test answers");
+    assert_eq!(result["ok"], false);
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("no outbound HTTP client")
+    );
+    assert!(!result.to_string().contains(TOKEN));
+    let runs = pollster::block_on(ledgers_connect::store::runs(
+        fx.deps.db.as_ref(),
+        common::COMPANY,
+        &id,
+        10,
+    ))
+    .expect("runs read");
+    assert!(runs.is_empty(), "a test writes no run");
+}

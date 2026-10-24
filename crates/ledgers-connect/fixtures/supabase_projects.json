@@ -1,0 +1,7 @@
+{
+  "projects": [
+    {"ref": "abcdefghijklmnopqrst", "name": "ledgers-prod", "cloud_provider": "AWS", "region": "us-east-1", "is_branch": false, "status": "ACTIVE_HEALTHY"},
+    {"ref": "tsrqponmlkjihgfedcba", "name": "sqeezin-staging", "cloud_provider": "AWS", "region": "eu-west-1", "is_branch": false, "status": "ACTIVE_HEALTHY"}
+  ],
+  "pagination": {"count": 2, "limit": 50, "offset": 0}
+}
