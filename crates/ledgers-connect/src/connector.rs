@@ -22,8 +22,13 @@ pub struct CredentialField {
 pub struct SyncContext<'a> {
     /// The vendor client with the host allow-list applied by the connector.
     pub http: &'a VendorHttp,
-    /// The decrypted credential, to be sent to the vendor only.
+    /// The decrypted credential, to be sent to the vendor only. A connector
+    /// with one field gets the token; one with several gets a JSON object of
+    /// the fields (see [`credential_text`]).
     pub credential: &'a str,
+    /// The current instant, RFC 3339 UTC (`2026-10-24T10:00:00Z`), for requests
+    /// that are signed over a timestamp.
+    pub now: &'a str,
     /// The connection's config, validated by [`Connector::validate_config`].
     pub config: &'a serde_json::Value,
     /// The first day of the window, `YYYY-MM-DD` (inclusive).
@@ -76,6 +81,8 @@ pub fn all() -> Vec<Box<dyn Connector>> {
         Box::new(crate::cloudflare::Cloudflare),
         Box::new(crate::anthropic::Anthropic),
         Box::new(crate::planetscale::PlanetScale),
+        Box::new(crate::aws::AwsCostExplorer),
+        Box::new(crate::vercel::Vercel),
     ]
 }
 
@@ -83,6 +90,25 @@ pub fn all() -> Vec<Box<dyn Connector>> {
 #[must_use]
 pub fn by_id(id: &str) -> Option<Box<dyn Connector>> {
     all().into_iter().find(|connector| connector.id() == id)
+}
+
+/// Reads one field of a multi-field credential: the sealed credential is a
+/// JSON object such as `{"access_key_id": "...", "secret_access_key": "..."}`.
+/// Empty and non-string values are refused; the message names the field, never
+/// the value.
+///
+/// # Errors
+/// A sentence naming the missing field.
+pub fn credential_text(credential: &str, field: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(credential)
+        .map_err(|_| "the stored credential is not in the expected form".to_owned())?;
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the credential has no {field}"))
 }
 
 /// Reads a required string config key.

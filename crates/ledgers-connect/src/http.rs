@@ -138,6 +138,30 @@ impl VendorHttp {
             .await
     }
 
+    /// GETs `url` and reads the answer as newline-delimited JSON (one object per
+    /// non-empty line), returned as a JSON array. Used for vendors that stream
+    /// their rows as JSON lines.
+    ///
+    /// # Errors
+    /// As [`VendorHttp::get_json`]; a line that is not JSON is
+    /// [`VendorError::Malformed`].
+    pub async fn get_lines(
+        &self,
+        allowed_hosts: &[&str],
+        url: &str,
+        headers: &[(&str, String)],
+    ) -> Result<serde_json::Value, VendorError> {
+        self.request_as(
+            http::Method::GET,
+            allowed_hosts,
+            url,
+            headers,
+            None,
+            Parse::Lines,
+        )
+        .await
+    }
+
     /// POSTs `body` as JSON to `url` (on one of `allowed_hosts`) and reads the
     /// answer as JSON. Used for the GraphQL analytics call.
     ///
@@ -150,8 +174,58 @@ impl VendorHttp {
         headers: &[(&str, String)],
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, VendorError> {
-        self.request_json(http::Method::POST, allowed_hosts, url, headers, Some(body))
+        let bytes = serde_json::to_vec(body).map_err(|err| VendorError::Malformed {
+            host: host_of(url),
+            detail: err.to_string(),
+        })?;
+        self.post_bytes(allowed_hosts, url, headers, "application/json", bytes)
             .await
+    }
+
+    /// POSTs a form-encoded `body` (OAuth token exchanges) and reads the answer
+    /// as JSON.
+    ///
+    /// # Errors
+    /// As [`VendorHttp::get_json`].
+    pub async fn post_form(
+        &self,
+        allowed_hosts: &[&str],
+        url: &str,
+        headers: &[(&str, String)],
+        body: &str,
+    ) -> Result<serde_json::Value, VendorError> {
+        self.post_bytes(
+            allowed_hosts,
+            url,
+            headers,
+            "application/x-www-form-urlencoded",
+            body.as_bytes().to_vec(),
+        )
+        .await
+    }
+
+    /// POSTs `body` with `content_type` to `url` and reads the answer as JSON.
+    /// The bytes are sent exactly as given, so a request signed over them (AWS
+    /// `SigV4`) matches what the vendor receives.
+    ///
+    /// # Errors
+    /// As [`VendorHttp::get_json`].
+    pub async fn post_bytes(
+        &self,
+        allowed_hosts: &[&str],
+        url: &str,
+        headers: &[(&str, String)],
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> Result<serde_json::Value, VendorError> {
+        self.request_json(
+            http::Method::POST,
+            allowed_hosts,
+            url,
+            headers,
+            Some((content_type, Bytes::from(body))),
+        )
+        .await
     }
 
     async fn request_json(
@@ -160,31 +234,27 @@ impl VendorHttp {
         allowed_hosts: &[&str],
         url: &str,
         headers: &[(&str, String)],
-        body: Option<&serde_json::Value>,
+        body: Option<(&str, Bytes)>,
+    ) -> Result<serde_json::Value, VendorError> {
+        self.request_as(method, allowed_hosts, url, headers, body, Parse::Json)
+            .await
+    }
+
+    async fn request_as(
+        &self,
+        method: http::Method,
+        allowed_hosts: &[&str],
+        url: &str,
+        headers: &[(&str, String)],
+        body: Option<(&str, Bytes)>,
+        parse: Parse,
     ) -> Result<serde_json::Value, VendorError> {
         let uri = check_url(url, allowed_hosts)?;
         let host = uri.host().unwrap_or_default().to_owned();
-        let payload =
-            match body {
-                Some(value) => Bytes::from(serde_json::to_vec(value).map_err(|err| {
-                    VendorError::Malformed {
-                        host: host.clone(),
-                        detail: err.to_string(),
-                    }
-                })?),
-                None => Bytes::new(),
-            };
         let mut attempt = 1;
         loop {
             let outcome = self
-                .send_once(
-                    &method,
-                    &uri,
-                    &host,
-                    headers,
-                    payload.clone(),
-                    body.is_some(),
-                )
+                .send_once(&method, &uri, &host, headers, body.clone(), parse)
                 .await;
             match outcome {
                 Ok(value) => return Ok(value),
@@ -203,17 +273,21 @@ impl VendorHttp {
         uri: &http::Uri,
         host: &str,
         headers: &[(&str, String)],
-        payload: Bytes,
-        has_body: bool,
+        body: Option<(&str, Bytes)>,
+        parse: Parse,
     ) -> Result<serde_json::Value, VendorError> {
         let mut builder = http::Request::builder()
             .method(method.clone())
             .uri(uri.clone())
             .header(header::ACCEPT, "application/json")
             .header(header::USER_AGENT, "ledgers-connect/0.1");
-        if has_body {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-        }
+        let payload = match body {
+            Some((kind, bytes)) => {
+                builder = builder.header(header::CONTENT_TYPE, kind);
+                bytes
+            }
+            None => Bytes::new(),
+        };
         for (name, value) in headers {
             builder = builder.header(*name, value.as_str());
         }
@@ -248,10 +322,44 @@ impl VendorHttp {
                 status,
             });
         }
-        serde_json::from_slice(response.body()).map_err(|err| VendorError::Malformed {
-            host: host.to_owned(),
-            detail: err.to_string(),
-        })
+        parse_body(response.body(), parse, host)
+    }
+}
+
+/// The host of `url` for an error message; `?` when it does not parse.
+fn host_of(url: &str) -> String {
+    url.parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(str::to_owned))
+        .unwrap_or_else(|| "?".to_owned())
+}
+
+/// How an answer body is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Parse {
+    /// One JSON document.
+    Json,
+    /// One JSON object per non-empty line, returned as an array.
+    Lines,
+}
+
+fn parse_body(body: &[u8], parse: Parse, host: &str) -> Result<serde_json::Value, VendorError> {
+    let malformed = |err: serde_json::Error| VendorError::Malformed {
+        host: host.to_owned(),
+        detail: err.to_string(),
+    };
+    match parse {
+        Parse::Json => serde_json::from_slice(body).map_err(malformed),
+        Parse::Lines => {
+            let mut rows = Vec::new();
+            for line in body.split(|byte| *byte == b'\n') {
+                if line.iter().all(u8::is_ascii_whitespace) {
+                    continue;
+                }
+                rows.push(serde_json::from_slice(line).map_err(malformed)?);
+            }
+            Ok(serde_json::Value::Array(rows))
+        }
     }
 }
 

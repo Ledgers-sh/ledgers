@@ -108,8 +108,17 @@ export interface CreateConnectionInput {
   name: string;
   config: Record<string, unknown>;
   default_unit: string;
-  /** The token, sent once. Never returned. */
-  token: string;
+  /** The token, sent once, for a connector with one token field. Never returned. */
+  token?: string;
+  /** The credential fields, sent once, for a connector with several. Never returned. */
+  credential?: Record<string, string>;
+}
+
+/** The answer of `connections.test`: nothing is written. `error` carries no credential. */
+export interface TestConnectionOutput {
+  ok: boolean;
+  notes: string[];
+  error: string | null;
 }
 
 export interface UpdateConnectionInput {
@@ -145,6 +154,15 @@ export function connectionsDelete(config: ClientConfig, id: string): Promise<{ i
 }
 
 /** POST /v1/connections/{id}/sync (connections.sync_now): reads the vendor now. A person only. */
+/** POST /v1/connections/{id}/test (connections.test). Reads the vendor for today; writes nothing. A person only. */
+export function connectionsTest(config: ClientConfig, id: string): Promise<TestConnectionOutput> {
+  return request<TestConnectionOutput>(config, {
+    method: 'POST',
+    path: `/v1/connections/${encodeURIComponent(id)}/test`,
+    body: {},
+  });
+}
+
 export function connectionsSyncNow(config: ClientConfig, id: string): Promise<RunView> {
   return request<RunView>(config, {
     method: 'POST',
