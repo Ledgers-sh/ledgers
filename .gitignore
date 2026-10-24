@@ -20,3 +20,4 @@
 
 # Stray run logs (never part of the repo)
 *.log
+package-lock.json
