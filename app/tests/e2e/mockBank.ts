@@ -69,10 +69,22 @@ interface Rule {
   created_at: string;
 }
 
-export const bankMock: { accounts: Account[]; lines: Line[]; rules: Rule[]; counter: number; writes: string[] } = {
+/** A customer's open invoice, as the receipt screen lists it. */
+interface OpenItem {
+  id: string;
+  party_id: string;
+  kind: string;
+  document: string | null;
+  posting_date: string;
+  due_date: string | null;
+  remaining: Amount;
+}
+
+export const bankMock: { accounts: Account[]; lines: Line[]; rules: Rule[]; openItems: OpenItem[]; counter: number; writes: string[] } = {
   accounts: [],
   lines: [],
   rules: [],
+  openItems: [],
   counter: 0,
   writes: [],
 };
@@ -178,9 +190,15 @@ export function resetBank(seed: boolean): void {
   bankMock.accounts = [];
   bankMock.lines = [];
   bankMock.rules = [];
+  bankMock.openItems = [];
   bankMock.counter = 0;
   bankMock.writes = [];
   if (!seed) return;
+  // Acme GmbH owes two invoices: the older settles in full, the newer is paid through the receipt.
+  bankMock.openItems = [
+    { id: 'oi_acme_1', party_id: 'party-acme', kind: 'invoice', document: 'RE-2026-0101', posting_date: '2026-09-15', due_date: '2026-10-15', remaining: { minor: '100000', currency: 'EUR' } },
+    { id: 'oi_acme_2', party_id: 'party-acme', kind: 'invoice', document: 'RE-2026-0108', posting_date: '2026-09-28', due_date: '2026-10-28', remaining: { minor: '150000', currency: 'EUR' } },
+  ];
   const id = 'acc_halden';
   bankMock.accounts.push({
     id,
@@ -452,6 +470,15 @@ export function handleBank(method: string, url: URL, bodyText: string, asPerson:
 
   if (method === 'GET' && path === '/v1/bank/transactions') return listLines(url);
 
+  if (method === 'GET' && path === '/v1/bank/receivables/open-items') {
+    const party = url.searchParams.get('party_id');
+    if (!party) return problem(400, 'Request validation failed', 'party_id is required');
+    const items = bankMock.openItems
+      .filter((item) => item.party_id === party && Number(item.remaining.minor) > 0)
+      .sort((a, b) => a.posting_date.localeCompare(b.posting_date) || a.id.localeCompare(b.id));
+    return { status: 200, body: { items } };
+  }
+
   const lineMatch = /^\/v1\/bank\/transactions\/([^/]+)\/(post|link|ignore)$/.exec(path);
   if (lineMatch && method === 'POST') {
     const line = findLine(lineMatch[1]);
@@ -465,6 +492,33 @@ export function handleBank(method: string, url: URL, bodyText: string, asPerson:
     }
     if (!asPerson) {
       return needsApproval(nextId('appr'));
+    }
+    const receivable = typeof body.counterparty_account === 'string' && body.counterparty_account === '1200';
+    if (receivable && action === 'post') {
+      // A receipt settles the customer's open items, oldest first; the excess is on account.
+      const party = String(body.party_id ?? '');
+      if (!party) return problem(400, 'Request validation failed', 'a receivables line needs the customer: give party_id');
+      let left = Number(line.amount.minor);
+      for (const item of bankMock.openItems
+        .filter((open) => open.party_id === party && Number(open.remaining.minor) > 0)
+        .sort((a, b) => a.posting_date.localeCompare(b.posting_date) || a.id.localeCompare(b.id))) {
+        if (left <= 0) break;
+        const settle = Math.min(Number(item.remaining.minor), left);
+        item.remaining = { minor: String(Number(item.remaining.minor) - settle), currency: 'EUR' };
+        left -= settle;
+      }
+      const entryId = nextId('entry-receipt');
+      line.status = 'matched';
+      line.matched = { kind: 'entry', id: entryId };
+      bankMock.writes.push(`receipt:${line.id}:${party}`);
+      return {
+        status: 200,
+        body: {
+          transaction_id: line.id,
+          status: 'matched',
+          entry: { entry_id: entryId, journal_id: 'GN', fiscal_year: 2026, number: bankMock.counter, recorded_at: NOW },
+        },
+      };
     }
     if (action === 'link') {
       line.status = 'matched';

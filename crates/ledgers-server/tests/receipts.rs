@@ -301,3 +301,36 @@ fn an_overpayment_settles_the_invoice_and_the_excess_is_on_account() {
     let ar = recon.iter().find(|row| row.ledger == "ar").expect("ar");
     assert_eq!(ar.difference, 0, "{ar:?}");
 }
+
+#[test]
+fn a_receivables_line_without_a_customer_is_refused_and_nothing_is_settled() {
+    let fx = person_fx();
+    bank_with_march(&fx);
+    let db = fx.deps.db.as_ref();
+    let invoice_id = invoice(&fx, "nordlicht", 420_000, "RE-NL-REFUSED");
+    let line = line_of(&fx, "420000");
+
+    let refused = receipt(
+        &fx,
+        &line,
+        json!({"id": line, "counterparty_account": "1030"}),
+    );
+    assert_eq!(
+        refused.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        refused.text
+    );
+    assert_eq!(
+        remaining(db, &invoice_id),
+        420_000,
+        "the invoice is still open"
+    );
+    let still = person(
+        &fx,
+        Method::GET,
+        "/v1/bank/transactions?status=unmatched&limit=200",
+        None,
+    );
+    assert!(still.text.contains(&line), "the line stays unmatched");
+}
