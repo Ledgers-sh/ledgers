@@ -41,15 +41,28 @@ export function fallbackColour(name: string): string {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length] ?? AVATAR_PALETTE[0];
 }
 
-/** The text colour that reads on a `#RRGGBB` background: dark on light colours, white on dark ones. */
-export function textOn(hex: string): string {
+/** Relative luminance of a `#RRGGBB` colour (WCAG), or null when it is not one. */
+function luminanceOf(hex: string): number | null {
   const match = /^#([0-9a-f]{6})$/i.exec(hex);
-  if (!match) return '#0B0D10';
+  if (!match) return null;
   const value = parseInt(match[1] ?? '000000', 16);
   const channel = (shift: number) => {
     const c = ((value >> shift) & 0xff) / 255;
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
-  const luminance = 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
-  return luminance > 0.36 ? '#0B0D10' : '#FFFFFF';
+  return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
+}
+
+/**
+ * The text colour that reads best on a `#RRGGBB` background: whichever of the
+ * dark ink or white has the higher contrast ratio (WCAG), so an initial is
+ * never white on a light colour or dark on a deep one.
+ */
+export function textOn(hex: string): string {
+  const bg = luminanceOf(hex);
+  if (bg === null) return '#0B0D10';
+  const ink = luminanceOf('#0B0D10') ?? 0;
+  const darkRatio = (bg + 0.05) / (ink + 0.05);
+  const whiteRatio = 1.05 / (bg + 0.05);
+  return darkRatio >= whiteRatio ? '#0B0D10' : '#FFFFFF';
 }

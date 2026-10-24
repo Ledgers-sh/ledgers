@@ -53,3 +53,25 @@ describe('textOn', () => {
     expect(textOn('not a colour')).toBe('#0B0D10');
   });
 });
+
+describe('textOn contrast', () => {
+  /** WCAG contrast ratio of two #RRGGBB colours. */
+  function ratio(a: string, b: string): number {
+    const lum = (hex: string) => {
+      const v = parseInt(hex.slice(1), 16);
+      const c = (shift: number) => {
+        const x = ((v >> shift) & 0xff) / 255;
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * c(16) + 0.7152 * c(8) + 0.0722 * c(0);
+    };
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x) as [number, number];
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  it('gives every fallback colour at least 4.5 to 1 with its initials', () => {
+    for (const colour of AVATAR_PALETTE) {
+      expect(ratio(colour, textOn(colour)), colour).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});

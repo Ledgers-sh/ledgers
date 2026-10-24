@@ -16,6 +16,9 @@ pub mod iban;
 pub mod model;
 pub mod module;
 pub mod parties;
+pub mod party_csv;
+pub mod party_fields;
+pub mod party_logo;
 pub mod store;
 
 pub use module::BillsModule;
@@ -52,6 +55,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "bill_iban_confirmed",
         include_str!("../migrations/sqlite/0006_bill_iban_confirmed.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0007",
+        "party_directory",
+        include_str!("../migrations/sqlite/0007_party_directory.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite.
@@ -85,6 +93,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0006",
         "bill_iban_confirmed",
         include_str!("../migrations/postgres/0006_bill_iban_confirmed.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0007",
+        "party_directory",
+        include_str!("../migrations/postgres/0007_party_directory.sql"),
     ),
 ];
 

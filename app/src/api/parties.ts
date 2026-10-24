@@ -22,6 +22,17 @@ export interface PartyContact {
   email: string | null;
   phone: string | null;
   role: string | null;
+  /** The party's primary contact; at most one per party. */
+  primary: boolean;
+}
+
+/** A further VAT or tax identifier: a VAT ID of another country, or a tax number. */
+export interface PartyTaxId {
+  /** ISO 3166-1 alpha-2. */
+  country: string;
+  kind: 'vat' | 'tax' | 'other';
+  /** The identifier; a VAT ID carries its country prefix. */
+  value: string;
 }
 
 export interface PartyViesResult {
@@ -50,6 +61,17 @@ export interface Party {
   default_tax_code: string | null;
   addresses: PartyAddress[];
   contacts: PartyContact[];
+  trading_name: string | null;
+  registration_number: string | null;
+  website: string | null;
+  email: string | null;
+  phone: string | null;
+  default_unit: string | null;
+  tags: string[];
+  notes: string | null;
+  tax_ids: PartyTaxId[];
+  /** The party's logo document (PNG or JPEG), when it has one. */
+  logo_document_id: string | null;
 }
 
 export interface PartyBankChange {
@@ -63,11 +85,82 @@ export interface PartyBankChange {
   reason: string | null;
 }
 
+/** A bill of the party, as the detail page lists it. */
+export interface PartyRecentBill {
+  id: string;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  currency: string;
+  gross_minor: number | null;
+  paid_minor: number;
+  posted: boolean;
+  discarded: boolean;
+}
+
+/** A payment recorded against one of the party's bills. */
+export interface PartyPayment {
+  bill_id: string;
+  invoice_number: string | null;
+  currency: string;
+  paid_minor: number;
+  paid_at: string;
+}
+
 export interface PartyDetail {
   party: Party;
   bank_changes: PartyBankChange[];
   bill_count: number;
   vies_enabled: boolean;
+  recent_bills: PartyRecentBill[];
+  recent_payments: PartyPayment[];
+}
+
+/** One receivable (`ar`) or payable (`ap`) still partly or wholly open. */
+export interface PartyOpenItem {
+  id: string;
+  ledger: 'ar' | 'ap';
+  kind: 'invoice' | 'credit-note' | 'bill' | 'on-account';
+  document: string | null;
+  posting_date: string;
+  due_date: string | null;
+  currency: string;
+  original_minor: number;
+  remaining_minor: number;
+}
+
+/** What is still open for a party, per ledger and currency. */
+export interface PartyOpenBalance {
+  ledger: 'ar' | 'ap';
+  currency: string;
+  remaining_minor: number;
+}
+
+export interface PartyOpenItems {
+  open_items: PartyOpenItem[];
+  balances: PartyOpenBalance[];
+}
+
+/** One row of a CSV check: its line in the file, what it would do, and its refusals. */
+export interface PartyImportRow {
+  line: number;
+  action: 'create' | 'update' | 'error';
+  id: string;
+  errors: { slug: string; field: string; message: string }[];
+}
+
+export interface PartyImportCheck {
+  valid: boolean;
+  creates: number;
+  updates: number;
+  errors: number;
+  rows: PartyImportRow[];
+}
+
+export interface PartyImportResult {
+  created: number;
+  updated: number;
+  ids: string[];
 }
 
 export interface PartiesPage {
@@ -85,6 +178,8 @@ export interface PartyBalance {
 export interface PartyFieldError {
   field: string;
   message: string;
+  /** The problem slug of the refusal, when the server names one; the app words it in its language. */
+  slug?: string | null;
 }
 
 export interface PartyValidation {
@@ -99,21 +194,31 @@ export interface PartyListQuery {
   q?: string;
   roles?: PartyRoles;
   needs_review?: boolean;
+  tag?: string;
 }
 
 /** The fields `parties.create` takes. Blank text is sent as an empty string and stored as none. */
 export interface PartyCreateInput {
   id?: string;
   name: string;
+  trading_name?: string | null;
   vat_id?: string | null;
+  tax_ids?: PartyTaxId[];
   roles?: PartyRoles;
   tax_number?: string | null;
+  registration_number?: string | null;
+  website?: string | null;
+  email?: string | null;
+  phone?: string | null;
   language?: string | null;
   currency?: string | null;
   personal_data?: boolean;
   payment_terms_days?: number | null;
   default_account?: string | null;
   default_tax_code?: string | null;
+  default_unit?: string | null;
+  tags?: string[];
+  notes?: string | null;
   addresses?: PartyAddress[];
   contacts?: PartyContact[];
 }
@@ -132,6 +237,16 @@ export interface PartyValidateInput {
   payment_terms_days?: number;
   addresses?: PartyAddress[];
   contacts?: PartyContact[];
+  registration_number?: string;
+  website?: string;
+  email?: string;
+  phone?: string;
+  currency?: string;
+  language?: string;
+  default_unit?: string;
+  notes?: string;
+  tags?: string[];
+  tax_ids?: PartyTaxId[];
 }
 
 function query(params: PartyListQuery): Record<string, string | undefined> {
@@ -141,6 +256,7 @@ function query(params: PartyListQuery): Record<string, string | undefined> {
     q: params.q && params.q.trim() !== '' ? params.q.trim() : undefined,
     roles: params.roles,
     needs_review: params.needs_review === undefined ? undefined : String(params.needs_review),
+    tag: params.tag && params.tag.trim() !== '' ? params.tag.trim().toLowerCase() : undefined,
   };
 }
 
@@ -212,4 +328,33 @@ export function partyMerge(config: ClientConfig, survivorId: string, fromId: str
     path: `/v1/parties/${encodeURIComponent(survivorId)}/merge`,
     body: { from: fromId },
   });
+}
+
+/** GET /v1/parties/{id}/open-items: what the party still owes or is owed, from the subledger. */
+export function partyOpenItems(config: ClientConfig, id: string): Promise<PartyOpenItems> {
+  return request<PartyOpenItems>(config, { method: 'GET', path: `/v1/parties/${encodeURIComponent(id)}/open-items` });
+}
+
+/** POST /v1/parties/{id}/set-logo: sets the logo to a stored PNG or JPEG document, or clears it with null. */
+export function partySetLogo(config: ClientConfig, id: string, documentId: string | null): Promise<{ party: Party }> {
+  return request<{ party: Party }>(config, {
+    method: 'POST',
+    path: `/v1/parties/${encodeURIComponent(id)}/set-logo`,
+    body: { logo_document_id: documentId },
+  });
+}
+
+/** GET /v1/parties/export: every party as CSV, in the columns the import reads. */
+export function partyExport(config: ClientConfig): Promise<{ csv: string; rows: number }> {
+  return request<{ csv: string; rows: number }>(config, { method: 'GET', path: '/v1/parties/export' });
+}
+
+/** POST /v1/parties/import/check: reads a CSV file and reports each row, writing nothing. */
+export function partyImportCheck(config: ClientConfig, csv: string): Promise<PartyImportCheck> {
+  return request<PartyImportCheck>(config, { method: 'POST', path: '/v1/parties/import/check', body: { csv } });
+}
+
+/** POST /v1/parties/import: writes a CSV file whose rows are all valid; a file with any error is refused whole. */
+export function partyImport(config: ClientConfig, csv: string): Promise<PartyImportResult> {
+  return request<PartyImportResult>(config, { method: 'POST', path: '/v1/parties/import', body: { csv } });
 }

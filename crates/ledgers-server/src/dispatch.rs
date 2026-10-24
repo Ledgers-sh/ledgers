@@ -43,6 +43,8 @@ use ledgers_bills::parties::{
     HttpVies, PartiesCheckVat, PartiesCreate, PartiesGet, PartiesList, PartiesMerge,
     PartiesSetBank, PartiesUpdate, PartiesValidate, ViesPort,
 };
+use ledgers_bills::party_csv::{PartiesExport, PartiesImport, PartiesImportCheck};
+use ledgers_bills::party_logo::PartiesSetLogo;
 use ledgers_commands::auth::{Authenticator, Credential, Limit, Limits, Principal, Tier};
 use ledgers_commands::{
     Command, CommandContext, CommandError, ExecToken, Executed, Executor, JournalPreview,
@@ -64,6 +66,7 @@ use ledgers_ledger::surface::{
 use ledgers_policy::KeyPolicy;
 use ledgers_policy::key::{AgentKey, CurrencyLimit};
 use ledgers_policy::store::{deserialize_key, parse_keys, serialize_key};
+use ledgers_subledger::party_open_items::PartiesOpenItems;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -684,6 +687,30 @@ impl ServerDispatch {
         self.execute(deps, &cmd, presented, request_id, input).await
     }
 
+    /// `parties.import_check` and `parties.import`: agent allowed. The acting
+    /// person, when the caller is one, is passed on: a bank row needs them, and
+    /// an agent key's file with bank details is refused row by row.
+    async fn parties_import(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+        write: bool,
+    ) -> Result<Value, Problem> {
+        let person = self
+            .person_id(deps, presented.clone(), request_id, None)
+            .await
+            .ok();
+        if write {
+            let cmd = PartiesImport::new(person);
+            self.execute(deps, &cmd, presented, request_id, input).await
+        } else {
+            let cmd = PartiesImportCheck::new(person);
+            self.execute(deps, &cmd, presented, request_id, input).await
+        }
+    }
+
     /// `parties.merge`: a person only. An agent gets 403 (`human-only`).
     async fn parties_merge(
         &self,
@@ -1010,6 +1037,26 @@ impl Dispatch for ServerDispatch {
                     .await
             }
             "parties.merge" => self.parties_merge(deps, presented, request_id, input).await,
+            "parties.open_items" => {
+                self.execute(deps, &PartiesOpenItems, presented, request_id, input)
+                    .await
+            }
+            "parties.set_logo" => {
+                self.execute(deps, &PartiesSetLogo, presented, request_id, input)
+                    .await
+            }
+            "parties.export" => {
+                self.execute(deps, &PartiesExport, presented, request_id, input)
+                    .await
+            }
+            "parties.import_check" => {
+                self.parties_import(deps, presented, request_id, input, false)
+                    .await
+            }
+            "parties.import" => {
+                self.parties_import(deps, presented, request_id, input, true)
+                    .await
+            }
             "bank.accounts.list"
             | "bank.accounts.get"
             | "bank.accounts.reconcile"
@@ -2387,6 +2434,41 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bills::parties::ListInput>(),
                 schema_of::<ledgers_bills::parties::ListOutput>(),
+            ),
+        ),
+        (
+            "parties.open_items",
+            (
+                schema_of::<ledgers_subledger::party_open_items::OpenItemsInput>(),
+                schema_of::<ledgers_subledger::party_open_items::OpenItemsOutput>(),
+            ),
+        ),
+        (
+            "parties.set_logo",
+            (
+                schema_of::<ledgers_bills::party_logo::SetLogoInput>(),
+                schema_of::<ledgers_bills::party_logo::SetLogoOutput>(),
+            ),
+        ),
+        (
+            "parties.export",
+            (
+                schema_of::<ledgers_bills::party_csv::ExportInput>(),
+                schema_of::<ledgers_bills::party_csv::ExportOutput>(),
+            ),
+        ),
+        (
+            "parties.import_check",
+            (
+                schema_of::<ledgers_bills::party_csv::ImportInput>(),
+                schema_of::<ledgers_bills::party_csv::ImportCheckOutput>(),
+            ),
+        ),
+        (
+            "parties.import",
+            (
+                schema_of::<ledgers_bills::party_csv::ImportInput>(),
+                schema_of::<ledgers_bills::party_csv::ImportOutput>(),
             ),
         ),
         (

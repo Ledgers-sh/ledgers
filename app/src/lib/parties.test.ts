@@ -15,12 +15,57 @@ import {
   mergePreview,
   reviewQuery,
   rolesQuery,
+  splitTags,
   termsValue,
   updateInputFromDraft,
   validateInputFromDraft,
   vatCountry,
   vatStatus,
 } from './parties';
+
+describe('directory fields', () => {
+  it('splits tags on commas and semicolons, lower-cased, without repeats', () => {
+    expect(splitTags('Retail; retail, Berlin ,, ')).toEqual(['retail', 'berlin']);
+    expect(splitTags('')).toEqual([]);
+  });
+
+  it('sends the directory fields on create, with blanks as none and tags as a list', () => {
+    const draft = {
+      ...emptyDraft('customer', 'Acme GmbH'),
+      trading_name: '  Acme  ',
+      website: 'https://acme.example',
+      tags: 'Retail, berlin',
+      notes: '',
+      tax_ids: [{ country: 'fr', kind: 'vat' as const, value: 'FR12345678901' }, { country: '', kind: 'vat' as const, value: '' }],
+      contacts: [{ name: 'Ada', email: '', phone: '', role: '', primary: true }],
+    };
+    const created = createInputFromDraft(draft);
+    expect(created.trading_name).toBe('Acme');
+    expect(created.website).toBe('https://acme.example');
+    expect(created.tags).toEqual(['retail', 'berlin']);
+    expect(created.notes).toBeNull();
+    expect(created.tax_ids).toEqual([{ country: 'FR', kind: 'vat', value: 'FR12345678901' }]);
+    expect(created.contacts?.[0]?.primary).toBe(true);
+  });
+
+  it('clears a directory text field on update by sending an empty string, and keeps the list fields', () => {
+    const update = updateInputFromDraft({ ...emptyDraft(), website: '', email: '  ', tags: '' });
+    expect(update.website).toBe('');
+    expect(update.email).toBe('');
+    expect(update.tags).toEqual([]);
+  });
+
+  it('reads a party into a draft, and the validate request names the directory fields it holds', () => {
+    const p = party({ trading_name: 'Halden', website: 'https://halden.example', tags: ['wholesale'], tax_ids: [{ country: 'NL', kind: 'tax', value: '123' }] });
+    const draft = draftFromParty(p);
+    expect(draft.trading_name).toBe('Halden');
+    expect(draft.tags).toBe('wholesale');
+    expect(draft.tax_ids).toEqual([{ country: 'NL', kind: 'tax', value: '123' }]);
+    const check = validateInputFromDraft(draft, p.id);
+    expect(check.website).toBe('https://halden.example');
+    expect(check.tags).toEqual(['wholesale']);
+  });
+});
 
 function party(over: Partial<Party> = {}): Party {
   return {
@@ -42,13 +87,23 @@ function party(over: Partial<Party> = {}): Party {
     default_account: null,
     default_tax_code: null,
     addresses: [{ kind: 'billing', line1: 'Musterstrasse 1', line2: null, postal_code: '10115', city: 'Berlin', country: 'DE' }],
-    contacts: [{ name: 'Lea', email: 'lea@example.test', phone: null, role: null }],
+    contacts: [{ name: 'Lea', email: 'lea@example.test', phone: null, role: null, primary: true }],
+    trading_name: null,
+    registration_number: null,
+    website: null,
+    email: null,
+    phone: null,
+    default_unit: null,
+    tags: [],
+    notes: null,
+    tax_ids: [],
+    logo_document_id: null,
     ...over,
   };
 }
 
 function detail(p: Party, bills = 0): PartyDetail {
-  return { party: p, bank_changes: [], bill_count: bills, vies_enabled: true };
+  return { party: p, bank_changes: [], bill_count: bills, vies_enabled: true, recent_bills: [], recent_payments: [] };
 }
 
 describe('VAT status and IDs', () => {

@@ -5,7 +5,8 @@
 import type { ComponentChildren } from 'preact';
 import { t, useLocale } from '../i18n';
 import { Icon } from './icons';
-import { COUNTRY_CODES, countryName, emptyAddress, emptyContact, type AddressDraft, type ContactDraft } from '../lib/parties';
+import { COUNTRY_CODES, countryName, emptyAddress, emptyContact, emptyTaxId, type AddressDraft, type ContactDraft, type TaxIdDraft } from '../lib/parties';
+import type { PartyTaxId } from '../api/parties';
 import { Select } from './Select';
 import { Ltr } from '../i18n/Ltr';
 
@@ -204,6 +205,16 @@ export function ContactEditor({
               <Field id={`${idPrefix}-c${index}-email`} label={t('parties.contact_email')} type="email" value={contact.email} onInput={(v) => update(index, { email: v })} ltr autoComplete="email" />
               <Field id={`${idPrefix}-c${index}-phone`} label={t('parties.contact_phone')} type="text" inputMode="text" value={contact.phone} onInput={(v) => update(index, { phone: v })} ltr autoComplete="tel" />
             </div>
+            <label class="check-row party-check">
+              <input
+                id={`${idPrefix}-c${index}-primary`}
+                type="checkbox"
+                checked={contact.primary}
+                disabled={disabled}
+                onChange={(event) => update(index, { primary: (event.target as HTMLInputElement).checked })}
+              />
+              <span>{t('parties.contact_primary')}</span>
+            </label>
           </div>
         );
       })}
@@ -226,5 +237,74 @@ export function ReadValue({ label, children, ltr }: { label: string; children: C
       <dt>{label}</dt>
       <dd>{ltr ? <Ltr>{children}</Ltr> : children}</dd>
     </div>
+  );
+}
+
+/** The further tax IDs: a country, a kind and a value per row, with add and remove. */
+export function TaxIdEditor({
+  idPrefix,
+  taxIds,
+  onChange,
+  error,
+  disabled,
+}: {
+  idPrefix: string;
+  taxIds: TaxIdDraft[];
+  onChange: (next: TaxIdDraft[]) => void;
+  error?: string;
+  disabled?: boolean;
+}) {
+  useLocale();
+  const update = (index: number, patch: Partial<TaxIdDraft>) => onChange(taxIds.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  const remove = (index: number) => onChange(taxIds.filter((_, i) => i !== index));
+  return (
+    <fieldset class="party-group" disabled={disabled} aria-describedby={error ? `${idPrefix}-error` : undefined}>
+      <legend>{t('parties.tax_ids')}</legend>
+      <p class="muted">{t('parties.tax_ids_intro')}</p>
+      {taxIds.map((row, index) => {
+        const n = index + 1;
+        return (
+          <div class="party-item" key={`${idPrefix}-t-${index}`}>
+            <div class="party-item-head">
+              <span class="party-item-title">{t('parties.tax_id_n', { n })}</span>
+              <button type="button" class="btn btn-sm btn-ghost" onClick={() => remove(index)} aria-label={t('parties.remove_tax_id_n', { n })}>
+                {t('parties.remove')}
+              </button>
+            </div>
+            <div class="party-grid">
+              <div class="field party-field">
+                <label for={`${idPrefix}-t${index}-country`}>{t('parties.country')}</label>
+                <CountrySelect id={`${idPrefix}-t${index}-country`} value={row.country} onChange={(country) => update(index, { country })} />
+              </div>
+              <div class="field party-field">
+                <label id={`${idPrefix}-t${index}-kind-label`} for={`${idPrefix}-t${index}-kind`}>
+                  {t('parties.tax_kind')}
+                </label>
+                <Select
+                  id={`${idPrefix}-t${index}-kind`}
+                  labelledBy={`${idPrefix}-t${index}-kind-label`}
+                  value={row.kind}
+                  onChange={(kind) => update(index, { kind: kind as PartyTaxId['kind'] })}
+                  options={[
+                    { value: 'vat', label: t('parties.tax_kind_vat') },
+                    { value: 'tax', label: t('parties.tax_kind_tax') },
+                    { value: 'other', label: t('parties.tax_kind_other') },
+                  ]}
+                />
+              </div>
+              <Field id={`${idPrefix}-t${index}-value`} label={t('parties.tax_value')} value={row.value} onInput={(v) => update(index, { value: v })} mono ltr />
+            </div>
+          </div>
+        );
+      })}
+      <button type="button" class="btn btn-sm" onClick={() => onChange([...taxIds, emptyTaxId()])}>
+        <Icon name="plus" /> {t('parties.add_tax_id')}
+      </button>
+      {error && (
+        <span id={`${idPrefix}-error`} class="field-error">
+          {error}
+        </span>
+      )}
+    </fieldset>
   );
 }

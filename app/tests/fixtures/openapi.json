@@ -9324,6 +9324,14 @@
                     "description": "The legal name.",
                     "type": "string"
                   },
+                  "trading_name": {
+                    "description": "The name people use (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
                   "vat_id": {
                     "description": "The VAT id (optional), checked against its country's pack.",
                     "type": [
@@ -9331,6 +9339,14 @@
                       "null"
                     ],
                     "default": null
+                  },
+                  "tax_ids": {
+                    "description": "Further VAT and tax IDs (optional), each checked against its country.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/TaxId"
+                    },
+                    "default": []
                   },
                   "roles": {
                     "description": "Roles: 'customer', 'vendor', or 'both'; defaults to 'vendor'.",
@@ -9342,6 +9358,38 @@
                   },
                   "tax_number": {
                     "description": "Tax number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "registration_number": {
+                    "description": "The company registration number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "website": {
+                    "description": "Website, `http://` or `https://` (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "email": {
+                    "description": "Main email address (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "phone": {
+                    "description": "Main phone number (optional).",
                     "type": [
                       "string",
                       "null"
@@ -9382,7 +9430,7 @@
                     "default": null
                   },
                   "default_account": {
-                    "description": "Default account number (optional).",
+                    "description": "Default account number, expense or revenue (optional).",
                     "type": [
                       "string",
                       "null"
@@ -9391,6 +9439,30 @@
                   },
                   "default_tax_code": {
                     "description": "Default tax code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "default_unit": {
+                    "description": "Default business unit (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "description": "Tags (optional).",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "notes": {
+                    "description": "Notes (optional).",
                     "type": [
                       "string",
                       "null"
@@ -9558,6 +9630,83 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/parties/export": {
+      "get": {
+        "operationId": "parties_export",
+        "description": "Execute command: parties.export",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ExportOutput",
+                  "description": "The output of `parties.export`.",
+                  "type": "object",
+                  "properties": {
+                    "csv": {
+                      "description": "The CSV text, header first.",
+                      "type": "string"
+                    },
+                    "rows": {
+                      "description": "The number of parties in it.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "csv",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.export",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties export",
+        "x-ledgers-mcp": "parties_export",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties/export\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/parties/{id}": {
       "get": {
         "operationId": "parties_get",
@@ -9578,7 +9727,7 @@
                 "schema": {
                   "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "title": "GetOutput",
-                  "description": "The output of `parties.get`.",
+                  "description": "The output of `parties.get`: the party, its bank history, recent bills and\npayments. A party's open items are read by `parties.open_items`.",
                   "type": "object",
                   "properties": {
                     "party": {
@@ -9601,13 +9750,29 @@
                     "vies_enabled": {
                       "description": "Whether `parties.check_vat` can call VIES on this server (`LEDGERS_VIES=1`).",
                       "type": "boolean"
+                    },
+                    "recent_bills": {
+                      "description": "The ten most recent bills of the party, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BillSummary"
+                      }
+                    },
+                    "recent_payments": {
+                      "description": "The ten most recent payments on the party's bills, newest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentSummary"
+                      }
                     }
                   },
                   "required": [
                     "party",
                     "bank_changes",
                     "bill_count",
-                    "vies_enabled"
+                    "vies_enabled",
+                    "recent_bills",
+                    "recent_payments"
                   ]
                 }
               }
@@ -9646,6 +9811,238 @@
         "x-ledgers-cli": "ledgers parties get",
         "x-ledgers-mcp": "parties_get",
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties/{id}\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/parties/import": {
+      "post": {
+        "operationId": "parties_import",
+        "description": "Execute command: parties.import",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ImportInput",
+                "description": "The input of `parties.import_check` and `parties.import`: the CSV text.",
+                "type": "object",
+                "properties": {
+                  "csv": {
+                    "description": "The CSV file's text, with a header row.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "csv"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ImportOutput",
+                  "description": "The output of `parties.import`.",
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "description": "Parties created.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "updated": {
+                      "description": "Parties updated.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "ids": {
+                      "description": "The party ids the file wrote, in file order.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "created",
+                    "updated",
+                    "ids"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.import",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties import",
+        "x-ledgers-mcp": "parties_import",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/import\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/parties/import/check": {
+      "post": {
+        "operationId": "parties_import_check",
+        "description": "Execute command: parties.import_check",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "ImportInput",
+                "description": "The input of `parties.import_check` and `parties.import`: the CSV text.",
+                "type": "object",
+                "properties": {
+                  "csv": {
+                    "description": "The CSV file's text, with a header row.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "csv"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ImportCheckOutput",
+                  "description": "The output of `parties.import_check` and the report of `parties.import`.",
+                  "type": "object",
+                  "properties": {
+                    "valid": {
+                      "description": "True when every row is valid, so the file would import.",
+                      "type": "boolean"
+                    },
+                    "creates": {
+                      "description": "Rows that would create a party.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "updates": {
+                      "description": "Rows that would update a party.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "errors": {
+                      "description": "Rows with at least one refusal.",
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0
+                    },
+                    "rows": {
+                      "description": "Every row's report, in file order.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RowReport"
+                      }
+                    }
+                  },
+                  "required": [
+                    "valid",
+                    "creates",
+                    "updates",
+                    "errors",
+                    "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.import_check",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties import-check",
+        "x-ledgers-mcp": "parties_import_check",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/import/check\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
       }
     },
     "/v1/parties/{id}/merge": {
@@ -9745,6 +10142,87 @@
         "x-ledgers-mcp": null,
         "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/merge\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
         "x-ledgers-human-only": true
+      }
+    },
+    "/v1/parties/{id}/open-items": {
+      "get": {
+        "operationId": "parties_open_items",
+        "description": "Execute command: parties.open_items",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "OpenItemsOutput",
+                  "description": "The output of `parties.open_items`.",
+                  "type": "object",
+                  "properties": {
+                    "open_items": {
+                      "description": "The open items, oldest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OpenItemView"
+                      }
+                    },
+                    "balances": {
+                      "description": "The totals still open, per ledger and currency.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PartyBalance"
+                      }
+                    }
+                  },
+                  "required": [
+                    "open_items",
+                    "balances"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.open_items",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers parties open-items",
+        "x-ledgers-mcp": "parties_open_items",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/parties/{id}/open-items\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
     "/v1/parties/{id}/set-bank": {
@@ -9859,6 +10337,107 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/parties/{id}/set-logo": {
+      "post": {
+        "operationId": "parties_set_logo",
+        "description": "Execute command: parties.set_logo",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "parties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SetLogoInput",
+                "description": "The input of `parties.set_logo`.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "The party id (from the path).",
+                    "type": "string"
+                  },
+                  "logo_document_id": {
+                    "description": "The stored logo document (a PNG or JPEG of at most 2 MiB). Blank or absent clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "SetLogoOutput",
+                  "description": "The output of `parties.set_logo`.",
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "description": "The party with its logo.",
+                      "$ref": "#/components/schemas/PartyView"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "parties.set_logo",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers parties set-logo",
+        "x-ledgers-mcp": "parties_set_logo",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/parties/{id}/set-logo\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/parties/{id}/update": {
       "post": {
         "operationId": "parties_update",
@@ -9893,12 +10472,31 @@
                     ],
                     "default": null
                   },
+                  "trading_name": {
+                    "description": "The name people use (optional). Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
                   "vat_id": {
                     "description": "The VAT id (optional), checked against its country's pack. Blank clears it.",
                     "type": [
                       "string",
                       "null"
                     ],
+                    "default": null
+                  },
+                  "tax_ids": {
+                    "description": "Further VAT and tax IDs; when given, they replace the list (optional).",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/TaxId"
+                    },
                     "default": null
                   },
                   "roles": {
@@ -9911,6 +10509,38 @@
                   },
                   "tax_number": {
                     "description": "Tax number (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "registration_number": {
+                    "description": "The company registration number (optional). Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "website": {
+                    "description": "Website (optional). Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "email": {
+                    "description": "Main email address (optional). Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "phone": {
+                    "description": "Main phone number (optional). Blank clears it.",
                     "type": [
                       "string",
                       "null"
@@ -9960,6 +10590,33 @@
                   },
                   "default_tax_code": {
                     "description": "Default tax code (optional).",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "default_unit": {
+                    "description": "Default business unit (optional). Blank clears it.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "description": "Tags (optional); when given, they replace the list.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": null
+                  },
+                  "notes": {
+                    "description": "Notes (optional). Blank clears them.",
                     "type": [
                       "string",
                       "null"
@@ -10149,6 +10806,100 @@
                       "$ref": "#/components/schemas/Contact"
                     },
                     "default": []
+                  },
+                  "trading_name": {
+                    "description": "The name people use.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "registration_number": {
+                    "description": "The registration number.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "website": {
+                    "description": "The website.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "email": {
+                    "description": "The main email address.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "phone": {
+                    "description": "The main phone number.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "default_unit": {
+                    "description": "The business unit.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "currency": {
+                    "description": "The currency.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "language": {
+                    "description": "The language.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "description": "The tags.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": null
+                  },
+                  "notes": {
+                    "description": "The notes.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "tax_ids": {
+                    "description": "Further tax IDs.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "$ref": "#/components/schemas/TaxId"
+                    },
+                    "default": null
                   }
                 },
                 "additionalProperties": false
@@ -13182,45 +13933,62 @@
         ]
       },
       "OpenItemView": {
-        "description": "One open receivable a customer owes.",
+        "description": "One open item of a party, still partly or wholly unpaid.",
         "type": "object",
         "properties": {
           "id": {
-            "description": "The open item id, as a receipt names it.",
+            "description": "The open item id.",
+            "type": "string"
+          },
+          "ledger": {
+            "description": "`ar` for a receivable, `ap` for a payable.",
             "type": "string"
           },
           "kind": {
-            "description": "`invoice` or `credit-note`.",
+            "description": "`invoice`, `credit-note`, `bill` or `on-account`.",
             "type": "string"
           },
           "document": {
-            "description": "The document number the item was posted with, if any.",
+            "description": "The document or invoice number, when the item has one.",
             "type": [
               "string",
               "null"
             ]
           },
           "posting_date": {
-            "description": "The posting date.",
+            "description": "The posting date (YYYY-MM-DD).",
             "type": "string"
           },
           "due_date": {
-            "description": "The due date, if the item has one.",
+            "description": "The due date, when there is one.",
             "type": [
               "string",
               "null"
             ]
           },
-          "remaining": {
-            "description": "What is still owed, in the item's currency.",
-            "$ref": "#/components/schemas/SerializableAmount"
+          "currency": {
+            "description": "The currency code.",
+            "type": "string"
+          },
+          "original_minor": {
+            "description": "The original amount, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "remaining_minor": {
+            "description": "The amount still open, in minor units.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "id",
+          "ledger",
           "kind",
           "posting_date",
-          "remaining"
+          "currency",
+          "original_minor",
+          "remaining_minor"
         ]
       },
       "RuleConditions": {
@@ -13915,6 +14683,14 @@
           "needs_review": {
             "description": "True until a person confirms the vendor.",
             "type": "boolean"
+          },
+          "logo_document_id": {
+            "description": "The party's logo document, when it has one (the app shows it beside the name).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "required": [
@@ -15470,6 +16246,30 @@
           "valid"
         ]
       },
+      "TaxId": {
+        "description": "The further tax identifiers on a party: a VAT ID of another country, or a\ntax number. `vat_id` on the party stays the primary VAT ID.",
+        "type": "object",
+        "properties": {
+          "country": {
+            "description": "ISO 3166-1 alpha-2 country code.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`vat`, `tax` or `other`.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The identifier. A VAT ID carries its country prefix.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "country",
+          "kind",
+          "value"
+        ]
+      },
       "Address": {
         "description": "A postal address on a party.",
         "type": "object",
@@ -15549,6 +16349,11 @@
               "null"
             ],
             "default": null
+          },
+          "primary": {
+            "description": "Whether this is the party's primary contact (at most one per party).",
+            "type": "boolean",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -15684,6 +16489,86 @@
               "$ref": "#/components/schemas/Contact"
             },
             "default": []
+          },
+          "trading_name": {
+            "description": "The name people use (optional); `name` is the legal name.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "registration_number": {
+            "description": "The company registration number (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "website": {
+            "description": "The website, `http://` or `https://` (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "email": {
+            "description": "The main email address (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "phone": {
+            "description": "The main phone number (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "default_unit": {
+            "description": "The business unit this party's documents book to (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "tags": {
+            "description": "Tags, lower-cased.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "notes": {
+            "description": "Free-text notes (optional).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "tax_ids": {
+            "description": "Further VAT and tax identifiers; `vat_id` stays the primary VAT ID.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxId"
+            },
+            "default": []
+          },
+          "logo_document_id": {
+            "description": "The stored logo document (a PNG or JPEG), when the party has one.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "required": [
@@ -15778,6 +16663,185 @@
           "changed_at"
         ]
       },
+      "BillSummary": {
+        "description": "A recent bill of a party.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The bill id.",
+            "type": "string"
+          },
+          "invoice_number": {
+            "description": "The invoice number on the bill, when it has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invoice_date": {
+            "description": "The invoice date.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_date": {
+            "description": "The due date.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "The currency code.",
+            "type": "string"
+          },
+          "gross_minor": {
+            "description": "The gross amount, in minor units, when known.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "paid_minor": {
+            "description": "The amount paid so far, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "posted": {
+            "description": "Whether the bill has been posted to the books.",
+            "type": "boolean"
+          },
+          "discarded": {
+            "description": "Whether the bill was discarded.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "currency",
+          "paid_minor",
+          "posted",
+          "discarded"
+        ]
+      },
+      "PaymentSummary": {
+        "description": "A payment made against a party's bill.",
+        "type": "object",
+        "properties": {
+          "bill_id": {
+            "description": "The bill the payment settles.",
+            "type": "string"
+          },
+          "invoice_number": {
+            "description": "The invoice number of that bill, when it has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "description": "The currency code.",
+            "type": "string"
+          },
+          "paid_minor": {
+            "description": "The cumulative amount paid, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "paid_at": {
+            "description": "When the payment was last recorded.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bill_id",
+          "currency",
+          "paid_minor",
+          "paid_at"
+        ]
+      },
+      "RowReport": {
+        "description": "One row's outcome: what it does, and its errors.",
+        "type": "object",
+        "properties": {
+          "line": {
+            "description": "The line in the file (the header is line 1).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "action": {
+            "description": "`create`, `update` or `error`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The party id the row names (or the server fills for a create).",
+            "type": "string"
+          },
+          "errors": {
+            "description": "The refusals for this row; empty when the row is valid.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RowError"
+            }
+          }
+        },
+        "required": [
+          "line",
+          "action",
+          "id",
+          "errors"
+        ]
+      },
+      "RowError": {
+        "description": "A refused row: the problem's slug, the field when one is named, and the message.",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "description": "The problem type slug (`party-vat-invalid`, ...).",
+            "type": "string"
+          },
+          "field": {
+            "description": "The field the refusal is about, or empty for the row as a whole.",
+            "type": "string"
+          },
+          "message": {
+            "description": "The message, in the server's words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "field",
+          "message"
+        ]
+      },
+      "PartyBalance": {
+        "description": "The total still open for a party, per ledger and currency.",
+        "type": "object",
+        "properties": {
+          "ledger": {
+            "description": "`ar` or `ap`.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The currency code.",
+            "type": "string"
+          },
+          "remaining_minor": {
+            "description": "The amount still open, in minor units.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "ledger",
+          "currency",
+          "remaining_minor"
+        ]
+      },
       "FieldError": {
         "description": "One refused field and why.",
         "type": "object",
@@ -15789,6 +16853,13 @@
           "message": {
             "description": "The message, in the server's words.",
             "type": "string"
+          },
+          "slug": {
+            "description": "The problem slug of the refusal (`party-vat-invalid`, ...), so the app can word it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

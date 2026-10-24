@@ -11,6 +11,7 @@ import { t } from '../i18n';
 import { Ltr } from '../i18n/Ltr';
 import { useSession } from '../session';
 import { VatChip } from './PartyParts';
+import { Avatar } from './Avatar';
 import { vatStatus } from '../lib/parties';
 
 const MAX_OPTIONS = 8;
@@ -22,6 +23,8 @@ export interface PickedParty {
   vat_id: string | null;
   /** Left out when the VAT check is not known for this party (a bill's vendor). */
   latest_vies?: PartyViesResult | null;
+  /** The party's logo document, shown beside the name when it has one. */
+  logo_document_id?: string | null;
 }
 
 export function PartyPicker({
@@ -126,6 +129,7 @@ export function PartyPicker({
       {selected && !open && (
         <div class="party-picker-current">
           <span class="party-picker-name">
+            <Avatar name={selected.name} logo={selected.logo_document_id ? { documentId: selected.logo_document_id } : null} size="xs" />{' '}
             <Ltr>{selected.name}</Ltr>
           </span>
           {selected.latest_vies !== undefined && <VatChip status={vatStatus({ vat_id: selected.vat_id, latest_vies: selected.latest_vies })} />}
@@ -173,6 +177,7 @@ export function PartyPicker({
               onClick={() => choose(party)}
             >
               <span>
+                <Avatar name={party.name} logo={party.logo_document_id ? { documentId: party.logo_document_id } : null} size="xs" />{' '}
                 <Ltr>{party.name}</Ltr>
                 {party.vat_id && (
                   <span class="muted party-picker-vat">
