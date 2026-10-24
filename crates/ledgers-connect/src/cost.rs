@@ -235,6 +235,22 @@ pub fn epoch_seconds(now: &str) -> Option<i64> {
     Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
 }
 
+/// The `YYYY-MM-DD` UTC date of `seconds` since the Unix epoch.
+#[must_use]
+pub fn date_of_epoch(seconds: i64) -> String {
+    // Howard Hinnant's civil-from-days, the inverse of `epoch_seconds`'s day count.
+    let z = seconds.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +364,21 @@ mod tests {
             Some(0)
         );
         assert!(micro_of_value(&serde_json::json!(true)).is_err());
+    }
+
+    #[test]
+    fn dates_round_trip_through_epoch_seconds() {
+        assert_eq!(date_of_epoch(0), "1970-01-01");
+        assert_eq!(date_of_epoch(951_868_800), "2000-03-01");
+        assert_eq!(date_of_epoch(1_792_836_000), "2026-10-24");
+        assert_eq!(
+            date_of_epoch(epoch_seconds("2028-02-29T23:59:59Z").unwrap()),
+            "2028-02-29"
+        );
+        assert_eq!(
+            date_of_epoch(epoch_seconds("2026-12-31T00:00:00Z").unwrap()),
+            "2026-12-31"
+        );
     }
 
     #[test]

@@ -75,6 +75,18 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://supabase.com/dashboard/account/tokens',
     tokenLabel: 'integrations.create_token',
   },
+  openai: {
+    imports: 'integrations.openai_imports',
+    scopes: 'integrations.scopes_openai',
+    tokenUrl: 'https://platform.openai.com/settings/organization/admin-keys',
+    tokenLabel: 'integrations.create_admin_key',
+  },
+  openrouter: {
+    imports: 'integrations.openrouter_imports',
+    scopes: 'integrations.scopes_openrouter',
+    tokenUrl: 'https://openrouter.ai/settings/management-keys',
+    tokenLabel: 'integrations.create_management_key',
+  },
 };
 
 /** The label of each credential field the connectors name. */
@@ -96,7 +108,7 @@ const GENERIC_CONFIG: Record<string, MessageKey> = {
 };
 
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
-const COMING_SOON = ['MiniMax', 'OpenAI', 'GitHub', 'Stripe', 'Polar', 'Google Workspace', 'Resend'];
+const COMING_SOON = ['MiniMax', 'GitHub', 'Stripe', 'Polar', 'Google Workspace', 'Resend'];
 
 function Mark({ connector }: { connector: string }) {
   const mark = BRAND_MARKS[connector];

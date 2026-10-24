@@ -121,6 +121,20 @@ const CONNECTORS = [
     hosts: ['api.supabase.com'],
     config_keys: ['organization'],
   },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    credential_fields: [{ name: 'token', label: 'Admin API key (organization owner or admin)' }],
+    hosts: ['api.openai.com'],
+    config_keys: [],
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    credential_fields: [{ name: 'token', label: 'Management API key' }],
+    hosts: ['openrouter.ai'],
+    config_keys: [],
+  },
 ];
 
 const MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'];

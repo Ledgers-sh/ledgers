@@ -86,6 +86,8 @@ pub fn all() -> Vec<Box<dyn Connector>> {
         Box::new(crate::gcp::GoogleCloud),
         Box::new(crate::azure::AzureCost),
         Box::new(crate::supabase::Supabase),
+        Box::new(crate::openai::OpenAi),
+        Box::new(crate::openrouter::OpenRouter),
     ]
 }
 
