@@ -5,12 +5,16 @@
 //! Template rendering for legally required fields (German §14 `UStG`).
 
 pub mod commands;
+pub mod einvoice;
 pub mod model;
 pub mod module;
 pub mod store;
 pub mod template;
 
 pub use commands::{CreditInvoice, IssueInvoice};
+pub use einvoice::{
+    ContactInfo, EInvoiceDocument, EInvoiceError, PartyInfo, PaymentMeans, Profile, render_einvoice,
+};
 pub use module::InvoiceModule;
 
 /// The invoice migrations, in apply order: the portable set (SQLite dialect,
