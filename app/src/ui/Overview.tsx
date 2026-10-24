@@ -65,7 +65,7 @@ function KpiCard({ kpi, currency, sub }: { kpi: Kpi; currency: string; sub: stri
       <span class="kpi-label">{t(kpi.label)}</span>
       <Money class="kpi-value" minor={kpi.value} currency={currency} />
       <span class={`kpi-change ${tone}`}>{text}</span>
-      <span class="kpi-sub">{sub}</span>
+      <span class="kpi-sub" title={sub}>{sub}</span>
       <Sparkline values={kpi.spark} tone={kpi.tone} />
     </div>
   );

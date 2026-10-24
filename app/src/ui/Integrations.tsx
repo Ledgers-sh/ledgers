@@ -182,11 +182,11 @@ export function IntegrationsPanel() {
               <div class="gallery-head">
                 <Mark connector={connector.id} />
                 <div>
-                  <h4 class="gallery-name">{connector.name}</h4>
-                  <p class="muted gallery-imports">{t(SOURCE_HELP[connector.id]?.imports ?? 'integrations.cf_imports')}</p>
+                  <h4 class="gallery-name" title={connector.name}>{connector.name}</h4>
+                  <p class="muted gallery-imports" title={t(SOURCE_HELP[connector.id]?.imports ?? 'integrations.cf_imports')}>{t(SOURCE_HELP[connector.id]?.imports ?? 'integrations.cf_imports')}</p>
                 </div>
               </div>
-              <p class="muted gallery-hosts mono">{connector.hosts.join(', ')}</p>
+              <p class="muted gallery-hosts mono" title={connector.hosts.join(', ')}>{connector.hosts.join(', ')}</p>
               {person && (
                 <button
                   type="button"

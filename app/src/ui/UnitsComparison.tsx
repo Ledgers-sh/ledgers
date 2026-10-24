@@ -97,7 +97,7 @@ export function UnitsComparison({
                         <span class="mono unit-card-code">{unit.code}</span>
                       </>
                     )}
-                    <span class="unit-card-name">{unit.name}</span>
+                    <span class="unit-card-name" title={unit.name}>{unit.name}</span>
                   </span>
                   <span class="unit-card-figures">
                     <Figure label={t('units.revenue')} amount={row.revenue} />
