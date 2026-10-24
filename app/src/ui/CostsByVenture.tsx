@@ -21,6 +21,7 @@ const SOURCE_NAMES: Record<string, string> = {
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
   stripe: 'Stripe',
+  polar: 'Polar',
 };
 
 /** Stacked bars per month, one segment per series (a unit or a source). Same frame as the other charts. */

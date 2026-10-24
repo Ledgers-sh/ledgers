@@ -17,6 +17,10 @@ const D1_CONNECT_PROVIDERS: &str =
 const D1_CONNECT_CLOUD: &str =
     include_str!("../d1/migrations/0042_ledgers_connect_connect_cloud.sql");
 
+/// The D1 mirror of migration 0006 (Polar).
+const D1_CONNECT_POLAR: &str =
+    include_str!("../d1/migrations/0045_ledgers_connect_connect_polar.sql");
+
 /// The D1 mirror of migration 0005 (Stripe, and the ledger idempotency table).
 const D1_CONNECT_STRIPE: &str =
     include_str!("../d1/migrations/0044_ledgers_connect_connect_stripe.sql");
@@ -123,6 +127,19 @@ fn the_cloud_mirror_applies_after_the_provider_mirror_to_a_database_with_rows() 
         [],
     )
     .expect("the ledger idempotency table accepts a row");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_POLAR}\nCOMMIT;"))
+        .expect("0045 applies after 0044, with the rows in place");
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_ledger_line WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+    conn.execute(
+        "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+         VALUES ('conn-polar', 'co-1', 'polar', 'Polar', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+        [],
+    )
+    .expect("polar is accepted after 0045");
     for connector in ["openai", "openrouter"] {
         conn.execute(
             "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)

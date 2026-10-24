@@ -385,6 +385,7 @@ impl ServerDispatch {
                     deps,
                     presented.clone(),
                     request_id,
+                    &caller,
                     &connection,
                     &output.entries,
                 )
@@ -512,6 +513,7 @@ impl ServerDispatch {
         deps: &Deps,
         presented: Option<Presented>,
         request_id: &str,
+        caller: &str,
         connection: &ledgers_connect::store::ConnectionRow,
         entries: &[ledgers_connect::model::PlannedEntry],
     ) -> Result<Vec<ledgers_connect::commands::LedgerLink>, String> {
@@ -568,6 +570,10 @@ impl ServerDispatch {
                     .map(str::to_owned)
                     .ok_or_else(|| format!("{} posted without an entry id", entry.provider_id))?
             };
+            if entry.suspense {
+                self.raise_suspense_item(deps, caller, request_id, connection, entry, &entry_id)
+                    .await?;
+            }
             links.push(ledgers_connect::commands::LedgerLink {
                 provider_id: entry.provider_id.clone(),
                 entry_id,
@@ -575,6 +581,137 @@ impl ServerDispatch {
             });
         }
         Ok(links)
+    }
+
+    /// Raises the approval item for a suspense entry, once per entry. The item's preview
+    /// shows the transaction, its amount and why it went to suspense, and it proposes the
+    /// connection's revenue account as the re-book target. A person approves it in the
+    /// Approvals inbox; approval posts the re-book (`connections.suspense_rebook`).
+    #[allow(clippy::too_many_lines)]
+    async fn raise_suspense_item(
+        &self,
+        deps: &Deps,
+        caller: &str,
+        request_id: &str,
+        connection: &ledgers_connect::store::ConnectionRow,
+        entry: &ledgers_connect::model::PlannedEntry,
+        entry_id: &str,
+    ) -> Result<(), String> {
+        let company = self.company_id();
+        let command =
+            <ledgers_connect::commands::SuspenseRebook as ledgers_commands::Command>::NAME;
+        let db = deps.db.as_ref();
+        let pattern = format!("%\"entry_id\":\"{entry_id}\"%");
+        let raised = db
+            .query(&cratefield_core::Statement::with_values(
+                "SELECT id FROM approval_request WHERE company_id = ? AND command = ? AND input LIKE ?".to_owned(),
+                vec![
+                    sea_query::Value::from(company),
+                    sea_query::Value::from(command),
+                    sea_query::Value::from(pattern.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|err| format!("the approvals could not be read: {err}"))?;
+        if !raised.rows.is_empty() {
+            return Ok(());
+        }
+        let config: Value = serde_json::from_str(&connection.config_json).unwrap_or(Value::Null);
+        let target = config
+            .get("revenue_account")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "the connection has no revenue account to propose".to_owned())?
+            .to_owned();
+        let leg = entry
+            .lines
+            .iter()
+            .find(|line| {
+                line.account
+                    == config
+                        .get("suspense_account")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+            })
+            .ok_or_else(|| format!("{} has no suspense line", entry.provider_id))?;
+        let typed = ledgers_connect::commands::SuspenseRebookInput {
+            connection_id: connection.id.clone(),
+            entry_id: entry_id.to_owned(),
+            to_account: target.clone(),
+        };
+        let input =
+            serde_json::to_value(&typed).map_err(|err| format!("the request input: {err}"))?;
+        let now = now_rfc3339(deps.clock.as_ref());
+        // The request hash covers the command's own preview, exactly as the executor
+        // recomputes it when a person approves: a request whose state changed is superseded.
+        let ctx = ledgers_commands::CommandContext {
+            company_id: company.to_owned(),
+            request_id: request_id.to_owned(),
+            event_id: deps.id_gen.ulid(),
+            now: now.clone(),
+            is_person: true,
+        };
+        let journal =
+            <ledgers_connect::commands::SuspenseRebook as ledgers_commands::Command>::preview(
+                &ledgers_connect::commands::SuspenseRebook,
+                db,
+                &ctx,
+                &typed,
+            )
+            .await
+            .map_err(|err| format!("the re-book could not be previewed: {err}"))?;
+        let command_preview =
+            serde_json::to_value(&journal).map_err(|err| format!("the preview: {err}"))?;
+        let reads = std::collections::BTreeMap::new();
+        let request_hash = ledgers_commands::request_hash(command, &input, &journal, &reads)
+            .map_err(|err| format!("the request hash: {err}"))?;
+        // What a person reads in the inbox: the command's preview, with the transaction and why.
+        let mut preview = command_preview.clone();
+        if let Value::Object(map) = &mut preview {
+            map.insert(
+                "transaction".to_owned(),
+                json!({
+                    "provider_id": entry.provider_id,
+                    "description": entry.description,
+                    "amount_minor": leg.minor.to_string(),
+                    "currency": entry.currency,
+                    "posting_date": entry.posting_date,
+                }),
+            );
+            map.insert(
+                "reason".to_owned(),
+                json!("Stripe reported a category this connector does not know, so the amount is in suspense."),
+            );
+            map.insert("proposed_account".to_owned(), json!(target));
+        }
+        let rules =
+            super::settings::approval_rules_for::<ledgers_connect::commands::SuspenseRebook>(
+                db, company,
+            )
+            .await
+            .map_err(|err| format!("the approval rules could not be read: {err}"))?;
+        let approval_id = deps.id_gen.ulid();
+        let (statement, _request) =
+            ledgers_approvals::request_statement(&ledgers_approvals::NewRequest {
+                id: &approval_id,
+                company_id: company,
+                command,
+                input: &input,
+                preview: &preview,
+                reads: &reads,
+                request_hash: &request_hash,
+                reason: "a Stripe transaction is in suspense and needs a decision",
+                requested_by: caller,
+                counterparty: None,
+                now: &now,
+                ttl: Duration::from_hours(u64::from(rules.ttl_hours)),
+                low_risk_limits: &rules.low_risk,
+            })
+            .map_err(|err| format!("the approval request could not be built: {err}"))?;
+        let _ = request_id;
+        db.batch_atomic(&[statement])
+            .await
+            .map_err(|err| format!("the approval request could not be stored: {err}"))?;
+        Ok(())
     }
 
     /// Calls the vendor for the window. `Ok` is the vendor's answer, `Err` the
@@ -880,26 +1017,29 @@ struct SuggestedRule {
     account_number: String,
 }
 
-/// The suggested bank rule for a new connection, when its connector has one.
-/// Stripe's payouts arrive as inflows whose description names Stripe.
+/// The suggested bank rule for a new connection, when its connector has one. A
+/// provider's payouts arrive as inflows whose description names the provider; the rule
+/// books them to the connection's clearing account.
 fn suggested_rule_for(input: &Value) -> Option<SuggestedRule> {
     let connector = input.get("connector").and_then(Value::as_str)?;
-    if connector != "stripe" {
-        return None;
-    }
+    let (connector, keyword) = match connector {
+        "stripe" => ("stripe", "stripe"),
+        "polar" => ("polar", "polar"),
+        _ => return None,
+    };
     let clearing = input
         .pointer("/config/clearing_account")
         .and_then(Value::as_str)?;
     let name = input
         .get("name")
         .and_then(Value::as_str)
-        .unwrap_or("Stripe")
+        .unwrap_or(connector)
         .to_owned();
     Some(SuggestedRule {
-        connector: "stripe",
+        connector,
         name: format!("{name}: payouts (suggested)"),
         conditions: ledgers_bank::rules::RuleConditions {
-            contains: Some("stripe".to_owned()),
+            contains: Some(keyword.to_owned()),
             counterparty_iban: None,
             amount_min: Some(1),
             amount_max: None,

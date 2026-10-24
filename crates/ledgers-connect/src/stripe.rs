@@ -51,6 +51,9 @@ pub struct Accounts {
     pub expense: String,
     /// The suspense account for a category this connector does not know.
     pub suspense: String,
+    /// The Connect account the balance transactions belong to (`acct_...`), when the
+    /// connection reads one. It is the allocation resource when a charge has no product.
+    pub connect: Option<String>,
 }
 
 /// The Stripe connector.
@@ -167,6 +170,11 @@ fn accounts_of(config: &Value) -> Result<Accounts, String> {
         revenue: config_text(config, "revenue_account")?.to_owned(),
         expense: config_text(config, "expense_account")?.to_owned(),
         suspense: config_text(config, "suspense_account")?.to_owned(),
+        connect: config
+            .get("stripe_account")
+            .and_then(Value::as_str)
+            .filter(|account| !account.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -221,7 +229,7 @@ pub fn plan_transaction(bt: &Value, accounts: &Accounts) -> Result<Option<Planne
         "fee" => (None, Some(amount), -amount, false, "fee"),
         other => (Some(amount), Some(-fee), -net, true, other),
     };
-    let resource = resource_of(bt);
+    let resource = resource_of(bt, accounts);
     let mut lines = Vec::new();
     let mut push = |account: &str, credit: i64, resource: Option<String>| {
         if credit == 0 {
@@ -278,14 +286,16 @@ pub fn plan_transaction(bt: &Value, accounts: &Accounts) -> Result<Option<Planne
 }
 
 /// The allocation resource of a transaction: its product or unit metadata on the
-/// charge or refund, else its Connect account, else none.
-fn resource_of(bt: &Value) -> Option<String> {
+/// charge or refund, else the Connect account it belongs to, else none. A connected
+/// account's own id maps to a business unit through the allocation rules.
+fn resource_of(bt: &Value, accounts: &Accounts) -> Option<String> {
     let metadata = bt.pointer("/source/metadata");
     metadata
         .and_then(|m| m.get("product").or_else(|| m.get("unit")))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
+        .or_else(|| accounts.connect.clone())
 }
 
 /// The presentment currency and amount of the charge or refund, when expanded.

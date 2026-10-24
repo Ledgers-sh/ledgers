@@ -20,6 +20,7 @@ fn accounts() -> Accounts {
         revenue: "8400".to_owned(),
         expense: "6850".to_owned(),
         suspense: "1990".to_owned(),
+        connect: None,
     }
 }
 
@@ -264,4 +265,31 @@ fn config_names_the_three_accounts_and_an_optional_connect_account() {
     assert!(Stripe.validate_config(&connect).is_err());
     assert_eq!(Stripe.allowed_hosts(), &["api.stripe.com"]);
     assert_eq!(Stripe.credential_fields()[0].name, "token");
+}
+
+#[test]
+fn a_connect_account_is_the_allocation_resource_when_a_charge_has_no_product() {
+    let mut connected = accounts();
+    connected.connect = Some("acct_1Example".to_owned());
+    let mut plain = charge();
+    plain["source"]["metadata"] = json!({});
+    let entry = plan_transaction(&plain, &connected)
+        .expect("planned")
+        .expect("an entry");
+    let revenue = entry
+        .lines
+        .iter()
+        .find(|l| l.account == "8400")
+        .expect("revenue line");
+    assert_eq!(revenue.resource.as_deref(), Some("acct_1Example"));
+    // A product still wins over the account.
+    let tagged = plan_transaction(&charge(), &connected)
+        .expect("planned")
+        .expect("an entry");
+    let revenue = tagged
+        .lines
+        .iter()
+        .find(|l| l.account == "8400")
+        .expect("revenue line");
+    assert_eq!(revenue.resource.as_deref(), Some("ledgers-pro"));
 }

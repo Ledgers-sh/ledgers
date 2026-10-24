@@ -4,7 +4,7 @@ Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
 `planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
-`supabase`, `openai` and `openrouter`, and `stripe`. Supabase books no money;
+`supabase`, `openai` and `openrouter`, `stripe` and `polar`. Supabase books no money;
 OpenRouter books one invoice per day with no allocation; Stripe posts journal entries
 (not bills); the others book bills by month.
 
@@ -236,11 +236,20 @@ suggestion and posting path.
   Refunds are their own entries, not reversals of the charge, because a Stripe refund is
   a new event. `entries.transfer` is not used.
 - **Unknown categories.** Anything not in the table goes to the suspense account, with a
-  note in the run. It is never dropped. An approval item in the Approvals inbox is added
-  in the next release.
+  note in the run. It is never dropped. Each suspense entry also raises an item in the
+  Approvals inbox (`connections.suspense_rebook`). Its preview shows the transaction, the
+  amount, why it is in suspense, and the proposed account (the connection's revenue
+  account). A person approves it, and the approval posts a balanced entry that takes the
+  amount off suspense and books it to that account. Rejecting it leaves the amount in
+  suspense. Each entry raises at most one item; a rejected item is not raised again. To book
+  to a different account, reject the item and change the connection's revenue account, or
+  book the entry by hand: the approval freezes its target, as every approval does.
 - **Connect.** Set `stripe_account` to a connected account id (`acct_…`) to read that
-  account's balance transactions with the `Stripe-Account` header. Leave it empty for the
-  platform's own account.
+  account's balance transactions with the `Stripe-Account` header. A connected account is
+  its own allocation resource: a charge with no `product` metadata allocates by the account
+  id, so an allocation rule such as `acct_1Example` → a business unit maps each connected
+  account to its unit. Create one connection per connected account to keep the books
+  separate. Leave the field empty for the platform's own account.
 - **Limits and throttling.** A window of more than 20,000 transactions is read up to that
   limit, with a note; a later sync reads the rest. A `429` is retried with backoff, up to
   three attempts, then reported as a failed run.
@@ -259,6 +268,34 @@ and not be a heading.
 a payout is an inflow whose description contains `stripe` (amount at least 1 minor unit),
 which books to the clearing account. The rule is proposed by the connector and waits in
 Bank, Rules until a person enables it.
+
+## Polar (`polar`): orders and refunds into a Polar balance
+
+Polar is a merchant of record. Its books are journal entries, as for Stripe. Source:
+<https://polar.sh/docs/api-reference/orders/list> (orders) and
+<https://polar.sh/docs/api-reference/refunds/list> (refunds).
+
+- **Credential.** An **organization access token** with `orders:read` and `refunds:read`.
+  Nothing else.
+- **Orders.** `GET https://api.polar.sh/v1/orders/`, paged by `page` (`limit=100`) while
+  `pagination.max_page` allows, in the window by `created_at`. Each order with total `T`,
+  tax `X` and platform fee `F` posts to the **Polar balance** (`clearing_account`): revenue
+  `T - X` (or `T` when no tax account is set), the fee to `expense_account` as a debit, and
+  `T - F` debited to the Polar balance. Tax goes to `tax_account` when one is set.
+- **Refunds.** `GET https://api.polar.sh/v1/refunds/` reverses them: revenue (and tax) are
+  debited, and the Polar balance is credited with the refunded amount.
+- **Payouts.** Polar's public API has no payout or balance endpoint, so payouts are not read.
+  A payout reaches the bank as a bank line. A suggested bank rule (contains `polar`, inflows)
+  books it to the Polar balance when a person enables it, and the balance reaches zero. The
+  server test `polar_ledger.rs` runs this path: an order, a refund and the payout leave the
+  balance at zero.
+- **Tax.** With no `tax_account`, tax stays inside revenue and the run notes say so.
+- **Allocation.** An order's product (`product_id`) is its resource; a refund has no product
+  of its own, so it allocates to the default unit.
+- **Idempotency.** Entries are `polar-order:{id}` and `polar-refund:{id}`. A repeat sync
+  posts nothing.
+- **Config.** `clearing_account` (the Polar balance), `revenue_account`, `expense_account`
+  (fees), and the optional `tax_account`. Each is checked against the chart on save.
 
 ## Providers not built, and why
 
@@ -287,7 +324,8 @@ currency field. Until then, Supabase reports these prices as run notes only.
 - Migration `0002` widens the `connector` check to include `aws` and `vercel`;
   migration `0003` adds `gcp`, `azure` and `supabase`; migration `0004` adds `openai`
   and `openrouter`; migration `0005` adds `stripe` and the ledger idempotency table
-  `connector_ledger_line` (D1 mirror `0044`).
+  `connector_ledger_line` (D1 mirror `0044`); migration `0006` adds `polar` (D1 mirror
+  `0045`).
   SQLite cannot alter a check constraint, so the migration copies the rows into a
   new table and renames it into place. It defers foreign-key checks with
   `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores

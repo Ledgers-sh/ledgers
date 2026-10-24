@@ -13,7 +13,7 @@
 //! as a failed run.
 
 use crate::allocation::{AllocationRule, suggest_unit, unit_for, validate_rules};
-use crate::connector::{self, Connector, CredentialField};
+use crate::connector::{self, Connector, CredentialField, config_text};
 use crate::http::sanitize_vendor_text;
 use crate::model::{InvoiceRecord, SyncOutput};
 use crate::split::{bill_lines, net_of_gross, split};
@@ -21,6 +21,10 @@ use crate::store::{self, ConnectionRow, InvoiceRow, UsageRow};
 use cratefield_core::{Database, Statement};
 use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
+use ledgers_ledger::surface::{
+    PostEntry, PostEntryInput, PostEntryOutput, SerializableAmount, SerializableEntryDraft,
+    SerializableLine,
+};
 use ledgers_money::Currency;
 use schemars::JsonSchema;
 use sea_query::Value as SeaValue;
@@ -46,6 +50,7 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
             "suspense_account",
             "stripe_account",
         ],
+        "polar" => &["clearing_account", "revenue_account", "tax_account"],
         "gcp" => &["project", "dataset", "table"],
         "azure" => &["tenant_id", "client_id", "subscription_id"],
         "supabase" => &["organization"],
@@ -262,6 +267,12 @@ fn ledger_account_keys(connector: &str) -> &'static [&'static str] {
             "clearing_account",
             "revenue_account",
             "suspense_account",
+            "expense_account",
+        ],
+        "polar" => &[
+            "clearing_account",
+            "revenue_account",
+            "tax_account",
             "expense_account",
         ],
         _ => &[],
@@ -1885,4 +1896,163 @@ pub struct TestOutput {
     pub notes: Vec<String>,
     /// Why the test failed, when it failed.
     pub error: Option<String>,
+}
+
+// ------------------------------------------------------- suspense rebook
+
+/// The input of `connections.suspense_rebook`: a journal entry a ledger connector posted to
+/// the suspense account, and the account its suspense amount moves to.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct SuspenseRebookInput {
+    /// The connection the entry came from.
+    pub connection_id: String,
+    /// The journal entry that holds the suspense amount.
+    pub entry_id: String,
+    /// The account the suspense amount is re-booked to. A leaf of the chart.
+    pub to_account: String,
+}
+
+/// `connections.suspense_rebook`: a person's approval of a suspense item. Posts a balanced
+/// entry that takes the suspense amount off the suspense account and books it to the chosen
+/// account. The entry's external id is `suspense-rebook:{entry id}`, so a second approval
+/// of the same item posts nothing new.
+pub struct SuspenseRebook;
+
+/// Builds the re-book draft for `input`: the reverse of the entry's suspense leg, and the
+/// same amount on the target account, with the same dimensions.
+async fn rebook_draft(
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &SuspenseRebookInput,
+) -> Result<PostEntryInput, CommandError> {
+    let connection = live_connection(db, ctx, &input.connection_id).await?;
+    let config: Value = serde_json::from_str(&connection.config_json).unwrap_or(Value::Null);
+    let suspense = config_text(&config, "suspense_account")
+        .map_err(invalid)?
+        .to_owned();
+    if input.to_account.trim().is_empty() {
+        return Err(invalid("to_account is the account to re-book to"));
+    }
+    let header = db
+        .query(&Statement::with_values(
+            "SELECT journal_id, fiscal_year, document_date, posting_date, base_currency FROM journal_entry WHERE company_id = ? AND id = ?".to_owned(),
+            vec![
+                SeaValue::from(ctx.company_id.as_str()),
+                SeaValue::from(input.entry_id.as_str()),
+            ],
+        ))
+        .await?;
+    let row = header
+        .rows
+        .first()
+        .ok_or_else(|| invalid(format!("journal entry {} does not exist", input.entry_id)))?;
+    let journal_id = row.get::<String>("journal_id").unwrap_or_default();
+    let fiscal_year = row.get::<i64>("fiscal_year").unwrap_or_default();
+    let document_date = row.get::<String>("document_date").unwrap_or_default();
+    let posting_date = row.get::<String>("posting_date").unwrap_or_default();
+    let currency = row.get::<String>("base_currency").unwrap_or_default();
+    let lines = db
+        .query(&Statement::with_values(
+            "SELECT account_number, base_minor, dimensions FROM journal_line WHERE entry_id = ? ORDER BY line_no".to_owned(),
+            vec![SeaValue::from(input.entry_id.as_str())],
+        ))
+        .await?;
+    let leg = lines
+        .rows
+        .iter()
+        .find(|line| line.get::<String>("account_number").as_deref() == Some(suspense.as_str()))
+        .ok_or_else(|| {
+            invalid(format!(
+                "journal entry {} has no suspense line",
+                input.entry_id
+            ))
+        })?;
+    let signed = leg.get::<i64>("base_minor").unwrap_or(0);
+    if signed == 0 {
+        return Err(invalid("the suspense line has no amount to re-book"));
+    }
+    let dimensions = leg
+        .get::<String>("dimensions")
+        .unwrap_or_else(|| "{}".to_owned());
+    let dimensions: BTreeMap<String, String> =
+        serde_json::from_str(&dimensions).unwrap_or_default();
+    // The suspense leg was a debit when `signed` is positive; the re-book reverses it there
+    // and books the same side to the target.
+    let (suspense_side, target_side) = if signed > 0 {
+        ("credit", "debit")
+    } else {
+        ("debit", "credit")
+    };
+    let amount = SerializableAmount {
+        minor: signed.unsigned_abs().to_string(),
+        currency: currency.clone(),
+    };
+    let draft = SerializableEntryDraft {
+        journal_id: journal_id.clone(),
+        document_date,
+        posting_date,
+        tax_point_date: None,
+        base_currency: currency,
+        description: format!("Re-booked from suspense: {}", connection.name),
+        source_documents: Vec::new(),
+        external_id: Some(format!("suspense-rebook:{}", input.entry_id)),
+        source_app: Some("ledgers-connect".to_owned()),
+        reverses: None,
+        lines: vec![
+            SerializableLine {
+                account_number: suspense,
+                side: suspense_side.to_owned(),
+                base: amount.clone(),
+                fx: None,
+                tax_code: None,
+                dimensions: BTreeMap::new(),
+                memo: None,
+            },
+            SerializableLine {
+                account_number: input.to_account.trim().to_owned(),
+                side: target_side.to_owned(),
+                base: amount,
+                fx: None,
+                tax_code: None,
+                dimensions,
+                memo: None,
+            },
+        ],
+    };
+    Ok(PostEntryInput {
+        journal_id,
+        fiscal_year,
+        entry: draft,
+    })
+}
+
+#[async_trait::async_trait]
+impl Command for SuspenseRebook {
+    const NAME: &'static str = "connections.suspense_rebook";
+    const TIER: Tier = Tier::PostWithinLimits;
+    const HUMAN_ONLY: bool = true;
+    const TARGET: Option<&'static str> = Some("entry_id");
+    type Input = SuspenseRebookInput;
+    type Output = PostEntryOutput;
+
+    async fn preview(
+        &self,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        let posting = rebook_draft(db, ctx, input).await?;
+        PostEntry.preview(db, ctx, &posting).await
+    }
+
+    async fn plan(
+        &self,
+        token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let posting = rebook_draft(db, ctx, input).await?;
+        PostEntry.plan(token, db, ctx, &posting).await
+    }
 }
