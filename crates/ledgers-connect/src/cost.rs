@@ -207,6 +207,24 @@ pub fn output(
     out
 }
 
+/// Formats minor units as a decimal string with the currency's decimals (`1234`
+/// at exponent 2 is `12.34`). Exact: no float is involved.
+#[must_use]
+pub fn decimal_of_minor(minor: i128, exponent: u32) -> String {
+    let sign = if minor < 0 { "-" } else { "" };
+    let magnitude = minor.unsigned_abs();
+    if exponent == 0 {
+        return format!("{sign}{magnitude}");
+    }
+    let scale = 10_u128.pow(exponent);
+    format!(
+        "{sign}{}.{:0width$}",
+        magnitude / scale,
+        magnitude % scale,
+        width = exponent as usize
+    )
+}
+
 pub fn exponent_of(code: &str) -> u32 {
     Currency::from_code(code).map_or(2, ledgers_money::Currency::exponent)
 }
@@ -254,6 +272,14 @@ pub fn date_of_epoch(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minor_units_print_as_exact_decimals() {
+        assert_eq!(decimal_of_minor(1234, 2), "12.34");
+        assert_eq!(decimal_of_minor(5, 2), "0.05");
+        assert_eq!(decimal_of_minor(-1234, 2), "-12.34");
+        assert_eq!(decimal_of_minor(7, 0), "7");
+    }
 
     fn line(period: &str, currency: &str, id: &str, micro: i128) -> CostLine {
         CostLine {

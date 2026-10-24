@@ -254,3 +254,39 @@ test('Twilio takes an API key SID and secret with the account SID, and leaves an
   expect(saved?.config).toMatchObject({ account_sid: 'AC-test-account-0001', expense_account: '6100' });
   expect(saved?.config).not.toHaveProperty('subaccount_sid');
 });
+
+test('Meta Ads, Google Ads and Jira are offered with their marks, and the Jira form says nothing is booked', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  const gallery = page.locator('.gallery');
+  for (const name of ['Meta', 'Google Ads', 'Jira']) {
+    await expect(gallery.getByRole('img', { name })).toBeVisible();
+  }
+  await expect(page.locator('.coming-soon')).not.toContainText('Jira');
+  await page.locator('.gallery-card', { hasText: 'Jira (Atlassian)' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('Nothing is booked from Atlassian');
+  await expect(form).toContainText('Jira administrator rights are optional');
+  await expect(form.getByLabel('API token')).toHaveAttribute('type', 'password');
+  await expect(form.getByLabel('Account email')).toHaveAttribute('type', 'text');
+  await expect(form.getByLabel('Jira site')).toBeVisible();
+});
+
+test('Meta Ads asks for the ad account and a read-only token, and sends the token as one credential', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'Meta Ads' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('ads_read');
+  await expect(form.getByLabel('System-user access token (ads_read)')).toHaveAttribute('type', 'password');
+  await form.getByRole('textbox', { name: /^Name/ }).first().fill('Meta (test)');
+  await form.getByLabel('Ad account ID (act_ and its digits)').fill('act_1234567890');
+  await form.getByLabel('Expense account').fill('6200');
+  await form.getByLabel('System-user access token (ads_read)').fill('token_example_0001');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Meta (test) is connected' })).toBeVisible();
+  expect(connectState.credentialsReceived).toContainEqual({ access_token: 'token_example_0001' });
+});
+

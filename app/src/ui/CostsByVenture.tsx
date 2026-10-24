@@ -23,6 +23,9 @@ const SOURCE_NAMES: Record<string, string> = {
   stripe: 'Stripe',
   polar: 'Polar',
   twilio: 'Twilio',
+  meta_ads: 'Meta Ads',
+  google_ads: 'Google Ads',
+  jira: 'Jira',
 };
 
 /** Stacked bars per month, one segment per series (a unit or a source). Same frame as the other charts. */

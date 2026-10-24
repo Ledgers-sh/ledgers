@@ -149,6 +149,35 @@ const CONNECTORS = [
     config_keys: ['account_sid', 'subaccount_sid'],
   },
   {
+    id: 'meta_ads',
+    name: 'Meta Ads',
+    credential_fields: [{ name: 'access_token', label: 'System-user access token (ads_read only)' }],
+    hosts: ['graph.facebook.com'],
+    config_keys: ['ad_account_id', 'name_prefixes'],
+  },
+  {
+    id: 'google_ads',
+    name: 'Google Ads',
+    credential_fields: [
+      { name: 'developer_token', label: 'Developer token' },
+      { name: 'client_id', label: 'OAuth client ID' },
+      { name: 'client_secret', label: 'OAuth client secret' },
+      { name: 'refresh_token', label: 'Refresh token (scope adwords)' },
+    ],
+    hosts: ['googleads.googleapis.com', 'oauth2.googleapis.com'],
+    config_keys: ['customer_id', 'login_customer_id', 'name_prefixes'],
+  },
+  {
+    id: 'jira',
+    name: 'Jira (Atlassian)',
+    credential_fields: [
+      { name: 'email', label: 'Account email' },
+      { name: 'api_token', label: 'API token' },
+    ],
+    hosts: [],
+    config_keys: ['site', 'price_per_seat', 'price_currency'],
+  },
+  {
     id: 'polar',
     name: 'Polar',
     credential_fields: [{ name: 'token', label: 'Organization access token (orders:read, refunds:read)' }],

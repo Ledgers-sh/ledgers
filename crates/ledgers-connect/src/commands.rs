@@ -12,7 +12,7 @@
 //! lands whole or not at all. A sync that the vendor refused is still recorded
 //! as a failed run.
 
-use crate::allocation::{AllocationRule, suggest_unit, unit_for, validate_rules};
+use crate::allocation::{self, AllocationRule, suggest_unit, unit_for, validate_rules};
 use crate::connector::{self, Connector, CredentialField, config_text};
 use crate::http::sanitize_vendor_text;
 use crate::model::{InvoiceRecord, SyncOutput};
@@ -55,6 +55,9 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
         "azure" => &["tenant_id", "client_id", "subscription_id"],
         "supabase" => &["organization"],
         "twilio" => &["account_sid", "subaccount_sid"],
+        "meta_ads" => &["ad_account_id", "name_prefixes"],
+        "google_ads" => &["customer_id", "login_customer_id", "name_prefixes"],
+        "jira" => &["site", "price_per_seat", "price_currency"],
         _ => &[],
     }
 }
@@ -259,6 +262,32 @@ fn check_config(connector: &dyn Connector, config: &Value) -> Result<(), Command
         }
     }
     connector.validate_config(config).map_err(invalid)
+}
+
+/// Adds an exact rule for each resource that no rule names but whose name starts with
+/// a `name_prefixes` rule of the connection (`SQZ:SQZ`). The rules are for this sync's
+/// split only; the mapping the user sees is unchanged.
+fn with_prefix_rules(
+    mut rules: Vec<AllocationRule>,
+    config: &Value,
+    usage: &[crate::model::UsageRecord],
+) -> Result<Vec<AllocationRule>, String> {
+    let Some(text) = config.get("name_prefixes").and_then(Value::as_str) else {
+        return Ok(rules);
+    };
+    let prefixes = allocation::parse_prefixes(text)?;
+    for row in usage {
+        if unit_for(&rules, &row.resource_id).is_some() {
+            continue;
+        }
+        if let Some(unit) = allocation::prefix_unit(&prefixes, &row.resource_name) {
+            rules.push(AllocationRule {
+                pattern: row.resource_id.clone(),
+                unit_code: unit.to_owned(),
+            });
+        }
+    }
+    Ok(rules)
 }
 
 /// The ledger accounts a connector posts to, by config key, for connectors that post entries.
@@ -840,6 +869,7 @@ impl Command for ConnectionsSyncNow {
             .get("vat_rate_bp")
             .and_then(Value::as_i64)
             .unwrap_or(0);
+        let rules = with_prefix_rules(rules, &config, &fetched.usage).map_err(invalid)?;
         for rule in &rules {
             require_unit(db, &ctx.company_id, &rule.unit_code).await?;
         }
@@ -2081,5 +2111,50 @@ impl Command for SuspenseRebook {
     ) -> Result<Plan<Self::Output>, CommandError> {
         let posting = rebook_draft(db, ctx, input).await?;
         PostEntry.plan(token, db, ctx, &posting).await
+    }
+}
+
+#[cfg(test)]
+mod prefix_rule_tests {
+    use super::*;
+    use crate::model::UsageRecord;
+    use serde_json::json;
+
+    fn usage(id: &str, name: &str) -> UsageRecord {
+        UsageRecord {
+            period: "2026-07".to_owned(),
+            resource_kind: "campaign".to_owned(),
+            resource_id: id.to_owned(),
+            resource_name: name.to_owned(),
+            quantity: 1,
+        }
+    }
+
+    #[test]
+    fn a_name_prefix_adds_an_exact_rule_only_where_no_rule_names_the_resource() {
+        let config = json!({ "name_prefixes": "SQZ:SQZ,LED:LED" });
+        let explicit = vec![AllocationRule {
+            pattern: "300".to_owned(),
+            unit_code: "FZ".to_owned(),
+        }];
+        let rows = vec![
+            usage("100", "SQZ_spring"),
+            usage("200", "LED launch"),
+            usage("300", "SQZ_named_elsewhere"),
+            usage("400", "unrelated"),
+        ];
+        let rules = with_prefix_rules(explicit, &config, &rows).expect("rules");
+        let found: Vec<(&str, &str)> = rules
+            .iter()
+            .map(|r| (r.pattern.as_str(), r.unit_code.as_str()))
+            .collect();
+        assert_eq!(found, [("300", "FZ"), ("100", "SQZ"), ("200", "LED")]);
+    }
+
+    #[test]
+    fn no_prefix_key_changes_nothing() {
+        let rules =
+            with_prefix_rules(Vec::new(), &json!({}), &[usage("100", "SQZ_x")]).expect("rules");
+        assert!(rules.is_empty());
     }
 }

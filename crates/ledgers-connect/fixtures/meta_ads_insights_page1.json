@@ -1,0 +1,9 @@
+{
+  "data": [
+    {"campaign_id": "120000000000001", "campaign_name": "SQZ_spring_sale", "account_currency": "USD", "spend": "1234.56", "date_start": "2026-07-01", "date_stop": "2026-07-31"},
+    {"campaign_id": "120000000000002", "campaign_name": "LED launch", "account_currency": "USD", "spend": "100.00", "date_start": "2026-07-01", "date_stop": "2026-07-31"},
+    {"campaign_id": "120000000000001", "campaign_name": "SQZ_spring_sale", "account_currency": "USD", "spend": "50.10", "date_start": "2026-08-01", "date_stop": "2026-08-31"},
+    {"campaign_id": "120000000000003", "campaign_name": "SQZ_october", "account_currency": "USD", "spend": "9.99", "date_start": "2026-10-01", "date_stop": "2026-10-31"}
+  ],
+  "paging": {"next": "https://graph.facebook.com/v26.0/act_1234567890/insights?page=2"}
+}

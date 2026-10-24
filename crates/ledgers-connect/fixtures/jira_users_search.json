@@ -1,0 +1,6 @@
+[
+  {"accountId": "test-account-1", "accountType": "atlassian", "active": true, "displayName": "Test Person One"},
+  {"accountId": "test-account-2", "accountType": "atlassian", "active": false, "displayName": "Test Person Two"},
+  {"accountId": "test-account-3", "accountType": "app", "active": true, "displayName": "Test App"},
+  {"accountId": "test-account-4", "accountType": "atlassian", "active": true, "displayName": "Test Person Four"}
+]

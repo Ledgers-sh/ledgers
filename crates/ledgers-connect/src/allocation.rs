@@ -56,6 +56,62 @@ pub fn validate_rules(rules: &[AllocationRule]) -> Result<(), String> {
     Ok(())
 }
 
+/// The name-prefix rules a connection holds, as `(prefix, unit code)` pairs, from
+/// its `name_prefixes` config key: `SQZ:SQZ,LED:LED`. A campaign or resource whose
+/// name starts with the prefix (case-insensitive, followed by a separator or the end)
+/// books to that unit when no allocation rule names it.
+///
+/// # Errors
+/// A sentence when a pair is not `PREFIX:UNIT` with alphanumeric parts.
+pub fn parse_prefixes(text: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    for pair in text
+        .split(',')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+    {
+        let (prefix, unit) = pair
+            .split_once(':')
+            .ok_or_else(|| format!("{pair}: a name prefix rule is PREFIX:UNIT"))?;
+        let (prefix, unit) = (prefix.trim(), unit.trim());
+        let plain = |text: &str| {
+            (1..=20).contains(&text.len())
+                && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        };
+        if !plain(prefix) || !plain(unit) {
+            return Err(format!(
+                "{pair}: the prefix and the unit are 1 to 20 letters, digits or dashes"
+            ));
+        }
+        out.push((prefix.to_owned(), unit.to_owned()));
+    }
+    Ok(out)
+}
+
+/// Checks the `name_prefixes` config key, when it is present.
+///
+/// # Errors
+/// A sentence naming the bad rule.
+pub fn validate_prefixes(config: &serde_json::Value) -> Result<(), String> {
+    match config.get("name_prefixes") {
+        None | Some(serde_json::Value::Null) => Ok(()),
+        Some(serde_json::Value::String(text)) => parse_prefixes(text).map(|_| ()),
+        Some(_) => Err("name_prefixes is text: PREFIX:UNIT pairs separated by commas".to_owned()),
+    }
+}
+
+/// The unit a name's prefix rule names, or `None`. The first matching pair wins.
+#[must_use]
+pub fn prefix_unit<'a>(prefixes: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    let lower = name.to_lowercase();
+    prefixes.iter().find_map(|(prefix, unit)| {
+        let head = prefix.to_lowercase();
+        let rest = lower.strip_prefix(&head)?;
+        let boundary = rest.chars().next().is_none_or(|c| !c.is_alphanumeric());
+        boundary.then_some(unit.as_str())
+    })
+}
+
 /// Splits `resource_name` into lower-case words for name suggestions.
 fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
@@ -137,5 +193,24 @@ mod tests {
             Some(("SQZ".to_owned(), 1))
         );
         assert_eq!(suggest_unit("random-thing", "xyz", &units), None);
+    }
+
+    #[test]
+    fn name_prefix_rules_match_the_whole_leading_word() {
+        let prefixes = parse_prefixes("SQZ:SQZ, led:LED").unwrap();
+        assert_eq!(prefix_unit(&prefixes, "SQZ_spring sale"), Some("SQZ"));
+        assert_eq!(prefix_unit(&prefixes, "sqz-retargeting"), Some("SQZ"));
+        assert_eq!(prefix_unit(&prefixes, "SQZ"), Some("SQZ"));
+        assert_eq!(prefix_unit(&prefixes, "SQZX brand"), None);
+        assert_eq!(prefix_unit(&prefixes, "LED launch"), Some("LED"));
+        assert_eq!(prefix_unit(&prefixes, "other"), None);
+    }
+
+    #[test]
+    fn name_prefix_rules_are_validated() {
+        assert!(parse_prefixes("").unwrap().is_empty());
+        assert!(parse_prefixes("SQZ").is_err());
+        assert!(parse_prefixes("S Q:SQZ").is_err());
+        assert!(parse_prefixes("SQZ:").is_err());
     }
 }

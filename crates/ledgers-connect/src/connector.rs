@@ -92,6 +92,9 @@ pub fn all() -> Vec<Box<dyn Connector>> {
         Box::new(crate::polar::Polar),
         Box::new(crate::spaceship::Spaceship),
         Box::new(crate::twilio::Twilio),
+        Box::new(crate::meta_ads::MetaAds),
+        Box::new(crate::google_ads::GoogleAds),
+        Box::new(crate::jira::Jira),
     ]
 }
 

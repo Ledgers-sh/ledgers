@@ -82,6 +82,24 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://polar.sh/docs/integrate/oat',
     tokenLabel: 'integrations.create_access_token',
   },
+  meta_ads: {
+    imports: 'integrations.meta_imports',
+    scopes: 'integrations.scopes_meta',
+    tokenUrl: 'https://developers.facebook.com/docs/marketing-api/overview/authorization',
+    tokenLabel: 'integrations.create_token',
+  },
+  google_ads: {
+    imports: 'integrations.google_ads_imports',
+    scopes: 'integrations.scopes_google_ads',
+    tokenUrl: 'https://developers.google.com/google-ads/api/docs/get-started/dev-token',
+    tokenLabel: 'integrations.create_token',
+  },
+  jira: {
+    imports: 'integrations.jira_imports',
+    scopes: 'integrations.scopes_jira',
+    tokenUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    tokenLabel: 'integrations.create_token',
+  },
   spaceship: {
     imports: 'integrations.spaceship_imports',
     scopes: 'integrations.scopes_spaceship',
@@ -120,6 +138,12 @@ const CREDENTIAL_LABELS: Record<string, MessageKey> = {
   secret_access_key: 'integrations.cred_secret_access_key',
   client_secret: 'integrations.cred_client_secret',
   service_account_json: 'integrations.cred_service_account',
+  email: 'integrations.cred_email',
+  api_token: 'integrations.cred_api_token',
+  access_token: 'integrations.cred_access_token',
+  developer_token: 'integrations.cred_developer_token',
+  client_id: 'integrations.cred_client_id',
+  refresh_token: 'integrations.cred_refresh_token',
   api_key: 'integrations.cred_api_key',
   api_secret: 'integrations.cred_api_secret',
   api_key_sid: 'integrations.cred_api_key_sid',
@@ -141,10 +165,28 @@ const GENERIC_CONFIG: Record<string, MessageKey> = {
   tax_account: 'integrations.polar_tax',
   account_sid: 'integrations.twilio_account',
   subaccount_sid: 'integrations.twilio_subaccount',
+  ad_account_id: 'integrations.meta_account',
+  customer_id: 'integrations.google_customer',
+  login_customer_id: 'integrations.google_login_customer',
+  name_prefixes: 'integrations.name_prefixes',
+  site: 'integrations.jira_site',
+  price_per_seat: 'integrations.jira_price',
+  price_currency: 'integrations.jira_price_currency',
 };
 
 /** Generic config keys that may stay empty. */
-const OPTIONAL_CONFIG = new Set<string>(['stripe_account', 'tax_account', 'subaccount_sid']);
+const OPTIONAL_CONFIG = new Set<string>([
+  'stripe_account',
+  'tax_account',
+  'subaccount_sid',
+  'login_customer_id',
+  'name_prefixes',
+  'price_per_seat',
+  'price_currency',
+]);
+
+/** Credential fields that are secrets: the form masks them. */
+const SECRET_FIELDS = new Set<string>(['api_key', 'access_token', 'developer_token', 'refresh_token', 'api_token']);
 
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
 const COMING_SOON = ['MiniMax', 'GitHub', 'Google Workspace', 'Resend'];
@@ -228,7 +270,8 @@ export function IntegrationsPanel() {
             onCancel={() => setPicked(null)}
             onConnected={(created) => {
               setPicked(null);
-              push(t(created.connector === 'spaceship' ? 'integrations.saved_registrar' : 'integrations.saved', { name: created.name }));
+              const savedKey = created.connector === 'spaceship' ? 'integrations.saved_registrar' : created.connector === 'jira' ? 'integrations.saved_seats' : 'integrations.saved';
+              push(t(savedKey, { name: created.name }));
               state.reload();
             }}
           />
@@ -398,6 +441,7 @@ function ConnectForm({
     <form class="connect-form panel" onSubmit={submit} noValidate aria-labelledby="connect-form-title" autocomplete="off">
       <h4 id="connect-form-title" class="section-title">{t('integrations.form_title', { connector: connector.name })}</h4>
       <p class="hint">{t(help?.scopes ?? 'integrations.scopes_cloudflare')}</p>
+      {connector.id === 'jira' && <p class="hint">{t(help.imports)}</p>}
       <p class="hint">
         <a href={help?.tokenUrl ?? '#'} target="_blank" rel="noopener noreferrer">
           {t(help?.tokenLabel ?? 'integrations.create_token')}
@@ -441,6 +485,9 @@ function ConnectForm({
             onInput={(e) => setGeneric({ ...generic, [key]: (e.target as HTMLInputElement).value })}
             aria-invalid={errors.generic ? 'true' : undefined}
           />
+          {key === 'name_prefixes' && units.length > 0 && (
+            <span class="hint">{t('integrations.name_prefixes_hint', { suggestions: units.slice(0, 3).map((unit) => `${unit.code}:${unit.code}`).join(', ') })}</span>
+          )}
           {errors.generic && <span class="field-error">{t(errors.generic as MessageKey)}</span>}
         </label>
       ))}
@@ -490,7 +537,7 @@ function ConnectForm({
             ) : (
               <input
                 class="input mono"
-                type={field.name.includes('secret') || field.name === 'api_key' ? 'password' : 'text'}
+                type={field.name.includes('secret') || SECRET_FIELDS.has(field.name) ? 'password' : 'text'}
                 autocomplete="off"
                 spellcheck={false}
                 value={credentials[field.name] ?? ''}
