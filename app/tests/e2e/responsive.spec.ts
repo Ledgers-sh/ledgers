@@ -120,3 +120,66 @@ test('pickers, sheets and the command palette fit a phone screen', async ({ page
   }
   expect(failures, failures.join('\n')).toEqual([]);
 });
+
+/** The selected tab of every scrolling tab row is fully inside the viewport, centred on load. */
+test('the active tab of each tab row is fully inside the viewport', async ({ page }) => {
+  const failures: string[] = [];
+  const screens = [
+    { name: 'approvals', hash: '#/approvals', company: undefined },
+    { name: 'accounts', hash: '#/accounts', company: undefined },
+    { name: 'bank', hash: '#/bank', company: undefined },
+    { name: 'group view', hash: '#/group/view', company: 'FZIP01' },
+    { name: 'group agreements', hash: '#/group/agreements', company: 'FZIP01' },
+  ];
+  for (const theme of THEMES) {
+    await setTheme(page, theme);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const screen of screens) {
+        await page.goto(`/${screen.company ? `?company=${screen.company}` : ''}${screen.hash}`);
+        await expect(page.locator('main')).toBeVisible();
+        await page.waitForLoadState('networkidle');
+        const active = page.locator('.tabs .tab[aria-selected="true"], .tabs .tab[aria-current="page"]').first();
+        await expect(active, `${screen.name} has an active tab`).toBeVisible();
+        const box = await active.boundingBox();
+        if (!box) throw new Error(`${screen.name} active tab has no box`);
+        if (box.x < -0.5 || box.x + box.width > width + 0.5) {
+          failures.push(`[${screen.name} ${width}px ${theme}] active tab ${Math.round(box.x)}..${Math.round(box.x + box.width)} is cut off`);
+        }
+      }
+    }
+  }
+  expect(failures, failures.join('\n')).toEqual([]);
+});
+
+/** On a phone the group view's figures sit two to a row, member figures and unit figures alike. */
+test('the group view figures are two per row at 390px', async ({ page }) => {
+  await setTheme(page, 'dark');
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/?company=FZIP01#/group/view');
+  await expect(page.locator('main')).toBeVisible();
+  await page.waitForLoadState('networkidle');
+  const rows = await page.evaluate(() => {
+    const tops = (els: Element[]) => els.map((el) => Math.round(el.getBoundingClientRect().top));
+    const lefts = (els: Element[]) => els.map((el) => Math.round(el.getBoundingClientRect().left));
+    const figures = Array.from(document.querySelectorAll('dl.figures')).map((dl) => ({
+      count: dl.children.length,
+      tops: tops(Array.from(dl.children)),
+      lefts: lefts(Array.from(dl.children)),
+    }));
+    const units = Array.from(document.querySelectorAll('dl.unit-figure-values')).map((dl) => ({
+      count: dl.children.length,
+      tops: tops(Array.from(dl.children)),
+      lefts: lefts(Array.from(dl.children)),
+    }));
+    return { figures, units };
+  });
+  expect(rows.figures.length).toBeGreaterThan(0);
+  expect(rows.units.length).toBeGreaterThan(0);
+  for (const group of [...rows.figures, ...rows.units]) {
+    // Two per row: the first two share a top edge and sit side by side.
+    expect(group.tops[0]).toBe(group.tops[1]);
+    expect(group.lefts[1]).toBeGreaterThan(group.lefts[0]);
+  }
+  for (const figure of rows.figures) expect(figure.count).toBe(6);
+});
