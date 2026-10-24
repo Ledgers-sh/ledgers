@@ -45,6 +45,8 @@ export interface BillVendor {
   vat_id: string | null;
   iban: string | null;
   needs_review: boolean;
+  /** The party's logo document, when it has one. */
+  logo_document_id?: string | null;
 }
 
 export interface PreviewLine {

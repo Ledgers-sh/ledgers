@@ -61,7 +61,7 @@ test.describe('customers and vendors', () => {
     const vat = page.getByLabel('VAT ID', { exact: true });
     await vat.fill('DE12');
     await vat.blur();
-    await expect(page.locator('#party-vat-error')).toContainText('German VAT ID is DE followed by nine digits');
+    await expect(page.locator('#party-vat-error')).toContainText("does not pass its country's check");
     await expect(vat).toHaveAttribute('aria-invalid', 'true');
 
     await page.getByRole('button', { name: 'Create party' }).click();

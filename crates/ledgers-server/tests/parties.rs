@@ -153,7 +153,7 @@ fn party_routes_validate_update_check_and_refuse_a_reader() {
     );
     assert_eq!(
         vies_off.status,
-        StatusCode::UNPROCESSABLE_ENTITY,
+        StatusCode::SERVICE_UNAVAILABLE,
         "{}",
         String::from_utf8_lossy(vies_off.body().as_ref())
     );

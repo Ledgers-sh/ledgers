@@ -24,6 +24,25 @@ const AGENT_TOKEN: &str = "bearer-draft-agent";
 // Authentication, the fake VIES port, and the harness
 // ============================================================================
 
+/// The problem slug of a refused command, when the refusal is a party problem.
+fn slug_of(error: &CommandError) -> Option<&'static str> {
+    ledgers_bills::party_fields::slug_of(error)
+}
+
+/// Whether a result was refused with the party problem `slug`.
+fn refused_with<T: std::fmt::Debug>(result: &Result<T, CommandError>, slug: &str) -> bool {
+    matches!(result, Err(error) if slug_of(error) == Some(slug))
+}
+
+/// The detail of a refusal, in the server's words.
+fn detail_of(error: &CommandError) -> String {
+    match error {
+        CommandError::Domain(problem) => problem.detail.clone().unwrap_or_default(),
+        CommandError::InvalidInput(message) => message.clone(),
+        other => other.to_string(),
+    }
+}
+
 struct TestAuthenticator {
     credentials: BTreeMap<String, Principal>,
 }
@@ -261,6 +280,7 @@ fn a_vendor_row_from_before_parties_is_a_vendor_and_its_bills_still_link() {
                     needs_review: None,
                     limit: None,
                     offset: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -298,6 +318,7 @@ fn create_checks_the_vat_id_with_its_country_pack_and_refuses_duplicates() {
                 payment_terms_days: None,
                 default_account: None,
                 default_tax_code: None,
+                ..Default::default()
             };
 
             // A DE number with a wrong check digit is refused before any write.
@@ -310,7 +331,7 @@ fn create_checks_the_vat_id_with_its_country_pack_and_refuses_duplicates() {
             )
             .await;
             assert!(
-                matches!(refused, Err(CommandError::InvalidInput(_))),
+                refused_with(&refused, "party-vat-invalid"),
                 "DE check digit"
             );
             assert_eq!(
@@ -344,7 +365,8 @@ fn create_checks_the_vat_id_with_its_country_pack_and_refuses_duplicates() {
             )
             .await;
             match duplicate {
-                Err(CommandError::InvalidInput(message)) => {
+                Err(error) if slug_of(&error) == Some("party-vat-taken") => {
+                    let message = detail_of(&error);
                     assert!(message.contains("p-acme"), "{message}");
                 }
                 other => panic!("expected a refusal naming p-acme, got {other:?}"),
@@ -378,10 +400,11 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                     payment_terms_days: None,
                     default_account: None,
                     default_tax_code: None,
+                    ..Default::default()
                 },
             )
             .await;
-            assert!(matches!(blank_name, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&blank_name, "party-name-required"));
 
             let bad_role = run(
                 &*kit.db,
@@ -402,10 +425,11 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                     payment_terms_days: None,
                     default_account: None,
                     default_tax_code: None,
+                    ..Default::default()
                 },
             )
             .await;
-            assert!(matches!(bad_role, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&bad_role, "party-roles-invalid"));
 
             let bad_vat = run(
                 &*kit.db,
@@ -426,11 +450,12 @@ fn create_and_update_refuse_a_nameless_party_an_unknown_role_and_a_bad_vat_id() 
                     payment_terms_days: None,
                     default_account: None,
                     default_tax_code: None,
+                    ..Default::default()
                 },
             )
             .await;
             assert!(
-                matches!(bad_vat, Err(CommandError::InvalidInput(_))),
+                refused_with(&bad_vat, "party-vat-invalid"),
                 "NL needs two digits after B"
             );
             assert_eq!(
@@ -484,10 +509,11 @@ fn a_merged_party_cannot_be_updated() {
                     payment_terms_days: None,
                     default_account: None,
                     default_tax_code: None,
+                    ..Default::default()
                 },
             )
             .await;
-            assert!(matches!(result, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&result, "party-merged"));
         });
     }
 }
@@ -616,10 +642,7 @@ fn set_bank_refuses_a_bad_iban_and_writes_nothing() {
                 &bank_input("p-bank", "DE89370400440532013001"),
             )
             .await;
-            assert!(
-                matches!(result, Err(CommandError::InvalidInput(_))),
-                "mod-97 check"
-            );
+            assert!(refused_with(&result, "party-iban-invalid"), "mod-97 check");
             assert_eq!(
                 scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vendor_bank_change").await,
                 0
@@ -846,7 +869,7 @@ fn check_vat_writes_nothing_when_vies_does_not_answer() {
                 &check_vat_input("p-err", "DE", "136695976"),
             )
             .await;
-            assert!(matches!(result, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&result, "party-vies-unavailable"));
             assert_eq!(
                 scalar_i64(&*kit.db, "SELECT COUNT(*) AS n FROM vies_check").await,
                 0
@@ -869,7 +892,8 @@ fn check_vat_is_refused_when_vies_is_off_on_this_server() {
             )
             .await;
             match result {
-                Err(CommandError::InvalidInput(message)) => {
+                Err(error) if slug_of(&error) == Some("party-vies-unavailable") => {
+                    let message = detail_of(&error);
                     assert!(message.contains("LEDGERS_VIES"), "{message}");
                 }
                 other => panic!("expected the off message, got {other:?}"),
@@ -898,7 +922,7 @@ fn check_vat_never_calls_vies_for_a_non_eu_country_a_bad_number_or_another_vat_i
                 &check_vat_input("p-vat", "US", "136695976"),
             )
             .await;
-            assert!(matches!(non_eu, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&non_eu, "party-vat-invalid"));
 
             let bad_number = run(
                 &*kit.db,
@@ -908,7 +932,7 @@ fn check_vat_never_calls_vies_for_a_non_eu_country_a_bad_number_or_another_vat_i
                 &check_vat_input("p-vat", "DE", "123456789"),
             )
             .await;
-            assert!(matches!(bad_number, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&bad_number, "party-vat-invalid"));
 
             let other = run(
                 &*kit.db,
@@ -919,7 +943,7 @@ fn check_vat_never_calls_vies_for_a_non_eu_country_a_bad_number_or_another_vat_i
             )
             .await;
             assert!(
-                matches!(other, Err(CommandError::InvalidInput(_))),
+                refused_with(&other, "party-vat-invalid"),
                 "not the party's VAT ID"
             );
 
@@ -983,6 +1007,7 @@ fn the_zero_rating_guard_follows_the_latest_check_for_the_current_vat_id() {
                     payment_terms_days: None,
                     default_account: None,
                     default_tax_code: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1092,6 +1117,7 @@ fn list_marks_parties_that_may_be_duplicates_and_skips_merged_ones() {
                     needs_review: None,
                     limit: Some(200),
                     offset: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1136,6 +1162,7 @@ fn list_marks_parties_that_may_be_duplicates_and_skips_merged_ones() {
                     needs_review: None,
                     limit: Some(200),
                     offset: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1204,6 +1231,7 @@ fn a_party_of_one_company_is_invisible_to_another() {
                     needs_review: None,
                     limit: None,
                     offset: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1223,7 +1251,7 @@ fn a_party_of_one_company_is_invisible_to_another() {
             )
             .await;
             assert!(
-                matches!(bank, Err(CommandError::InvalidInput(_))),
+                refused_with(&bank, "party-not-found"),
                 "set_bank across companies"
             );
             party(&*kit.db, "p-a-two", "Acme Holding", None, None).await;
@@ -1240,7 +1268,7 @@ fn a_party_of_one_company_is_invisible_to_another() {
             )
             .await;
             assert!(
-                matches!(merge, Err(CommandError::InvalidInput(_))),
+                refused_with(&merge, "party-not-found"),
                 "merge across companies"
             );
             assert_eq!(
@@ -1262,7 +1290,7 @@ fn a_party_of_one_company_is_invisible_to_another() {
             )
             .await;
             assert!(
-                matches!(check, Err(CommandError::InvalidInput(_))),
+                refused_with(&check, "party-not-found"),
                 "check_vat across companies"
             );
 
@@ -1295,6 +1323,7 @@ fn a_party_of_one_company_is_invisible_to_another() {
                     needs_review: None,
                     limit: None,
                     offset: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1316,6 +1345,7 @@ fn blank_list() -> ListInput {
         needs_review: None,
         limit: None,
         offset: None,
+        ..Default::default()
     }
 }
 
@@ -1334,6 +1364,7 @@ fn new_party(id: &str, name: &str, roles: &str) -> CreateInput {
         default_tax_code: None,
         addresses: Vec::new(),
         contacts: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -1435,7 +1466,7 @@ fn list_filters_by_search_role_and_review_flag_and_counts_the_matches() {
                 },
             )
             .await;
-            assert!(matches!(bad_role, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&bad_role, "party-roles-invalid"));
         });
     }
 }
@@ -1493,7 +1524,7 @@ fn get_returns_the_bank_history_newest_first_and_the_bill_count() {
                 },
             )
             .await;
-            assert!(matches!(missing, Err(CommandError::InvalidInput(_))));
+            assert!(refused_with(&missing, "party-not-found"));
         });
     }
 }
@@ -1531,6 +1562,7 @@ fn validate_names_each_refused_field_and_writes_nothing() {
                         email: Some("not-an-email".to_string()),
                         phone: None,
                         role: None,
+                        primary: false,
                     }],
                     ..ValidateInput::default()
                 },
@@ -1636,6 +1668,7 @@ fn addresses_and_contacts_round_trip_and_an_update_replaces_them() {
                 email: Some("ada@example.com".to_string()),
                 phone: None,
                 role: Some("Accounts".to_string()),
+                primary: false,
             }];
             let made = run(db, &PartiesCreate, OWNER_TOKEN, "create-addr", &create)
                 .await
@@ -1677,6 +1710,7 @@ fn addresses_and_contacts_round_trip_and_an_update_replaces_them() {
                     default_tax_code: None,
                     addresses: Some(Vec::new()),
                     contacts: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -1695,7 +1729,8 @@ fn addresses_and_contacts_round_trip_and_an_update_replaces_them() {
                 country: "Germany".to_string(),
             }];
             let refused = run(db, &PartiesCreate, OWNER_TOKEN, "create-bad-addr", &bad).await;
-            assert!(matches!(refused, Err(CommandError::InvalidInput(m)) if m.contains("country")));
+            assert!(refused_with(&refused, "party-address-invalid"));
+            assert!(detail_of(&refused.expect_err("refused")).contains("country"));
             let count = scalar_i64(
                 db,
                 "SELECT COUNT(*) AS n FROM vendor WHERE id = 'p-bad-addr'",

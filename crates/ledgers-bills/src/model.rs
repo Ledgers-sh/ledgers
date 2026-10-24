@@ -193,6 +193,9 @@ pub struct VendorView {
     pub iban: Option<String>,
     /// True until a person confirms the vendor.
     pub needs_review: bool,
+    /// The party's logo document, when it has one (the app shows it beside the name).
+    #[serde(default)]
+    pub logo_document_id: Option<String>,
 }
 
 /// One line of the journal preview: account, side and amount in minor units.

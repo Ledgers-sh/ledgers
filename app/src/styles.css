@@ -1301,6 +1301,20 @@ dialog.bank-import { width: min(680px, calc(100vw - 32px)); max-height: calc(100
 .parties { display: flex; flex-direction: column; gap: 4px; }
 .party { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .party-role { font-size: 12px; min-width: 64px; }
+/* Party directory: the logo beside the name, the import page, and the metadata lists. */
+.party-hero { display: flex; gap: 16px; align-items: flex-start; }
+.party-hero > .page-head, .party-hero > div:last-child { flex: 1 1 auto; min-width: 0; }
+.party-import-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-block-end: 12px; }
+.party-import-controls input[type='file'] { min-block-size: 40px; max-inline-size: 100%; }
+.party-plain-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; }
+.party-tags { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.party-notes-text { white-space: pre-wrap; }
+.party-primary { font-size: 12px; }
+.party-logo-group { display: grid; gap: 8px; }
+.party-import-error td.main { border-inline-start: 3px solid var(--danger, #c0392b); }
+@media (max-width: 640px) {
+  .party-hero { flex-direction: column; }
+}
 .hint-text { display: block; font-size: 12px; }
 .terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin: 0; }
 .terms > div { min-width: 0; }

@@ -48,6 +48,7 @@ import { Settings, settingsSectionOf } from './ui/Settings';
 import { Parties } from './ui/Parties';
 import { PartyNew, PartyEdit } from './ui/PartyForm';
 import { PartyPage } from './ui/PartyPage';
+import { PartyImport } from './ui/PartyImport';
 import { badgeText } from './lib/approvals';
 import { activeUnits, hashWithUnit, navigateToUnit, routeOf, unitFromHash } from './lib/units';
 import { unitsList } from './api/commands';
@@ -588,6 +589,7 @@ function renderRoute(route: string) {
   if (route === 'parties') return <Parties />;
   if (route === 'parties/new') return <PartyNew />;
   if (route.startsWith('parties/') && route.endsWith('/edit')) return <PartyEdit id={decodeURIComponent(route.slice('parties/'.length, -'/edit'.length))} />;
+  if (route === 'parties/import') return <PartyImport />;
   if (route.startsWith('parties/')) return <PartyPage id={decodeURIComponent(route.slice('parties/'.length))} />;
   if (route.startsWith('bank/')) return <BankAccountPage id={decodeURIComponent(route.slice('bank/'.length))} />;
   if (route === 'new') return <NewEntry />;

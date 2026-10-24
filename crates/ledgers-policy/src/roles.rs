@@ -111,6 +111,9 @@ const READ_COMMANDS: &[&str] = &[
     "parties.get",
     "parties.validate",
     "parties.balances",
+    "parties.export",
+    "parties.import_check",
+    "parties.open_items",
     "groups.list",
     "agreements.list",
     "agreements.get",
@@ -191,6 +194,8 @@ fn books_class(command: &str) -> Option<Class> {
         | "parties.create"
         | "parties.update"
         | "parties.check_vat"
+        | "parties.import"
+        | "parties.set_logo"
         | "agreements.run_period"
         | "agreements.post_period"
         | "test.write"
@@ -362,6 +367,11 @@ mod tests {
         ("parties.create", Class::Post),
         ("parties.update", Class::Post),
         ("parties.check_vat", Class::Post),
+        ("parties.export", Class::Read),
+        ("parties.open_items", Class::Read),
+        ("parties.import_check", Class::Read),
+        ("parties.import", Class::Post),
+        ("parties.set_logo", Class::Post),
         ("parties.set_bank", Class::Settings),
         ("parties.merge", Class::Settings),
         ("groups.list", Class::Read),
@@ -444,6 +454,11 @@ mod tests {
             (Role::Approver, "parties.list", true),
             (Role::Approver, "parties.update", false),
             (Role::Viewer, "parties.merge", false),
+            (Role::Accountant, "parties.import", true),
+            (Role::Accountant, "parties.set_logo", true),
+            (Role::Approver, "parties.export", true),
+            (Role::Viewer, "parties.import_check", true),
+            (Role::Viewer, "parties.import", false),
             (Role::Owner, "groups.create", true),
             (Role::Admin, "groups.update", true),
             (Role::Accountant, "groups.create", false),

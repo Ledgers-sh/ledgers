@@ -5,7 +5,7 @@
  * duplicates; and the merge (owners and admins).
  */
 import { useState } from 'preact/hooks';
-import { partiesBalances, partyCheckVat, partyGet, type PartyDetail } from '../api/parties';
+import { partyCheckVat, partyGet, partyOpenItems, type PartyDetail, type PartyOpenItems } from '../api/parties';
 import { billsList, type Bill } from '../api/bills';
 import { bankTransactionsList, type TransactionView } from '../api/bank';
 import { useAsync } from '../hooks';
@@ -17,13 +17,13 @@ import { FormProblem } from './settings/common';
 import { ReadValue } from './PartyFields';
 import { VatChip } from './PartyParts';
 import { BankChangeDialog, MergeDialog } from './PartyDialogs';
+import { Avatar } from './Avatar';
 import { bankChangeLines, canManageBank, compactVat, formatIban, roleLabelKey, vatCountry, vatStatus } from '../lib/parties';
-import { payablesByCurrency } from './Parties';
 
 export function PartyPage({ id }: { id: string }) {
   const { client, person } = useSession();
   const detail = useAsync<PartyDetail>(() => partyGet(client, id), [id]);
-  const balances = useAsync(() => partiesBalances(client), [id]);
+  const open = useAsync<PartyOpenItems>(() => partyOpenItems(client, id), [id]);
   const bills = useAsync(() => billsList(client), [id]);
   const lines = useAsync(() => bankTransactionsList(client, { limit: 200 }), [id]);
 
@@ -32,11 +32,12 @@ export function PartyPage({ id }: { id: string }) {
   if (!detail.data) return null;
   return (
     <PartyView
-      key={`${detail.data.party.id}-${detail.data.party.name}-${detail.data.bank_changes.length}`}
+      key={`${detail.data.party.id}-${detail.data.party.name}-${detail.data.bank_changes.length}-${detail.data.party.logo_document_id ?? ''}`}
       detail={detail.data}
       reload={detail.reload}
       role={person?.role ?? null}
-      balances={balances.data?.balances ?? []}
+      open={open.data ?? null}
+      openError={open.error}
       billRows={bills.data?.bills ?? null}
       billsError={bills.error}
       lines={lines.data?.transactions ?? null}
@@ -48,7 +49,8 @@ function PartyView({
   detail,
   reload,
   role,
-  balances,
+  open,
+  openError,
   billRows,
   billsError,
   lines,
@@ -56,7 +58,8 @@ function PartyView({
   detail: PartyDetail;
   reload: () => void;
   role: string | null;
-  balances: { party_id: string; currency: string; payable_minor: number; open_bills: number }[];
+  open: PartyOpenItems | null;
+  openError: unknown;
   billRows: Bill[] | null;
   billsError: unknown;
   lines: TransactionView[] | null;
@@ -71,7 +74,6 @@ function PartyView({
   const canBank = canManageBank(role) && !merged;
   const canMerge = canManageBank(role) && !merged;
   const status = vatStatus(party);
-  const payables = payablesByCurrency(balances, party.id);
   const linkedBills = (billRows ?? []).filter((b) => b.vendor.id === party.id);
   const linkedLines = (lines ?? []).filter((line) => line.party?.id === party.id);
   const vatNumber = party.vat_id ? compactVat(party.vat_id) : '';
@@ -94,13 +96,16 @@ function PartyView({
 
   return (
     <>
-      <PageHead title={party.name}>
-        <span class="party-head-meta">
+      <div class="party-hero">
+        <Avatar name={party.name} logo={party.logo_document_id ? { documentId: party.logo_document_id } : null} size="lg" />
+        <PageHead title={party.name}>
+          <span class="party-head-meta">
           <span class="badge party-role">{t(roleLabelKey(party.roles))}</span> <VatChip status={status} />
           {party.needs_review && <span class="badge state-open">{t('parties.needs_review')}</span>}
           {merged && <span class="badge state-soft">{t('parties.merged')}</span>}
         </span>
-      </PageHead>
+        </PageHead>
+      </div>
       <nav class="back-link-row party-page-actions">
         <a class="back-link" href="#/parties">
           {t('parties.back')}
@@ -154,6 +159,65 @@ function PartyView({
             </ReadValue>
             <ReadValue label={t('parties.default_account')} ltr>
               {party.default_account ?? <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.trading_name')} ltr>
+              {party.trading_name ?? <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.registration_number')} ltr>
+              {party.registration_number ?? <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.website')} ltr>
+              {party.website ? (
+                <a href={party.website} rel="noopener noreferrer" target="_blank">
+                  <Ltr>{party.website}</Ltr>
+                </a>
+              ) : (
+                <span class="muted">{t('parties.none')}</span>
+              )}
+            </ReadValue>
+            <ReadValue label={t('parties.email')} ltr>
+              {party.email ? (
+                <a href={`mailto:${party.email}`}>
+                  <Ltr>{party.email}</Ltr>
+                </a>
+              ) : (
+                <span class="muted">{t('parties.none')}</span>
+              )}
+            </ReadValue>
+            <ReadValue label={t('parties.phone')} ltr>
+              {party.phone ?? <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.default_unit')} ltr>
+              {party.default_unit ?? <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.tags')}>
+              {party.tags.length === 0 ? (
+                <span class="muted">{t('parties.none')}</span>
+              ) : (
+                <span class="party-tags">
+                  {party.tags.map((tag) => (
+                    <span class="badge" key={tag}>
+                      <Ltr>{tag}</Ltr>
+                    </span>
+                  ))}
+                </span>
+              )}
+            </ReadValue>
+            <ReadValue label={t('parties.notes')}>
+              {party.notes ? <span class="party-notes-text">{party.notes}</span> : <span class="muted">{t('parties.none')}</span>}
+            </ReadValue>
+            <ReadValue label={t('parties.tax_ids')}>
+              {party.tax_ids.length === 0 ? (
+                <span class="muted">{t('parties.none')}</span>
+              ) : (
+                <ul class="party-plain-list">
+                  {party.tax_ids.map((id) => (
+                    <li key={`${id.country}-${id.value}`}>
+                      <Ltr>{id.country}</Ltr> <span class="muted">{t(taxKindKey(id.kind))}</span> <span class="mono"><Ltr>{id.value}</Ltr></span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </ReadValue>
             <ReadValue label={t('parties.personal_data')}>{party.personal_data ? t('parties.yes') : t('parties.no')}</ReadValue>
           </dl>
@@ -263,6 +327,7 @@ function PartyView({
                   <strong>
                     <Ltr>{c.name}</Ltr>
                   </strong>
+                  {c.primary && <span class="badge party-primary">{t('parties.primary_badge')}</span>}
                   {c.role && <span class="muted"> · {c.role}</span>}
                   <div>
                     {c.email && (
@@ -285,20 +350,54 @@ function PartyView({
       </div>
 
       <div class="party-columns">
-        <section class="panel party-section" aria-labelledby="party-payables-title">
-          <h2 id="party-payables-title">{t('parties.payables')}</h2>
-          {payables.length === 0 ? (
-            <p class="muted">{t('parties.nothing_open')}</p>
+        <section class="panel party-section" aria-labelledby="party-open-title">
+          <h2 id="party-open-title">{t('parties.open_items')}</h2>
+          {openError ? (
+            <ErrorBanner error={openError} />
+          ) : open === null ? (
+            <p class="muted">{t('parties.loading_short')}</p>
+          ) : open.open_items.length === 0 ? (
+            <p class="muted">{t('parties.open_items_none')}</p>
           ) : (
-            <ul class="party-cards">
-              {payables.map((p) => (
-                <li key={p.currency}>
-                  <Money minor={String(p.minor)} currency={p.currency} /> <span class="muted">{t('parties.open_bills', { n: p.bills })}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul class="party-cards party-balances">
+                {open.balances.map((b) => (
+                  <li key={`${b.ledger}-${b.currency}`}>
+                    <span class="badge">{b.ledger === 'ar' ? t('parties.balance_ar') : t('parties.balance_ap')}</span>{' '}
+                    <Money minor={String(b.remaining_minor)} currency={b.currency} />
+                  </li>
+                ))}
+              </ul>
+              <div class="table-wrap">
+                <table class="ledger cards party-open-table">
+                  <caption class="sr-only">{t('parties.open_items')}</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t('parties.col_document')}</th>
+                      <th scope="col">{t('parties.col_due')}</th>
+                      <th scope="col" class="num-col">
+                        {t('parties.col_remaining')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {open.open_items.map((item) => (
+                      <tr key={item.id}>
+                        <td class="main" data-label={t('parties.col_document')}>
+                          <span class="badge">{item.ledger === 'ar' ? t('parties.open_receivable') : t('parties.open_payable')}</span>{' '}
+                          <Ltr>{item.document ?? item.id}</Ltr>
+                        </td>
+                        <td data-label={t('parties.col_due')}>{formatDate((item.due_date ?? item.posting_date).slice(0, 10))}</td>
+                        <td class="num-col" data-label={t('parties.col_remaining')}>
+                          <Money minor={String(item.remaining_minor)} currency={item.currency} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
-          <p class="muted">{t('parties.receivables_note')}</p>
         </section>
         <section class="panel party-section" aria-labelledby="party-bills-title">
           <h2 id="party-bills-title">{t('parties.linked_bills')}</h2>
@@ -321,6 +420,43 @@ function PartyView({
                       <Money minor={String(b.gross_minor)} currency={b.currency} />
                     </>
                   )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <div class="party-columns">
+        <section class="panel party-section" aria-labelledby="party-recent-bills-title">
+          <h2 id="party-recent-bills-title">{t('parties.recent_bills')}</h2>
+          {detail.recent_bills.length === 0 ? (
+            <p class="muted">{t('parties.no_linked_bills')}</p>
+          ) : (
+            <ul class="party-cards">
+              {detail.recent_bills.map((b) => (
+                <li key={b.id}>
+                  <a href={`#/bills/${encodeURIComponent(b.id)}`}>
+                    <Ltr>{b.invoice_number ?? b.id}</Ltr>
+                  </a>{' '}
+                  {b.gross_minor !== null && <Money minor={String(b.gross_minor)} currency={b.currency} />}{' '}
+                  <span class="muted">{b.discarded ? t('parties.bill_status_discarded') : b.posted ? t('parties.bill_status_posted') : t('parties.bill_status_ready')}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section class="panel party-section" aria-labelledby="party-recent-payments-title">
+          <h2 id="party-recent-payments-title">{t('parties.recent_payments')}</h2>
+          {detail.recent_payments.length === 0 ? (
+            <p class="muted">{t('parties.no_recent_payments')}</p>
+          ) : (
+            <ul class="party-cards">
+              {detail.recent_payments.map((p) => (
+                <li key={p.bill_id}>
+                  <span class="muted">{formatDate(p.paid_at.slice(0, 10))}</span>{' '}
+                  <Ltr>{t('parties.payment_line', { bill: p.invoice_number ?? p.bill_id })}</Ltr>{' '}
+                  <Money minor={String(p.paid_minor)} currency={p.currency} />
                 </li>
               ))}
             </ul>
@@ -378,6 +514,12 @@ function billStatusText(status: string): string {
   if (status === 'posted') return t('parties.bill_status_posted');
   if (status === 'discarded') return t('parties.bill_status_discarded');
   return t('parties.bill_status_needs_review');
+}
+
+function taxKindKey(kind: string): 'parties.tax_kind_vat' | 'parties.tax_kind_tax' | 'parties.tax_kind_other' {
+  if (kind === 'vat') return 'parties.tax_kind_vat';
+  if (kind === 'tax') return 'parties.tax_kind_tax';
+  return 'parties.tax_kind_other';
 }
 
 function kindKey(kind: string): 'parties.kind_billing' | 'parties.kind_shipping' | 'parties.kind_other' {
