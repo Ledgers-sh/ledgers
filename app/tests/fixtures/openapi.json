@@ -6392,6 +6392,114 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/connections/{connection_id}/test": {
+      "post": {
+        "operationId": "connections_test",
+        "description": "Execute command: connections.test",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "TestInput",
+                "description": "The input of `connections.test`: the connection to try.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection whose credential is tried.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connection_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "TestOutput",
+                  "description": "The output of `connections.test`. Nothing is written: the test reads the\nvendor for the current day and reports whether the credential and its scope\nwork. `error` is set when they do not, with no credential in it.",
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "description": "Whether the vendor answered for the test window.",
+                      "type": "boolean"
+                    },
+                    "notes": {
+                      "description": "What the vendor said about the test, as sentences.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "error": {
+                      "description": "Why the test failed, when it failed.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "notes"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.test",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections test",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{connection_id}/test\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/connections/{id}/update": {
       "post": {
         "operationId": "connections_update",

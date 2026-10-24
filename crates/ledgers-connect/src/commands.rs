@@ -38,6 +38,8 @@ pub fn connector_config_keys(connector: &str) -> &'static [&'static str] {
     match connector {
         "cloudflare" => &["account_id"],
         "planetscale" => &["organization", "currency"],
+        "aws" => &["tag_key"],
+        "vercel" => &["team_id"],
         _ => &[],
     }
 }
@@ -1756,4 +1758,24 @@ impl Command for ReportsCostsByUnit {
             .collect();
         Ok(Plan::with_output(CostsOutput { lines }))
     }
+}
+
+/// The input of `connections.test`: the connection to try.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct TestInput {
+    /// The connection whose credential is tried.
+    pub connection_id: String,
+}
+
+/// The output of `connections.test`. Nothing is written: the test reads the
+/// vendor for the current day and reports whether the credential and its scope
+/// work. `error` is set when they do not, with no credential in it.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct TestOutput {
+    /// Whether the vendor answered for the test window.
+    pub ok: bool,
+    /// What the vendor said about the test, as sentences.
+    pub notes: Vec<String>,
+    /// Why the test failed, when it failed.
+    pub error: Option<String>,
 }

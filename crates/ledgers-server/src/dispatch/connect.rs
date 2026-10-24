@@ -47,6 +47,64 @@ fn invalid(message: impl Into<String>, request_id: &str) -> Problem {
         .instance(request_id)
 }
 
+/// Removes the credential from a command input and returns the text to seal.
+/// A connector with one field takes `token` (a string). One with several takes
+/// `credential`, an object holding exactly its fields, which is sealed as JSON
+/// text. An unknown field is refused, so a stray secret cannot be stored.
+fn take_credential(
+    input: &mut Value,
+    connector: &dyn connector::Connector,
+    request_id: &str,
+) -> Result<Option<String>, Problem> {
+    let fields = connector.credential_fields();
+    if fields.len() == 1 && fields[0].name == "token" {
+        return take_token(input, request_id);
+    }
+    let Value::Object(map) = input else {
+        return Err(invalid("the request body must be an object", request_id));
+    };
+    if map.remove("token").is_some() {
+        return Err(invalid(
+            format!(
+                "{} takes its credential fields, not a token",
+                connector.display_name()
+            ),
+            request_id,
+        ));
+    }
+    match map.remove("credential") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Object(given)) => {
+            let mut sealed = serde_json::Map::new();
+            for field in fields {
+                let text = given
+                    .get(field.name)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .ok_or_else(|| {
+                        invalid(format!("the credential needs {}", field.name), request_id)
+                    })?;
+                sealed.insert(field.name.to_owned(), json!(text));
+            }
+            if given.len() != sealed.len() {
+                return Err(invalid(
+                    format!(
+                        "the credential of {} has only: {}",
+                        connector.display_name(),
+                        fields.iter().map(|f| f.name).collect::<Vec<_>>().join(", ")
+                    ),
+                    request_id,
+                ));
+            }
+            serde_json::to_string(&Value::Object(sealed))
+                .map(Some)
+                .map_err(|_| invalid("the credential could not be read", request_id))
+        }
+        Some(_) => Err(invalid("credential must be an object", request_id)),
+    }
+}
+
 /// Removes the token from a command input and returns it, refusing an empty one.
 fn take_token(input: &mut Value, request_id: &str) -> Result<Option<String>, Problem> {
     let Value::Object(map) = input else {
@@ -57,6 +115,20 @@ fn take_token(input: &mut Value, request_id: &str) -> Result<Option<String>, Pro
         Some(Value::String(token)) if !token.trim().is_empty() => Ok(Some(token.trim().to_owned())),
         Some(_) => Err(invalid("token must be a non-empty string", request_id)),
     }
+}
+
+/// The current instant in UTC, RFC 3339 (`2026-10-24T10:00:00Z`).
+fn now_rfc3339(clock: &dyn Clock) -> String {
+    let now = clock.now().to_offset(time::UtcOffset::UTC);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
 }
 
 fn today_of(clock: &dyn Clock) -> String {
@@ -95,8 +167,23 @@ impl ServerDispatch {
         let caller = self
             .caller_label(deps, presented.as_ref(), request_id)
             .await?;
-        let token = take_token(&mut input, request_id)?
-            .ok_or_else(|| invalid("a token is required to create a connection", request_id))?;
+        let connector_id = input
+            .get("connector")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("a connector is required", request_id))?
+            .to_owned();
+        let vendor = connector::by_id(&connector_id).ok_or_else(|| {
+            invalid(
+                format!("{connector_id} is not a connector Ledgers ships"),
+                request_id,
+            )
+        })?;
+        let token = take_credential(&mut input, vendor.as_ref(), request_id)?.ok_or_else(|| {
+            invalid(
+                "a credential is required to create a connection",
+                request_id,
+            )
+        })?;
         let id = deps.id_gen.ulid();
         let sealed = self
             .sealing_key(request_id)?
@@ -128,12 +215,26 @@ impl ServerDispatch {
         request_id: &str,
         mut input: Value,
     ) -> Result<Value, Problem> {
-        let token = take_token(&mut input, request_id)?;
         let id = input
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid("the connection id is required", request_id))?
             .to_owned();
+        let existing = ledgers_connect::store::connection(deps.db.as_ref(), self.company_id(), &id)
+            .await
+            .map_err(|err| {
+                CommandError::Database(err)
+                    .to_problem()
+                    .instance(request_id)
+            })?
+            .ok_or_else(|| invalid(format!("connection {id} does not exist"), request_id))?;
+        let vendor = connector::by_id(&existing.connector).ok_or_else(|| {
+            invalid(
+                "the connector of this connection is not shipped",
+                request_id,
+            )
+        })?;
+        let token = take_credential(&mut input, vendor.as_ref(), request_id)?;
         if let Some(token) = token {
             let sealed = self
                 .sealing_key(request_id)?
@@ -266,6 +367,73 @@ impl ServerDispatch {
         .await
     }
 
+    /// `connections.test`: a person only. Reads the vendor for today with the
+    /// stored credential and reports whether it answers. Nothing is written: no
+    /// run, no bill, no usage.
+    pub(super) async fn connections_test(
+        &self,
+        deps: &Deps,
+        presented: Option<Presented>,
+        request_id: &str,
+        input: Value,
+    ) -> Result<Value, Problem> {
+        self.caller_label(deps, presented.as_ref(), request_id)
+            .await?;
+        let connection_id = input
+            .get("connection_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("the connection id is required", request_id))?
+            .to_owned();
+        let connection =
+            ledgers_connect::store::connection(deps.db.as_ref(), self.company_id(), &connection_id)
+                .await
+                .map_err(|err| {
+                    CommandError::Database(err)
+                        .to_problem()
+                        .instance(request_id)
+                })?
+                .ok_or_else(|| {
+                    invalid(
+                        format!("connection {connection_id} does not exist"),
+                        request_id,
+                    )
+                })?;
+        let vendor = connector::by_id(&connection.connector).ok_or_else(|| {
+            invalid(
+                "the connector of this connection is not shipped",
+                request_id,
+            )
+        })?;
+        let today = today_of(deps.clock.as_ref());
+        let outcome = self
+            .fetch_vendor(
+                deps,
+                vendor.as_ref(),
+                &connection,
+                &today,
+                &today,
+                request_id,
+            )
+            .await?;
+        let output = match outcome {
+            Ok(answer) => ledgers_connect::commands::TestOutput {
+                ok: true,
+                notes: answer.notes,
+                error: None,
+            },
+            Err(message) => ledgers_connect::commands::TestOutput {
+                ok: false,
+                notes: Vec::new(),
+                error: Some(message),
+            },
+        };
+        serde_json::to_value(output).map_err(|err| {
+            Problem::internal()
+                .with_detail(format!("test answer: {err}"))
+                .instance(request_id)
+        })
+    }
+
     /// Calls the vendor for the window. `Ok` is the vendor's answer, `Err` the
     /// reason for the failed run, with no credential in it.
     async fn fetch_vendor(
@@ -286,9 +454,11 @@ impl ServerDispatch {
                 VendorHttp::new(Arc::new(demo), Arc::new(ConnectPause(deps.clock.clone())));
             let config: Value =
                 serde_json::from_str(&connection.config_json).unwrap_or(Value::Null);
+            let now = now_rfc3339(deps.clock.as_ref());
             let context = SyncContext {
                 http: &vendor_http,
                 credential: "",
+                now: &now,
                 config: &config,
                 since,
                 until,
@@ -329,9 +499,11 @@ impl ServerDispatch {
         }
         let config: Value = serde_json::from_str(&connection.config_json).unwrap_or(Value::Null);
         let vendor_http = VendorHttp::new(http, Arc::new(ConnectPause(deps.clock.clone())));
+        let now = now_rfc3339(deps.clock.as_ref());
         let context = SyncContext {
             http: &vendor_http,
             credential: &token,
+            now: &now,
             config: &config,
             since,
             until,

@@ -48,6 +48,8 @@ export const connectState: {
   lines: { period: string; unit_code: string; connector: string; connection_id: string; currency: string; amount_minor: number }[];
   writes: { method: string; path: string; body: unknown }[];
   tokensReceived: string[];
+  /** The credential objects sent for multi-field connectors (never echoed back). */
+  credentialsReceived: Record<string, string>[];
 } = {
   connections: [],
   runs: {},
@@ -56,6 +58,7 @@ export const connectState: {
   lines: [],
   writes: [],
   tokensReceived: [],
+  credentialsReceived: [],
 };
 
 const CONNECTORS = [
@@ -79,6 +82,23 @@ const CONNECTORS = [
     credential_fields: [{ name: 'token', label: 'Service token as ID:token (read_invoices)' }],
     hosts: ['api.planetscale.com'],
     config_keys: ['organization', 'currency'],
+  },
+  {
+    id: 'aws',
+    name: 'Amazon Web Services',
+    credential_fields: [
+      { name: 'access_key_id', label: 'Access key ID (IAM user with ce:GetCostAndUsage only)' },
+      { name: 'secret_access_key', label: 'Secret access key' },
+    ],
+    hosts: ['ce.us-east-1.amazonaws.com'],
+    config_keys: ['tag_key'],
+  },
+  {
+    id: 'vercel',
+    name: 'Vercel',
+    credential_fields: [{ name: 'token', label: 'Access token (team Billing role)' }],
+    hosts: ['api.vercel.com'],
+    config_keys: ['team_id'],
   },
 ];
 
@@ -142,6 +162,7 @@ export function resetConnect(seed: boolean): void {
   connectState.lines = [];
   connectState.writes = [];
   connectState.tokensReceived = [];
+  connectState.credentialsReceived = [];
   if (seed) seedConnect();
 }
 
@@ -177,6 +198,9 @@ export function handleConnect(method: string, url: URL, bodyText: string, agent:
   if (method === 'POST' && path === '/v1/connections') {
     const token = typeof body.token === 'string' ? body.token : '';
     if (token) connectState.tokensReceived.push(token);
+    if (body.credential && typeof body.credential === 'object') {
+      connectState.credentialsReceived.push(body.credential as Record<string, string>);
+    }
     const id = newId();
     const now = '2026-10-23T09:00:00Z';
     const connector = CONNECTORS.find((c) => c.id === body.connector);
@@ -200,12 +224,17 @@ export function handleConnect(method: string, url: URL, bodyText: string, agent:
     connectState.unmapped[id] = [];
     return reply(200, view);
   }
-  const match = /^\/v1\/connections\/([^/]+)\/(update|delete|sync|runs)$/.exec(path);
+  const match = /^\/v1\/connections\/([^/]+)\/(update|delete|sync|runs|test)$/.exec(path);
   if (match) {
     const [, id, action] = match;
     const connection = connectState.connections.find((c) => c.id === id);
     if (!connection) return problem(422, 'invalid-input', `connection ${id} does not exist`);
     if (method === 'GET' && action === 'runs') return reply(200, { runs: connectState.runs[id] ?? [] });
+    if (method === 'POST' && action === 'test') {
+      // A connection named "Broken" stands for a vendor that refuses the credential.
+      if (connection.name.startsWith('Broken')) return reply(200, { ok: false, notes: [], error: 'api.vercel.com refused the token (403); check the token scopes' });
+      return reply(200, { ok: true, notes: ['The vendor answered for today.'], error: null });
+    }
     if (method === 'POST' && action === 'delete') {
       connectState.connections = connectState.connections.filter((c) => c.id !== id);
       return reply(200, { id, disconnected: true });

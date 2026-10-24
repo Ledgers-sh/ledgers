@@ -1,0 +1,4 @@
+{"ChargeCategory":"Usage","BillingCurrency":"USD","BilledCost":12.5,"ChargePeriodStart":"2026-07-03T00:00:00Z","ServiceName":"Edge Requests","Tags":{"ProjectId":"prj_ledgers","ProjectName":"ledgers-web"}}
+{"ChargeCategory":"Usage","BillingCurrency":"USD","BilledCost":0.75,"ChargePeriodStart":"2026-07-04T00:00:00Z","ServiceName":"Functions","Tags":{}}
+{"ChargeCategory":"Purchase","BillingCurrency":"USD","BilledCost":100,"ChargePeriodStart":"2026-07-01T00:00:00Z","ServiceName":"Credits","Tags":{}}
+{"ChargeCategory":"Tax","BillingCurrency":"USD","BilledCost":1.0,"ChargePeriodStart":"2026-08-01T00:00:00Z","ServiceName":"Tax","Tags":{"ProjectId":"prj_ledgers","ProjectName":"ledgers-web"}}

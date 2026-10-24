@@ -51,6 +51,8 @@ export const SOURCE_COLOURS: Record<string, string> = {
   cloudflare: '#E9B44C',
   anthropic: '#7FA6C9',
   planetscale: '#9AB973',
+  aws: '#C98B7E',
+  vercel: '#A9B6C6',
 };
 
 /**

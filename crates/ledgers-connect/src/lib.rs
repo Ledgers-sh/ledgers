@@ -12,9 +12,11 @@
 
 pub mod allocation;
 pub mod anthropic;
+pub mod aws;
 pub mod cloudflare;
 pub mod commands;
 pub mod connector;
+pub mod cost;
 pub mod demo;
 pub mod http;
 pub mod model;
@@ -22,25 +24,39 @@ pub mod module;
 pub mod money;
 pub mod planetscale;
 pub mod secret;
+pub mod sigv4;
 pub mod split;
 pub mod store;
+pub mod vercel;
 
 /// The connections schema migrations, in apply order.
-pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "connect",
         include_str!("../migrations/sqlite/0001_connect.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "connect_providers",
+        include_str!("../migrations/sqlite/0002_connect_providers.sql"),
+    ),
+];
 
 /// The Postgres set: the same portable DDL as SQLite, with the append-only
 /// trigger written as a function.
-pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] =
-    &[cratefield_core::SqlMigration::new(
+pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
+    cratefield_core::SqlMigration::new(
         "0001",
         "connect",
         include_str!("../migrations/postgres/0001_connect.sql"),
-    )];
+    ),
+    cratefield_core::SqlMigration::new(
+        "0002",
+        "connect_providers",
+        include_str!("../migrations/postgres/0002_connect_providers.sql"),
+    ),
+];
 
 pub use module::ConnectModule;
 

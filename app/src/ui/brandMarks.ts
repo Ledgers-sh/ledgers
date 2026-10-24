@@ -1,8 +1,11 @@
 /**
- * Brand marks for the connectable sources (issue #142). Path data is from
- * Simple Icons 16.35.0 (CC0-1.0, https://simpleicons.org): the icon artwork is
- * public domain; the trademarks stay with their owners and the marks only
- * identify the service. Each mark has a 24-unit viewBox.
+ * Brand marks for the connectable sources (issue #142). Path data for
+ * Cloudflare, Anthropic, PlanetScale and Vercel is from Simple Icons 16.35.0
+ * (CC0-1.0, https://simpleicons.org): the icon artwork is public domain; the
+ * trademarks stay with their owners and the marks only identify the service.
+ * Simple Icons has no Amazon Web Services mark, so AWS uses a neutral cloud
+ * glyph that names the service and is not the AWS logo. Each mark has a
+ * 24-unit viewBox and is drawn inline: no external images are loaded.
  */
 
 export interface BrandMark {
@@ -20,6 +23,14 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   anthropic: {
     title: 'Anthropic',
     path: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
+  },
+  aws: {
+    title: 'Amazon Web Services',
+    path: 'M7 18.5h10.2a4.3 4.3 0 0 0 .6-8.55A6.2 6.2 0 0 0 6.1 9.6 4.9 4.9 0 0 0 7 18.5Z',
+  },
+  vercel: {
+    title: 'Vercel',
+    path: 'm12 1.608 12 20.784H0Z',
   },
   planetscale: {
     title: 'PlanetScale',
