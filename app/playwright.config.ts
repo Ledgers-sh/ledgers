@@ -22,7 +22,7 @@ export default defineConfig({
   ],
   webServer: {
     // The build points the sign-in screen at this run's fake API, not the default port.
-    command: `VITE_LEDGERS_API=http://127.0.0.1:${apiPort} npm run build && npx vite preview --port ${webPort} --strictPort`,
+    command: `VITE_LEDGERS_API=http://127.0.0.1:${apiPort} bun run build && bunx vite preview --port ${webPort} --strictPort`,
     url: `http://localhost:${webPort}`,
     // A preview started for another checkout is never reused: it would serve that build.
     reuseExistingServer: !process.env.CI && !process.env.LEDGERS_E2E_PORT,

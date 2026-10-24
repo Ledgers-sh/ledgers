@@ -12,7 +12,7 @@ with access to the Cloudflare account. Production (`[env.production]`) is not
 covered here.
 
 Tools: Rust 1.98.1 (pinned in `rust-toolchain.toml`), `worker-build` 0.8.x,
-Node 22, and wrangler through `npx`. Every wrangler call below pins
+Bun 1.3.6, and wrangler through `bunx`. Every wrangler call below pins
 `wrangler@4.148.0`.
 
 ## Toolchain for the Worker build
@@ -45,9 +45,9 @@ produced. CI runs the same script in the `wasm32-link` job.
 ## 1. Create the storage (once)
 
 ```sh
-npx wrangler@4.148.0 login
-npx wrangler@4.148.0 d1 create ledgers-staging
-npx wrangler@4.148.0 r2 bucket create ledgers-documents-staging
+bunx wrangler@4.148.0 login
+bunx wrangler@4.148.0 d1 create ledgers-staging
+bunx wrangler@4.148.0 r2 bucket create ledgers-documents-staging
 ```
 
 `d1 create` prints a `database_id`. Keep it for step 2.
@@ -72,8 +72,8 @@ wrangler, so they are never printed or written to a file:
 
 ```sh
 cd crates/ledgers-server
-openssl rand -hex 32 | npx wrangler@4.148.0 secret put HARNESS_SECRET --env staging
-openssl rand -hex 32 | npx wrangler@4.148.0 secret put BOOTSTRAP_TOKEN --env staging
+openssl rand -hex 32 | bunx wrangler@4.148.0 secret put HARNESS_SECRET --env staging
+openssl rand -hex 32 | bunx wrangler@4.148.0 secret put BOOTSTRAP_TOKEN --env staging
 ```
 
 `BOOTSTRAP_TOKEN` is needed for step 6 only. Keep the value in your password
@@ -83,9 +83,9 @@ Two more secrets are needed for documents and bills (issues #20 to #22). Neither
 is set by the repository; the operator sets them the same way:
 
 ```sh
-openssl rand -hex 32 | npx wrangler@4.148.0 secret put LEDGERS_DOCUMENT_SIGNING_KEY --env staging
-npx wrangler@4.148.0 secret put LEDGERS_EXTRACT_API_KEY --env staging
-npx wrangler@4.148.0 secret put LEDGERS_MINIMAX_API_KEY --env staging
+openssl rand -hex 32 | bunx wrangler@4.148.0 secret put LEDGERS_DOCUMENT_SIGNING_KEY --env staging
+bunx wrangler@4.148.0 secret put LEDGERS_EXTRACT_API_KEY --env staging
+bunx wrangler@4.148.0 secret put LEDGERS_MINIMAX_API_KEY --env staging
 ```
 
 - `LEDGERS_DOCUMENT_SIGNING_KEY` signs the five-minute download links for
@@ -137,8 +137,8 @@ Check them against local D1 first, then apply to staging:
 
 ```sh
 cd crates/ledgers-server
-npx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --local
-npx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --remote
+bunx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --local
+bunx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --remote
 ```
 
 Applying twice is safe: wrangler records each applied file.
@@ -150,8 +150,8 @@ Dry run first. It builds the Worker and reports its bindings without uploading:
 ```sh
 cd crates/ledgers-server
 worker-build --release
-npx wrangler@4.148.0 deploy --dry-run --env staging --outdir /tmp/lg-dry
-npx wrangler@4.148.0 deploy --env staging
+bunx wrangler@4.148.0 deploy --dry-run --env staging --outdir /tmp/lg-dry
+bunx wrangler@4.148.0 deploy --env staging
 ```
 
 The Worker limits each agent key to 100 requests per 60 seconds through the
@@ -202,7 +202,7 @@ through Owlpost, so each environment needs the Owlpost key as a secret and a
 sender address in its vars:
 
 ```bash
-npx wrangler@4.148.0 secret put OWLPOST_API_KEY --env staging
+bunx wrangler@4.148.0 secret put OWLPOST_API_KEY --env staging
 ```
 
 `ORGS_FROM` (a `send.` address, staging: `invitations@send.ledgers.sh`) and
@@ -239,7 +239,7 @@ rm "$HOME/ledgers-staging-bootstrap.json"
 Remove the bootstrap token so the route is closed for good:
 
 ```sh
-npx wrangler@4.148.0 secret delete BOOTSTRAP_TOKEN --env staging
+bunx wrangler@4.148.0 secret delete BOOTSTRAP_TOKEN --env staging
 ```
 
 The key authenticates the API from now on:
@@ -260,11 +260,11 @@ screen still lets a user change it.
 
 ```sh
 cd app
-npm ci
-npm run typecheck && npm test
-VITE_LEDGERS_API=https://api-staging.ledgers.sh npm run build
-npx wrangler@4.148.0 pages project create ledgers-app-staging   # once
-npx wrangler@4.148.0 pages deploy dist --project-name ledgers-app-staging
+bun install --frozen-lockfile
+bun run typecheck && bun run test
+VITE_LEDGERS_API=https://api-staging.ledgers.sh bun run build
+bunx wrangler@4.148.0 pages project create ledgers-app-staging   # once
+bunx wrangler@4.148.0 pages deploy dist --project-name ledgers-app-staging
 ```
 
 `app/wrangler.jsonc` names the Pages project and its output directory (`dist`).
@@ -325,7 +325,7 @@ LEDGERS_AUTH_CLIENT_ID=<the staging client id> \
 cargo run -p ledgers-server
 ```
 
-3. In `app/`, run `LEDGERS_DEV_API=http://127.0.0.1:3000 VITE_LEDGERS_API=http://localhost:5173 npm run dev`.
+3. In `app/`, run `LEDGERS_DEV_API=http://127.0.0.1:3000 VITE_LEDGERS_API=http://localhost:5173 bun run dev`.
    Vite proxies `/v1` (including `/v1/auth`) to the server, so the browser sees
    one origin and the session cookie is first-party.
 
@@ -337,9 +337,9 @@ started before a restart fails and must be started again.
 
 ```sh
 cd crates/ledgers-server
-npx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --local
+bunx wrangler@4.148.0 d1 migrations apply ledgers-staging --env staging --local
 printf 'BOOTSTRAP_TOKEN=%s\n' "$(openssl rand -hex 32)" > .dev.vars   # gitignored
-npx wrangler@4.148.0 dev --env staging --local --port 8787
+bunx wrangler@4.148.0 dev --env staging --local --port 8787
 ```
 
 `.dev.vars` is gitignored and must never be committed. Delete it when you are

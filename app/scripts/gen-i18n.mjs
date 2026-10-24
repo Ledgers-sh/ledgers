@@ -4,7 +4,7 @@
  * ../templates/i18n/{en,de,id,ar}.toml, so the account names the app shows
  * come from the same files the Rust side imports (one source of truth).
  *
- * Run with `npm run i18n:gen`. i18n.test.ts fails when the committed file is
+ * Run with `bun run i18n:gen`. i18n.test.ts fails when the committed file is
  * stale. The TOML subset is the one those files use: flat `"key" = "value"`
  * lines, comments, and blank lines.
  */

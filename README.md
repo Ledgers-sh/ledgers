@@ -200,15 +200,15 @@ Copy the dev key, then in a second terminal:
 
 ```sh
 cd app
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Open http://localhost:5173, keep the server URL at `http://127.0.0.1:3000`, paste the key and
 connect. The key is kept in `sessionStorage` for that tab only. Passkey sign-in comes with issue #12.
 
-Checks for the app: `npm run typecheck`, `npm test` (unit tests), `npm run build`, and
-`npm run test:e2e` (Playwright against a local fake API, no server needed).
+Checks for the app: `bun run typecheck`, `bun run test` (unit tests), `bun run build`, and
+`bun run test:e2e` (Playwright against a local fake API, no server needed).
 
 ## MCP
 
