@@ -2,6 +2,7 @@
 
 use ledgers_approvals::ApprovalRules;
 use ledgers_auth::IdentityProvider;
+use ledgers_bank::close::BankReconciliationCloseCheck;
 use ledgers_bills::close::{FlaggedExtractionCloseCheck, UnpostedBillsCloseCheck};
 use ledgers_ext::{
     BankFeed, DocumentIntake, EInvoiceTransport, Filing, UsageMeter,
@@ -40,6 +41,7 @@ impl LedgersConfig {
         close_checks.register(Box::new(ledgers_ledger::close::DraftEntriesCloseCheck));
         close_checks.register(Box::new(FlaggedExtractionCloseCheck));
         close_checks.register(Box::new(UnpostedBillsCloseCheck));
+        close_checks.register(Box::new(BankReconciliationCloseCheck));
         close_checks.register(Box::new(SubledgerReconciliationCheck));
 
         LedgersConfig {

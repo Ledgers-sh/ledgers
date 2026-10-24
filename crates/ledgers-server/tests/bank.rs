@@ -618,3 +618,207 @@ fn count_lines(fx: &Fixture) -> usize {
         .expect("lines")
         .len()
 }
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn ledger_and_statement_balances_agree_after_reconciling_the_fixture_month() {
+    let fx = person_fx();
+    let account = create_halden(&fx);
+
+    // Open the period so postings are allowed.
+    pollster::block_on(
+        fx.deps
+            .db
+            .execute(&ledgers_db::period::set_status_statement(
+                COMPANY, "2026-03", "open",
+            )),
+    )
+    .expect("open March");
+
+    // Post an opening balance entry so the ledger matches the account's opening_amount.
+    // This is needed for reconciliation to work: the bank statement's opening balance
+    // (12500.00) must match the ledger's opening position.
+    let opening = person(
+        &fx,
+        Method::POST,
+        "/v1/entries",
+        Some(json!({
+            "entry": {
+                "journal_id": "GN",
+                "document_date": "2026-03-01",
+                "posting_date": "2026-03-01",
+                "base_currency": "EUR",
+                "description": "Opening balance",
+                "source_documents": [],
+                "lines": [
+                    {
+                        "account_number": "1020",
+                        "side": "debit",
+                        "base": {"minor": "1250000", "currency": "EUR"},
+                        "dimensions": {}
+                    },
+                    {
+                        "account_number": "3020",
+                        "side": "credit",
+                        "base": {"minor": "1250000", "currency": "EUR"},
+                        "dimensions": {}
+                    }
+                ]
+            }
+        })),
+    );
+    assert_eq!(
+        opening.status,
+        StatusCode::OK,
+        "opening entry should post successfully: {}",
+        opening.text
+    );
+
+    // Import the March statement.
+    let document = store_statement(&fx, CAMT_FULL, "march-full.xml");
+    let imported = import(&fx, &fx.keys.draft, &account, &document);
+    assert_eq!(imported.status, StatusCode::OK, "{}", imported.text);
+    let new_lines = imported.json()["new_transactions"].as_u64().unwrap_or(0);
+    assert!(new_lines > 0, "statement should have lines to reconcile");
+
+    // Before reconciling, the period close should be blocked by the bank check
+    // because there are unmatched lines. Verify the blocker is from "bank.reconciliation".
+    let blocked_close = person(
+        &fx,
+        Method::POST,
+        "/v1/periods/close",
+        Some(json!({"period": "2026-03"})),
+    );
+    assert!(
+        blocked_close.status.is_client_error() || blocked_close.status.as_u16() == 422,
+        "close should be blocked with unmatched lines: {}",
+        blocked_close.text
+    );
+    let error_text = blocked_close.text.to_lowercase();
+    assert!(
+        error_text.contains("bank.reconciliation") || error_text.contains("unmatched"),
+        "blocker should mention bank.reconciliation check: {}",
+        blocked_close.text
+    );
+
+    // Get all unmatched lines and post them to reconcile the account.
+    let lines = as_key(
+        &fx,
+        &fx.keys.read,
+        Method::GET,
+        &format!("/v1/bank/transactions?account_id={account}&limit=200"),
+        None,
+    );
+    assert_eq!(lines.status, StatusCode::OK, "{}", lines.text);
+    let lines_json = lines.json();
+    let transactions = lines_json["transactions"].as_array().expect("transactions");
+
+    // Track what we post so we can report it later
+    let mut posted_count = 0;
+    for tx in transactions {
+        let tx_id = tx["id"].as_str().expect("line id");
+        let status = tx["status"].as_str().unwrap_or("");
+        let remittance = tx["remittance"].as_str().unwrap_or("");
+        let booking_date = tx["booking_date"].as_str().unwrap_or("");
+
+        if status != "unmatched" {
+            continue;
+        }
+
+        // Route each bank line to an appropriate expense or revenue account.
+        // This reconciles the bank statement by posting each line against the ledger.
+        let target_account = match remittance {
+            // Bank fees: post to 5100 (bank charges)
+            r if r.contains("Kontofuehrungsentgelt") => "5100",
+            // Utilities: post to 5030 (rent and utilities)
+            r if r.contains("Strom") => "5030",
+            // Halden Supplies bills: post to 5010 (materials and supplies)
+            r if r.contains("Halden Supplies")
+                || r.contains("Rechnung 4711")
+                || r.contains("Rechnung 4790") =>
+            {
+                "5010"
+            }
+            // Nordlicht incoming payment (customer revenue): post to 4010 (sales revenue)
+            r if r.contains("Nordlicht") || r.contains("Projekt Nord") => "4010",
+            // Acme advance payment (customer deposit/liability): post to 2030 (accrued liabilities)
+            r if r.contains("Acme") || r.contains("Anzahlung") => "2030",
+            // Default: utilities for unknown lines
+            _ => "5030",
+        };
+
+        let post_result = person(
+            &fx,
+            Method::POST,
+            &format!("/v1/bank/transactions/{tx_id}/post"),
+            Some(json!({"id": tx_id, "counterparty_account": target_account})),
+        );
+        assert!(
+            post_result.status.is_success() || post_result.status.as_u16() == 200,
+            "posting {} ({} on {}) to {} should succeed: {}",
+            tx_id,
+            remittance,
+            booking_date,
+            target_account,
+            post_result.text
+        );
+        posted_count += 1;
+    }
+    assert_eq!(posted_count, 6, "should have posted all 6 booked lines");
+
+    // After posting all lines, the period close should succeed without the bank check blocking.
+    let successful_close = person(
+        &fx,
+        Method::POST,
+        "/v1/periods/close",
+        Some(json!({"period": "2026-03"})),
+    );
+    assert_eq!(
+        successful_close.status,
+        StatusCode::OK,
+        "close should succeed after posting all lines: {}",
+        successful_close.text
+    );
+    assert_eq!(successful_close.json()["state"], "closed");
+
+    // Verify the reconciliation view shows the bank account reconciles correctly.
+    let reconcile = as_key(
+        &fx,
+        &fx.keys.read,
+        Method::GET,
+        &format!("/v1/bank/accounts/{account}/reconciliation"),
+        None,
+    );
+    assert_eq!(reconcile.status, StatusCode::OK, "{}", reconcile.text);
+    let reconcile_json = reconcile.json();
+
+    // Statement and ledger balances should agree (difference = 0).
+    let statement_balance = reconcile_json["statement_balance"]["minor"]
+        .as_str()
+        .expect("statement balance")
+        .parse::<i64>()
+        .expect("statement balance is a number");
+    let ledger_balance = reconcile_json["ledger_balance"]["minor"]
+        .as_str()
+        .expect("ledger balance")
+        .parse::<i64>()
+        .expect("ledger balance is a number");
+    let difference = reconcile_json["difference"]["minor"]
+        .as_str()
+        .expect("difference")
+        .parse::<i64>()
+        .expect("difference is a number");
+
+    assert_eq!(
+        difference, 0,
+        "statement balance {statement_balance} and ledger balance {ledger_balance} should match (difference should be 0)"
+    );
+    assert_eq!(
+        reconcile_json["reconciled"], true,
+        "reconciliation should show reconciled=true"
+    );
+    assert_eq!(
+        reconcile_json["unmatched_count"], 0,
+        "there should be zero unmatched lines"
+    );
+}

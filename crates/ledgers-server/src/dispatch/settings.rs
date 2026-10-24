@@ -12,12 +12,15 @@ use crate::routes::Presented;
 use async_trait::async_trait;
 use cratefield_core::{Database, DbError, Statement};
 use ledgers_audit::{AuditContext, AuditEvent, Outcome};
+use ledgers_bank::close::BankReconciliationCloseCheck;
+use ledgers_bills::close::{FlaggedExtractionCloseCheck, UnpostedBillsCloseCheck};
 use ledgers_commands::auth::Tier;
 use ledgers_commands::{Command, CommandContext, CommandError, ExecToken, JournalPreview, Plan};
 use ledgers_ledger::close::{CloseCheckRegistry, DraftEntriesCloseCheck};
 use ledgers_ledger::fiscal::{self, FiscalYear, FiscalYearSpec};
 use ledgers_ledger::period::{self, PeriodState};
 use ledgers_ledger::{AccountsError, EntryJournal};
+use ledgers_subledger::close_check::SubledgerReconciliationCheck;
 use ledgers_tax::country::{self, CountryPack};
 use ledgers_tax::rate::{DatedRate, Jurisdiction, RateCategory};
 use ledgers_tax::settings::{TaxSettings, VatBasis};
@@ -2006,6 +2009,10 @@ fn person_audit(deps: &Deps, person: &str, request_id: &str) -> AuditContext {
 pub fn close_checks() -> CloseCheckRegistry {
     let mut checks = CloseCheckRegistry::new();
     checks.register(Box::new(DraftEntriesCloseCheck));
+    checks.register(Box::new(FlaggedExtractionCloseCheck));
+    checks.register(Box::new(UnpostedBillsCloseCheck));
+    checks.register(Box::new(BankReconciliationCloseCheck));
+    checks.register(Box::new(SubledgerReconciliationCheck));
     checks
 }
 

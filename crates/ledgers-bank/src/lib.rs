@@ -15,6 +15,7 @@
 //! [`module`]. Remittance and counterparty text is data: no reader or ranker
 //! interprets it as an instruction.
 
+pub mod close;
 pub mod commands;
 pub mod fingerprint;
 pub use ledgers_bills::iban;

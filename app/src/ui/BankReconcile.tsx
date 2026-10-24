@@ -40,6 +40,8 @@ const KIND_KEYS: Record<Suggestion['kind'], MessageKey> = {
   rule: 'bank.kind_rule',
   bill: 'bank.kind_bill',
   entry: 'bank.kind_entry',
+  combined: 'bank.kind_combined',
+  'partial-payment': 'bank.kind_partial_payment',
 };
 
 export function BankReconcile({ account, line, onChanged }: { account: AccountView; line: TransactionView; onChanged: () => void }) {
@@ -129,7 +131,10 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
     choice !== null &&
     (choice.kind === 'manual'
       ? manualAccount !== '' && (!receivable || (customer !== null && incoming))
-      : suggestion !== undefined && (suggestion.kind !== 'rule' || !!suggestion.account_number));
+      : suggestion !== undefined &&
+        suggestion.kind !== 'combined' &&
+        suggestion.kind !== 'partial-payment' &&
+        (suggestion.kind !== 'rule' || !!suggestion.account_number));
   const canMatch = !busy && matchable;
 
   const afterWrite = (result: unknown, done: string) => {
