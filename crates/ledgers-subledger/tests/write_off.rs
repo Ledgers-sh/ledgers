@@ -55,6 +55,7 @@ async fn post_invoice(
         amount,
         rate: None,
         counter_account: "4000".to_owned(),
+        dimensions: Default::default(),
         description: "Test invoice".to_owned(),
         source_id: Some(format!("INV-{event_id}")),
     };

@@ -2571,6 +2571,7 @@ dependencies = [
  "ledgers-db",
  "ledgers-money",
  "ledgers-storage",
+ "ledgers-subledger",
  "pollster",
  "schemars 1.2.3",
  "sea-query",

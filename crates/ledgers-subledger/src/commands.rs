@@ -107,6 +107,10 @@ pub struct PostItemInput {
     pub rate: Option<String>,
     /// Counter-account to post against (e.g., 6000 for expense).
     pub counter_account: String,
+    /// Dimension values on the counter-account line (e.g. a cost centre on an
+    /// expense), in the entry's dimension kinds.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dimensions: BTreeMap<String, String>,
     /// Description for the entry.
     pub description: String,
     /// Optional source reference (e.g., invoice number).
@@ -431,6 +435,14 @@ fn build_entry_input(
             ));
         }
         (Ledger::Ar, ItemKind::Bill) => unreachable!("Bill should only be in AP"),
+    }
+
+    // The requested dimensions belong on the counter-account line only; the
+    // control line stays untagged, as the open item is per party.
+    for line in &mut lines {
+        if line.account_number == input.counter_account {
+            line.dimensions = input.dimensions.clone();
+        }
     }
 
     let fiscal_year = input

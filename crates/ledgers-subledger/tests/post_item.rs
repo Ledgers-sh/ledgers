@@ -42,6 +42,7 @@ fn test_post_eur_invoice_entry_and_item() {
             amount: 100_000, // 1000.00 EUR in minor units
             rate: None,
             counter_account: "4000".to_owned(), // Revenue
+            dimensions: Default::default(),
             description: "Invoice for services".to_owned(),
             source_id: Some("INV001".to_owned()),
         };
@@ -128,6 +129,7 @@ fn test_post_usd_invoice_with_fx() {
             amount: 100_000,              // 1000.00 USD
             rate: Some("0.9".to_owned()), // Decimal rate, will be scaled internally
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "USD invoice".to_owned(),
             source_id: Some("INVUSD001".to_owned()),
         };
@@ -202,6 +204,7 @@ fn test_post_ap_bill_credits_payables() {
             amount: 50_000, // 500.00 EUR
             rate: None,
             counter_account: "6000".to_owned(), // Expense
+            dimensions: Default::default(),
             description: "Vendor bill".to_owned(),
             source_id: Some("BILL001".to_owned()),
         };
@@ -269,6 +272,7 @@ fn test_post_ar_credit_note_gives_negative_item() {
             amount: 10_000, // 100.00 EUR
             rate: None,
             counter_account: "4000".to_owned(), // Revenue
+            dimensions: Default::default(),
             description: "Credit note".to_owned(),
             source_id: Some("CN001".to_owned()),
         };
@@ -342,6 +346,7 @@ fn test_duplicate_source_id_rejected() {
             amount: 100_000,
             rate: None,
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "First invoice".to_owned(),
             source_id: Some("INV001".to_owned()),
         };
@@ -384,6 +389,7 @@ fn test_duplicate_source_id_rejected() {
             amount: 50_000,
             rate: None,
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "Second invoice".to_owned(),
             source_id: Some("INV001".to_owned()), // Duplicate!
         };
@@ -435,6 +441,7 @@ fn test_missing_rate_for_non_base_currency_rejected() {
             amount: 100_000,
             rate: None, // Missing rate for non-base currency
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "USD invoice without rate".to_owned(),
             source_id: Some("INVUSD_BAD".to_owned()),
         };
@@ -489,6 +496,7 @@ fn test_multiple_items_same_party() {
             amount: 100_000, // EUR 100.00
             rate: None,
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "Invoice 1".to_owned(),
             source_id: Some("INV001".to_owned()),
         };
@@ -530,6 +538,7 @@ fn test_multiple_items_same_party() {
             amount: 200_000, // EUR 200.00
             rate: None,
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "Invoice 2".to_owned(),
             source_id: Some("INV002".to_owned()),
         };
@@ -571,6 +580,7 @@ fn test_multiple_items_same_party() {
             amount: 300_000, // USD 300.00
             rate: Some("0.9".to_owned()),
             counter_account: "4000".to_owned(),
+            dimensions: Default::default(),
             description: "Invoice 3 USD".to_owned(),
             source_id: Some("INV003".to_owned()),
         };
@@ -612,6 +622,7 @@ fn test_multiple_items_same_party() {
             amount: 100_000, // EUR 100.00
             rate: None,
             counter_account: "6000".to_owned(),
+            dimensions: Default::default(),
             description: "Bill 1".to_owned(),
             source_id: Some("BILL001".to_owned()),
         };
@@ -739,6 +750,7 @@ fn test_multiple_items_same_party_same_day() {
                 amount: 100_000 * i, // EUR 100, 200, 300
                 rate: None,
                 counter_account: "4000".to_owned(),
+                dimensions: Default::default(),
                 description: "Same description".to_owned(), // Same description
                 source_id: Some(format!("INV{i:03}")),
             };
