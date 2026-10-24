@@ -9,7 +9,16 @@ import { ErrorBanner, Skeleton } from './common';
 import { Figure, useWidth } from './charts';
 import { colourOf } from '../lib/units';
 
-const SOURCE_NAMES: Record<string, string> = { cloudflare: 'Cloudflare', anthropic: 'Anthropic', planetscale: 'PlanetScale' };
+const SOURCE_NAMES: Record<string, string> = {
+  cloudflare: 'Cloudflare',
+  anthropic: 'Anthropic',
+  planetscale: 'PlanetScale',
+  aws: 'Amazon Web Services',
+  vercel: 'Vercel',
+  gcp: 'Google Cloud',
+  azure: 'Microsoft Azure',
+  supabase: 'Supabase',
+};
 
 /** Stacked bars per month, one segment per series (a unit or a source). Same frame as the other charts. */
 export function CostStack({ view, id, title, summary, currency }: { view: CostView; id: string; title: string; summary: string; currency: string }) {

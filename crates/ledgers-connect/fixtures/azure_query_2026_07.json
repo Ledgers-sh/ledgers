@@ -1,0 +1,18 @@
+{
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.CostManagement/query",
+  "name": "55312978-ba1b-415c-9304-cfd9c43c0481",
+  "type": "Microsoft.CostManagement/Query",
+  "properties": {
+    "columns": [
+      {"name": "PreTaxCost", "type": "Number"},
+      {"name": "ResourceGroup", "type": "String"},
+      {"name": "Currency", "type": "String"}
+    ],
+    "nextLink": null,
+    "rows": [
+      [12.5, "rg-ledgers", "USD"],
+      [0.25, "", "USD"],
+      [3.125, "rg-sqeezin", "EUR"]
+    ]
+  }
+}

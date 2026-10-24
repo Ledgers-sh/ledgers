@@ -53,6 +53,9 @@ export const SOURCE_COLOURS: Record<string, string> = {
   planetscale: '#9AB973',
   aws: '#C98B7E',
   vercel: '#A9B6C6',
+  gcp: '#B7A3D6',
+  azure: '#D98C5F',
+  supabase: '#8DB89E',
 };
 
 /**

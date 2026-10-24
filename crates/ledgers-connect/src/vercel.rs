@@ -22,7 +22,7 @@
 //! invoices are not imported; the charges are the source of truth.
 
 use crate::connector::{Connector, CredentialField, SyncContext, next_day};
-use crate::cost::{CostLine, micro_of, month_of, output};
+use crate::cost::{CostLine, micro_of_value, month_of, output};
 use crate::http::VendorError;
 use crate::model::SyncOutput;
 use async_trait::async_trait;
@@ -140,12 +140,7 @@ fn cost_line(row: &Value) -> Result<Option<CostLine>, ()> {
         .and_then(Value::as_str)
         .ok_or(())?
         .to_uppercase();
-    let text = match row.get("BilledCost").ok_or(())? {
-        Value::String(text) => text.clone(),
-        Value::Number(number) => number.to_string(),
-        _ => return Err(()),
-    };
-    let micro = micro_of(&text).map_err(|_| ())?;
+    let micro = micro_of_value(row.get("BilledCost").ok_or(())?).map_err(|_| ())?;
     let project = row
         .pointer("/Tags/ProjectId")
         .and_then(Value::as_str)

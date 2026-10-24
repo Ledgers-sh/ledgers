@@ -3,7 +3,8 @@
 Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
-`planetscale` (earlier releases) and, from this release, `aws` and `vercel`.
+`planetscale` (earlier releases), `aws` and `vercel`, and `gcp`, `azure` and
+`supabase`. Supabase books no money; the others book bills and usage.
 
 ## How a sync books money
 
@@ -27,6 +28,10 @@ draft bills, split across business units. The framework is in
   the weight of each unit's resources (largest remainder, exact). A resource
   with no allocation rule books to the connection's default unit and is listed
   in the mapping queue, so nothing is silently lost to the wrong unit.
+- **Several currencies in one period.** Usage weights are kept per period, not per
+  currency. A period whose costs are in more than one currency therefore writes no
+  weights, and its invoices book to the default unit with a note, instead of letting
+  one currency's amounts distort another's split.
 - **Currency.** Amounts are read as exact decimals and summed at six decimals,
   then rounded half up once to the currency's minor units. Any ISO 4217 code
   Ledgers knows is booked in that currency; an unknown code is not booked and
@@ -90,9 +95,74 @@ one FOCUS 1.3 charge per line. Source:
   as a number; the reader accepts a number or a decimal string. Check the first
   live answer before relying on it.
 
+## Google Cloud (`gcp`)
+
+The Cloud Billing API cannot return costs, so the cost comes from the **Cloud
+Billing export to BigQuery** (the standard usage cost table). The connection names
+the table: `project` (the project that runs the query), `dataset` and `table`.
+Ledgers runs the query with the BigQuery REST `jobs.query` and reads the rows with
+`getQueryResults`, following page tokens and waiting for a job that is still
+running. Source: <https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query>
+
+- **Credential.** A service account JSON key. Create one key for a service account
+  with **BigQuery Data Viewer** on the export dataset and **BigQuery Job User** on
+  the project that runs the query, and paste the whole JSON file.
+- **Auth.** Ledgers signs an RS256 JWT with the key (`ring`, built for wasm32 with
+  `wasm32_unknown_unknown_js`) and exchanges it at `https://oauth2.googleapis.com/token`
+  for a token with the `bigquery.readonly` scope. The key is never sent anywhere else.
+- **What is booked.** Each month's net cost per project: `cost` plus `credits`,
+  summed as NUMERIC (the export's `cost` is a FLOAT64, so each row is converted first).
+- **Allocation key.** The project id. A row with no project books as `unattributed`.
+- **Export lag.** The export lags usage by hours; only completed months are booked.
+
+## Microsoft Azure (`azure`)
+
+The Cost Management query at subscription scope,
+`POST https://management.azure.com/subscriptions/{id}/providers/Microsoft.CostManagement/query?api-version=2025-03-01`,
+one request per calendar month: `type: Usage` (actual cost), `granularity: None`,
+`PreTaxCost` summed, grouped by `ResourceGroup`. The answer's columns are matched by
+name and `properties.nextLink` pages. Source:
+<https://learn.microsoft.com/rest/api/cost-management/query/usage>
+
+- **Credential.** A client secret of an app registration with the **Cost Management
+  Reader** role on the subscription (assign it on the subscription, not the tenant).
+- **Config.** `tenant_id`, `client_id` and `subscription_id`, each a GUID.
+- **Auth.** The Entra ID client-credentials flow at
+  `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` with
+  `scope=https://management.azure.com/.default`. The secret is percent-encoded in the
+  form body and never logged.
+- **Allocation key.** The resource group. A cost with no resource group books as
+  `unattributed`.
+- **Currency.** Read from the `Currency` column of each row.
+
+## Supabase (`supabase`): metrics only, no bills
+
+Supabase's Management API gives no cost in a currency for an organization, so this
+connector **books nothing** and creates no bills or usage rows. Each sync reads the
+organization's projects, then for each project (up to 25):
+
+- the add-ons it pays for (`GET /v1/projects/{ref}/billing/addons`), with their
+  price `amount` and `interval`. The API gives **no currency**, so these are shown
+  in the run notes as "amount without currency, not booked", and are never converted
+  or guessed; and
+- the last day's request counts (`usage.api-counts?interval=1day`), summed in the
+  run notes as counts, not money.
+
+The notes appear in the run history of the Connected sources screen. Because nothing
+is split, no allocation rule applies to Supabase. Source: the Management API's
+OpenAPI document at <https://api.supabase.com/api/v1-json>.
+
+- **Credential.** A personal access token with read access to the organization.
+  Supabase documents scoped tokens (limited to chosen organizations and permissions);
+  use one limited to the organization. The reference does not name the exact
+  permissions, so no permission name is given here.
+- **Config.** `organization`, the organization slug.
+- **Limit.** Projects beyond the first 25 are counted in a note, not read.
+
 ## Deploy notes
 
-- Migration `0002` widens the `connector` check to include `aws` and `vercel`.
+- Migration `0002` widens the `connector` check to include `aws` and `vercel`;
+  migration `0003` adds `gcp`, `azure` and `supabase`.
   SQLite cannot alter a check constraint, so the migration copies the rows into a
   new table and renames it into place. It defers foreign-key checks with
   `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores
