@@ -10,6 +10,7 @@ publish = false
 cratefield-core = { workspace = true }
 ledgers-commands = { workspace = true }
 ledgers-db = { workspace = true }
+ledgers-ext = { workspace = true }
 ledgers-ledger = { workspace = true }
 ledgers-money = { workspace = true }
 ledgers-subledger = { workspace = true }
@@ -27,10 +28,12 @@ pollster = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-audit = { workspace = true }
 ledgers-bills = { workspace = true }
+ledgers-extract = { workspace = true }
 ledgers-ledger = { workspace = true }
 ledgers-storage = { workspace = true }
 ledgers-subledger = { workspace = true }
 ledgers-demo = { workspace = true }
+quick-xml = { workspace = true, features = ["serialize"] }
 
 [lints]
 workspace = true

@@ -166,6 +166,12 @@ pub struct DocumentLine {
     pub quantity: String,
     pub unit: Option<String>,
     pub net_minor: i64,
+    /// Tax rate as a decimal percentage string (e.g., "19.00").
+    #[serde(default)]
+    pub tax_rate_percent: Option<String>,
+    /// Tax kind matching TaxBreakdown.kind (e.g., "standard", "intra-eu", "reverse-charge").
+    #[serde(default)]
+    pub tax_kind: Option<String>,
 }
 
 /// Tax breakdown per rate.

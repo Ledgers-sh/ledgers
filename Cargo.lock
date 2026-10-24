@@ -2482,12 +2482,15 @@ dependencies = [
  "ledgers-commands",
  "ledgers-db",
  "ledgers-demo",
+ "ledgers-ext",
+ "ledgers-extract",
  "ledgers-ledger",
  "ledgers-money",
  "ledgers-storage",
  "ledgers-subledger",
  "ledgers-tax",
  "pollster",
+ "quick-xml",
  "schemars 1.2.3",
  "sea-query",
  "serde",
@@ -3257,6 +3260,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]

@@ -223,6 +223,8 @@ mod tests {
                 quantity: "1".to_string(),
                 unit: None,
                 net_minor: 10000,
+                tax_rate_percent: Some("19.00".to_string()),
+                tax_kind: Some("standard".to_string()),
             }],
             tax_breakdown: vec![TaxBreakdown {
                 tax_rate_percent: "19%".to_string(),
@@ -269,6 +271,8 @@ mod tests {
                 quantity: "10".to_string(),
                 unit: Some("h".to_string()),
                 net_minor: 50000,
+                tax_rate_percent: Some("19.00".to_string()),
+                tax_kind: Some("standard".to_string()),
             }],
             tax_breakdown: vec![TaxBreakdown {
                 tax_rate_percent: "19%".to_string(),
@@ -333,6 +337,8 @@ mod tests {
                 quantity: "10".to_string(),
                 unit: Some("h".to_string()),
                 net_minor: 50000,
+                tax_rate_percent: Some("0.00".to_string()),
+                tax_kind: Some("intra-eu".to_string()),
             }],
             tax_breakdown: vec![TaxBreakdown {
                 tax_rate_percent: "0%".to_string(),
