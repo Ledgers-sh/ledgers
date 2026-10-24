@@ -75,7 +75,7 @@ getrandom = { version = "0.4.3", default-features = false, features = ["wasm_js"
 getrandom_02 = { package = "getrandom", version = "0.2", default-features = false, features = ["js"] }
 
 [dev-dependencies]
-p256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
 rusqlite = "0.40"
 cratefield-testing = { workspace = true, features = ["harness"] }
 pollster = { workspace = true }

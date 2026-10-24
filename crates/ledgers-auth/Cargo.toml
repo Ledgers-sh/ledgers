@@ -25,7 +25,7 @@ tracing = { workspace = true }
 # ledgers-approvals uses), PKCE and the HMAC-sealed login-state cookie.
 base64 = "0.22"
 hmac = "0.12"
-p256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
 url = "2"
 
 [dev-dependencies]
