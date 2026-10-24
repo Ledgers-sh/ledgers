@@ -6230,6 +6230,133 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/connections/{connection_id}/renewals": {
+      "post": {
+        "operationId": "connections_renewals",
+        "description": "Execute command: connections.renewals",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "RenewalsInput",
+                "description": "The input of `connections.renewals`: the connection whose domains are read.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The registrar connection (Spaceship).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connection_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "RenewalsOutput",
+                  "description": "The output of `connections.renewals`: the domains that expire within the\nwindow, read live from the registrar. Nothing is written. A registrar does not\ngive the renewal price of a domain it already holds, so no amount is shown.",
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "description": "Whether the registrar answered.",
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "description": "Why the read failed, when it failed. No credential is in it.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "as_of": {
+                      "description": "The day the window starts from, `YYYY-MM-DD`.",
+                      "type": "string"
+                    },
+                    "window_days": {
+                      "description": "The window in days, from `as_of`. A domain already past its expiry is listed.",
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "domains": {
+                      "description": "The domains in the window, soonest first.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DomainRecord"
+                      }
+                    },
+                    "notes": {
+                      "description": "What the registrar said, as sentences.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "as_of",
+                    "window_days",
+                    "domains",
+                    "notes"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.renewals",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections renewals",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{connection_id}/renewals\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/connections/{connection_id}/runs": {
       "get": {
         "operationId": "connections_runs",
@@ -15261,6 +15388,36 @@
           "label"
         ]
       },
+      "DomainRecord": {
+        "description": "One domain a registrar lists for the account. Metadata only: the list has no\ncharge, so no bill or entry is made from it.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The domain name, as the registrar prints it (`squeez.in`).",
+            "type": "string"
+          },
+          "expires_on": {
+            "description": "The expiry date, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "auto_renew": {
+            "description": "Whether the registrar renews the domain automatically.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "The registrar's lifecycle status for the domain, when it gives one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "expires_on",
+          "auto_renew"
+        ]
+      },
       "RunView": {
         "description": "One sync run, as the history shows it.",
         "type": "object",
@@ -15392,6 +15549,14 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PlannedEntry"
+            },
+            "default": []
+          },
+          "domains": {
+            "description": "Domains a registrar lists, as metadata. Nothing is booked from them: a\ndomain list carries no charge. The renewals view reads them.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainRecord"
             },
             "default": []
           }

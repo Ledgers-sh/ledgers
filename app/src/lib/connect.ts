@@ -60,6 +60,8 @@ export const SOURCE_COLOURS: Record<string, string> = {
   openrouter: '#9FB3C8',
   stripe: '#A9B6C6',
   polar: '#B5C7A8',
+  spaceship: '#C7B98F',
+  twilio: '#E2776A',
 };
 
 /**

@@ -8,6 +8,7 @@ import {
   connectionsDelete,
   connectionsList,
   connectionsSyncNow,
+  connectionRenewals,
   connectionsTest,
   type AllocationRule,
   type AllocationListOutput,
@@ -81,6 +82,18 @@ const SOURCE_HELP: Record<string, { imports: MessageKey; scopes: MessageKey; tok
     tokenUrl: 'https://polar.sh/docs/integrate/oat',
     tokenLabel: 'integrations.create_access_token',
   },
+  spaceship: {
+    imports: 'integrations.spaceship_imports',
+    scopes: 'integrations.scopes_spaceship',
+    tokenUrl: 'https://docs.spaceship.dev',
+    tokenLabel: 'integrations.create_token',
+  },
+  twilio: {
+    imports: 'integrations.twilio_imports',
+    scopes: 'integrations.scopes_twilio',
+    tokenUrl: 'https://www.twilio.com/docs/iam/api-keys',
+    tokenLabel: 'integrations.create_token',
+  },
   stripe: {
     imports: 'integrations.stripe_imports',
     scopes: 'integrations.scopes_stripe',
@@ -107,6 +120,10 @@ const CREDENTIAL_LABELS: Record<string, MessageKey> = {
   secret_access_key: 'integrations.cred_secret_access_key',
   client_secret: 'integrations.cred_client_secret',
   service_account_json: 'integrations.cred_service_account',
+  api_key: 'integrations.cred_api_key',
+  api_secret: 'integrations.cred_api_secret',
+  api_key_sid: 'integrations.cred_api_key_sid',
+  api_key_secret: 'integrations.cred_api_key_secret',
 };
 
 /** Config keys the form asks for as plain text, when a connector names them. */
@@ -122,10 +139,12 @@ const GENERIC_CONFIG: Record<string, MessageKey> = {
   suspense_account: 'integrations.stripe_suspense',
   stripe_account: 'integrations.stripe_connect',
   tax_account: 'integrations.polar_tax',
+  account_sid: 'integrations.twilio_account',
+  subaccount_sid: 'integrations.twilio_subaccount',
 };
 
 /** Generic config keys that may stay empty. */
-const OPTIONAL_CONFIG = new Set<string>(['stripe_account', 'tax_account']);
+const OPTIONAL_CONFIG = new Set<string>(['stripe_account', 'tax_account', 'subaccount_sid']);
 
 /** Sources on the roadmap. Listed as text only: no button, no link, no form. */
 const COMING_SOON = ['MiniMax', 'GitHub', 'Google Workspace', 'Resend'];
@@ -209,7 +228,7 @@ export function IntegrationsPanel() {
             onCancel={() => setPicked(null)}
             onConnected={(created) => {
               setPicked(null);
-              push(t('integrations.saved', { name: created.name }));
+              push(t(created.connector === 'spaceship' ? 'integrations.saved_registrar' : 'integrations.saved', { name: created.name }));
               state.reload();
             }}
           />
@@ -471,7 +490,7 @@ function ConnectForm({
             ) : (
               <input
                 class="input mono"
-                type={field.name.includes('secret') ? 'password' : 'text'}
+                type={field.name.includes('secret') || field.name === 'api_key' ? 'password' : 'text'}
                 autocomplete="off"
                 spellcheck={false}
                 value={credentials[field.name] ?? ''}
@@ -510,6 +529,51 @@ function ConnectForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/** Domains that expire soon, read live from the registrar. Metadata only: no amount is shown or booked. */
+function RenewalsPanel({ connectionId }: { connectionId: string }) {
+  const { client } = useSession();
+  const renewals = useAsync(() => connectionRenewals(client, connectionId), [client.baseUrl, client.apiKey, connectionId]);
+  if (renewals.loading && !renewals.data) return <Skeleton rows={2} label={t('integrations.renewals_loading')} />;
+  if (renewals.error && !renewals.data) return <ErrorBanner error={renewals.error} onRetry={renewals.reload} />;
+  if (!renewals.data) return null;
+  const { ok, error, as_of, window_days, domains } = renewals.data;
+  return (
+    <section class="renewals" aria-labelledby={`renewals-title-${connectionId}`}>
+      <h5 id={`renewals-title-${connectionId}`} class="section-title">{t('integrations.renewals_title')}</h5>
+      <p class="hint">{t('integrations.renewals_body', { days: String(window_days) })}</p>
+      {!ok ? (
+        <Notice tone="error">{t('integrations.renewals_failed', { reason: error ?? '' })}</Notice>
+      ) : domains.length === 0 ? (
+        <p class="muted">{t('integrations.renewals_none', { days: String(window_days) })}</p>
+      ) : (
+        <table class="ledger cards renewals-table">
+          <caption class="sr-only">{t('integrations.renewals_title')}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t('integrations.renewal_col_domain')}</th>
+              <th scope="col">{t('integrations.renewal_col_expires')}</th>
+              <th scope="col">{t('integrations.renewal_col_auto')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {domains.map((domain) => (
+              <tr key={domain.name}>
+                <td data-label={t('integrations.renewal_col_domain')} class="mono">{domain.name}</td>
+                <td data-label={t('integrations.renewal_col_expires')}>
+                  <span class="mono">{domain.expires_on}</span>
+                  {domain.expires_on < as_of && <span class="badge warn"> {t('integrations.renewal_past')}</span>}
+                </td>
+                <td data-label={t('integrations.renewal_col_auto')}>{domain.auto_renew ? t('integrations.renewal_on') : t('integrations.renewal_off')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p class="hint">{t('integrations.renewals_as_of', { date: as_of })}</p>
+    </section>
   );
 }
 
@@ -596,7 +660,14 @@ function ConnectionDetail({
           {testResult.ok ? t('integrations.test_ok') : t('integrations.test_failed', { reason: testResult.error ?? '' })}
         </Notice>
       )}
+      {testResult?.ok &&
+        testResult.notes.map((note) => (
+          <p class="hint" key={note}>
+            {note}
+          </p>
+        ))}
       {testError !== null && <Notice tone="error">{describeError(testError).title}</Notice>}
+      {connection.connector === 'spaceship' && <RenewalsPanel connectionId={connection.id} />}
       {person && (
         <div class="row-actions">
           <button type="button" class="btn btn-primary" onClick={sync} disabled={syncing}>

@@ -199,6 +199,7 @@ fn sample_answer() -> SyncOutput {
             usage("2026-08", "fz-dashboard", 2),
         ],
         notes: vec!["R2 operations and storage are not read".to_owned()],
+        domains: Vec::new(),
     }
 }
 

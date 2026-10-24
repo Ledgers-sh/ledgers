@@ -4,7 +4,7 @@ Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
 `planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
-`supabase`, `openai` and `openrouter`, `stripe` and `polar`. Supabase books no money;
+`supabase`, `openai` and `openrouter`, `stripe` and `polar`, `spaceship` (domains, renewals) and `twilio`. Supabase and Spaceship book no money;
 OpenRouter books one invoice per day with no allocation; Stripe posts journal entries
 (not bills); the others book bills by month.
 
@@ -297,6 +297,99 @@ Polar is a merchant of record. Its books are journal entries, as for Stripe. Sou
 - **Config.** `clearing_account` (the Polar balance), `revenue_account`, `expense_account`
   (fees), and the optional `tax_account`. Each is checked against the chart on save.
 
+## Spaceship (`spaceship`): domains and renewals, no bills
+
+Spaceship is the registrar for the Factory Zero domains. Its public API is at
+<https://docs.spaceship.dev> (base `https://spaceship.dev/api/v1`). Researched for this
+connector:
+
+- **Authentication.** Two headers on every request: `X-Api-Key` and `X-Api-Secret`
+  (the docs' samples write them as `X-API-Key` and `X-API-Secret`; header names are
+  case-insensitive).
+- **Scopes.** The API lists `domains:read`, `domains:write`, `domains:transfer`,
+  `domains:billing`, `contacts:read`/`write`, `dnsrecords:read`/`write`,
+  `asyncoperations:read`, `sellerhub:read`/`write` and `hyperlift:*`. Ledgers asks for
+  **`domains:read` only**, which is all the domain list needs.
+- **Billing: none.** The reference has **no billing, invoice, order or transaction
+  endpoint** for the account. `domains:billing` is a scope on register, renew, restore
+  and transfer (writes), not a read. The only "transactions" are SellerHub SafePay
+  escrow sales of domains you sell (`GET /v1/sellerhub/safepay-transactions`), which are
+  income, not a cost, and need `sellerhub:read`. They are not read.
+- **Domain list.** `GET /v1/domains?take=1..100&skip=N&orderBy=name` returns
+  `items` and `total`. Each item has `name`, `unicodeName`, `isPremium`, `autoRenew`,
+  `registrationDate`, `expirationDate`, `lifecycleStatus`, `verificationStatus`,
+  `eppStatuses`, `suspensions`, `privacyProtection`, `nameservers` and `contacts`.
+- **Pricing.** The list has **no price**. Prices appear only on the availability
+  endpoints (`premiumPricing`), for a name not yet registered. So the renewal price of a
+  domain you already hold is not available from the API.
+- **Async and errors.** Long operations return 202 with `spaceship-async-operationid`;
+  `GET /v1/async-operations/{id}` gives `pending`, `success` or `failed`. Ledgers reads
+  only the domain list, so no async operation is involved.
+
+**What Ledgers does with this.** A sync reads the domain list (paged by `take` and `skip`,
+up to 5,000 domains) and books **nothing**: no bill, no usage row, no journal entry. Each
+domain is kept as metadata in the run, and the **renewals view** lists the domains that
+expire within 60 days, plus those already past expiry, soonest first, with the expiry
+date and auto-renew status. The view reads the registrar live when it is opened; nothing
+is stored. Renewal amounts are not shown, because the API gives none. Actual renewal
+charges come from the bank feed or the invoice inbox, and the renewal reminders do not
+replace them.
+
+- **Credential.** An API key with `domains:read`, created for this account only. The
+  form asks for the key and the secret as one credential object, sealed with
+  `LEDGERS_CONNECT_KEY`.
+- **Config.** None. Expense account and default unit are required by the form as for every
+  connection, but nothing is posted to them.
+- **Allocation.** None. Nothing is split, so no allocation rule applies. The domains carry
+  their names, so a domain-name rule (for example `squeez.in` to the Sqeezin unit) is a
+  reasonable mapping to set up when a cost source exists.
+- **Dates.** `expirationDate` is read as its first ten characters (`YYYY-MM-DD`). The
+  exact format of a live answer has not been checked against an account; check the first
+  live list before relying on the renewal dates.
+- **Tests.** `crates/ledgers-connect/tests/spaceship.rs` runs the connector against recorded
+  answers: headers, the query, paging by `skip`, parsing, idempotent re-sync, the renewals
+  window, 401 and 403 (not retried), 429 and 5xx (three attempts), and a missing field.
+
+## Twilio (`twilio`): usage costs, one bill per month and currency
+
+The Usage Records API, `GET https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Usage/Records/Monthly.json`
+with `StartDate` and `EndDate` (`YYYY-MM-DD`), `PageSize=1000` and `IncludeSubaccounts=false`.
+Each record is one usage category in one month: `category`, `price` (a decimal string),
+`price_unit` (the currency Twilio bills in, usually `USD`) and `start_date`. Paging follows
+`next_page_uri`, which must stay on `api.twilio.com`. Sources:
+<https://www.twilio.com/docs/usage/api/usage-record> and
+<https://www.twilio.com/docs/iam/api/account>.
+
+- **Credential.** An **API key** SID (`SK…`) and its secret, sent as HTTP Basic (the key SID
+  as user name, the secret as password). Use a standard or restricted API key. **Never the
+  main auth token.**
+- **Config.** `account_sid` (required, `AC` and 32 hex characters) and `subaccount_sid`
+  (optional). One connection per account. A subaccount needs its own connection, so its
+  cost is not counted twice. Usage is read with `IncludeSubaccounts=false`.
+- **What is booked.** One invoice per month and currency, `twilio-cost:{YYYY-MM}:{currency}`,
+  whose total is the sum of the categories. The invoice description lists each category's
+  amount in minor units. The aggregate `totalprice` category is skipped, since the
+  categories add up to it. The sign of a price is ignored: the amount is booked by its size,
+  because the docs do not say whether a charge is reported as a negative price. The current month is not booked; re-syncing a month is a no-op.
+- **Allocation.** A usage row's resource is the account (or subaccount) SID. An allocation
+  rule keyed by that SID maps the connection's costs to a business unit. Without a rule,
+  costs book to the connection's default unit and are listed in the mapping queue. Usage
+  rows carry no venture, so map by subaccount, not by phone number.
+- **Balance.** `GET /2010-04-01/Accounts/{AccountSid}/Balance.json` is read each sync and
+  shown as a run note, labelled "information only, not booked". The balance is read from
+  the parent account, because a child account has no balance. The docs do not say whether
+  an API key may read it, so a refusal is a note, not a failed sync. **Check the first live
+  sync for this note.**
+- **Errors.** 401 and 403 are refusals and are not retried. 429 and 5xx are retried three
+  times, then reported. A next-page link that leaves `api.twilio.com` is refused.
+- **Tests.** `crates/ledgers-connect/tests/twilio.rs`: Basic auth and the query, following
+  `next_page_uri`, one invoice per month and currency with the categories in the
+  description, the current month skipped, a repeat sync, a subaccount scope, the balance as
+  a note, 401, 403, 429 and 5xx, and account SID validation.
+- **Not verified live.** The balance endpoint's fields (`account_sid`, `balance`,
+  `currency`) come from a third-party reference, since the Twilio page could not be
+  fetched; check them against the first live answer.
+
 ## Providers not built, and why
 
 - **MiniMax.** No billing or usage API is documented. Balance and usage are on the
@@ -325,7 +418,7 @@ currency field. Until then, Supabase reports these prices as run notes only.
   migration `0003` adds `gcp`, `azure` and `supabase`; migration `0004` adds `openai`
   and `openrouter`; migration `0005` adds `stripe` and the ledger idempotency table
   `connector_ledger_line` (D1 mirror `0044`); migration `0006` adds `polar` (D1 mirror
-  `0045`).
+  `0045`); migration `0007` adds `spaceship` and `twilio` (D1 mirror `0050`).
   SQLite cannot alter a check constraint, so the migration copies the rows into a
   new table and renames it into place. It defers foreign-key checks with
   `PRAGMA defer_foreign_keys` rather than switching them off, because D1 ignores

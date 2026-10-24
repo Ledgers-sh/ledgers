@@ -30,10 +30,12 @@ pub mod planetscale;
 pub mod polar;
 pub mod secret;
 pub mod sigv4;
+pub mod spaceship;
 pub mod split;
 pub mod store;
 pub mod stripe;
 pub mod supabase;
+pub mod twilio;
 pub mod vercel;
 
 /// The connections schema migrations, in apply order.
@@ -67,6 +69,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0006",
         "connect_polar",
         include_str!("../migrations/sqlite/0006_connect_polar.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0007",
+        "connect_spaceship_twilio",
+        include_str!("../migrations/sqlite/0007_connect_spaceship_twilio.sql"),
     ),
 ];
 
@@ -102,6 +109,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0006",
         "connect_polar",
         include_str!("../migrations/postgres/0006_connect_polar.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0007",
+        "connect_spaceship_twilio",
+        include_str!("../migrations/postgres/0007_connect_spaceship_twilio.sql"),
     ),
 ];
 

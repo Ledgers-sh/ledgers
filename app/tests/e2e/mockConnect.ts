@@ -129,6 +129,26 @@ const CONNECTORS = [
     config_keys: [],
   },
   {
+    id: 'spaceship',
+    name: 'Spaceship',
+    credential_fields: [
+      { name: 'api_key', label: 'API key' },
+      { name: 'api_secret', label: 'API secret' },
+    ],
+    hosts: ['spaceship.dev'],
+    config_keys: [],
+  },
+  {
+    id: 'twilio',
+    name: 'Twilio',
+    credential_fields: [
+      { name: 'api_key_sid', label: 'API key SID (starts with SK)' },
+      { name: 'api_key_secret', label: 'API key secret' },
+    ],
+    hosts: ['api.twilio.com'],
+    config_keys: ['account_sid', 'subaccount_sid'],
+  },
+  {
     id: 'polar',
     name: 'Polar',
     credential_fields: [{ name: 'token', label: 'Organization access token (orders:read, refunds:read)' }],
@@ -273,12 +293,24 @@ export function handleConnect(method: string, url: URL, bodyText: string, agent:
     connectState.unmapped[id] = [];
     return reply(200, view);
   }
-  const match = /^\/v1\/connections\/([^/]+)\/(update|delete|sync|runs|test)$/.exec(path);
+  const match = /^\/v1\/connections\/([^/]+)\/(update|delete|sync|runs|test|renewals)$/.exec(path);
   if (match) {
     const [, id, action] = match;
     const connection = connectState.connections.find((c) => c.id === id);
     if (!connection) return problem(422, 'invalid-input', `connection ${id} does not exist`);
     if (method === 'GET' && action === 'runs') return reply(200, { runs: connectState.runs[id] ?? [] });
+    if (method === 'POST' && action === 'renewals') {
+      // A connection named "Broken" stands for a registrar that refuses the key.
+      if (connection.name.startsWith('Broken')) {
+        return reply(200, { ok: false, error: 'spaceship.dev refused the key (401)', as_of: '2026-10-25', window_days: 60, domains: [], notes: [] });
+      }
+      // The registrar's domains: one expires inside the 60-day window, one has lapsed.
+      const domains = [
+        { name: 'squeez.in', expires_on: '2026-11-20', auto_renew: true, status: 'active' },
+        { name: 'lapsed.example', expires_on: '2026-10-01', auto_renew: false, status: 'redemption' },
+      ];
+      return reply(200, { ok: true, error: null, as_of: '2026-10-25', window_days: 60, domains, notes: [] });
+    }
     if (method === 'POST' && action === 'test') {
       // A connection named "Broken" stands for a vendor that refuses the credential.
       if (connection.name.startsWith('Broken')) return reply(200, { ok: false, notes: [], error: 'api.vercel.com refused the token (403); check the token scopes' });
