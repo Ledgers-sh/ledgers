@@ -1,0 +1,4 @@
+[
+  {"key": "jira-software", "name": "Jira Software", "numberOfSeats": 10, "userCount": 2, "hasUnlimitedSeats": false},
+  {"key": "jira-servicedesk", "name": "Jira Service Management", "numberOfSeats": 0, "userCount": 0, "hasUnlimitedSeats": true}
+]

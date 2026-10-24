@@ -4,7 +4,7 @@ Connected sources import what a vendor charges (invoices, cost, or usage) as
 draft bills, split across business units. The framework is in
 `crates/ledgers-connect`; the connectors are `cloudflare`, `anthropic`,
 `planetscale` (earlier releases), `aws` and `vercel`, `gcp`, `azure` and
-`supabase`, `openai` and `openrouter`, `stripe` and `polar`, `spaceship` (domains, renewals) and `twilio`. Supabase and Spaceship book no money;
+`supabase`, `openai` and `openrouter`, `stripe` and `polar`, `spaceship` (domains, renewals), `twilio`, `meta_ads`, `google_ads` and `jira`. Supabase, Spaceship and Jira book no money;
 OpenRouter books one invoice per day with no allocation; Stripe posts journal entries
 (not bills); the others book bills by month.
 
@@ -389,6 +389,105 @@ Each record is one usage category in one month: `category`, `price` (a decimal s
 - **Not verified live.** The balance endpoint's fields (`account_sid`, `balance`,
   `currency`) come from a third-party reference, since the Twilio page could not be
   fetched; check them against the first live answer.
+
+## Meta Ads (`meta_ads`): monthly ad spend per campaign
+
+The Marketing API insights edge of one ad account:
+`GET https://graph.facebook.com/v26.0/act_{ad_account_id}/insights` with `level=campaign`,
+`time_increment=monthly`, `time_range={"since":...,"until":...}` and the fields `spend`,
+`account_currency`, `campaign_id`, `campaign_name`, `date_start` and `date_stop`. Paging
+follows `paging.next`, which must stay on `graph.facebook.com` under the pinned version.
+The Graph API version is pinned in `GRAPH_VERSION` (`v26.0`, the version the Meta
+documentation shows as current when this was written). Sources:
+<https://developers.facebook.com/docs/marketing-api/insights>.
+
+- **Credential.** One system-user access token with the `ads_read` permission only,
+  sent as `Authorization: Bearer`. Never a token with `ads_management` or a business-wide
+  admin permission. The token is never put in a URL.
+- **Config.** `ad_account_id` (required: `act_` and its digits; one connection per ad account)
+  and `name_prefixes` (optional, see Allocation).
+- **What is booked.** One invoice per month and account currency, `meta-ads-cost:{YYYY-MM}:{currency}`,
+  unique per connection. Each campaign is one usage line for its month (the allocation key is
+  the campaign id). The current month is not booked. Re-importing a month is a no-op.
+- **Allocation.** Allocation rules by campaign id first. Then `name_prefixes`: pairs of
+  `PREFIX:UNIT` separated by commas (for example `SQZ:SQZ`). A campaign whose name starts
+  with the prefix, followed by a separator or the end, books to that unit when no rule names
+  it. The rule applies to this sync's split; the mapping list does not change. The form
+  suggests the unit codes you already use.
+- **Errors.** 401 and 403 are refusals (the token or its `ads_read` permission), not retried.
+  429 and 5xx are retried three times with backoff (500 ms, then 1 s), then reported.
+  Graph also throttles some apps with HTTP 400 and an error code in the body; the connector
+  does not read that body, so such a throttle is reported as a status 400 and is not retried.
+- **Tests.** `crates/ledgers-connect/tests/meta_ads.rs`: the pinned URL and paging, Bearer
+  auth, per-month invoices and campaign lines in minor units, the current month skipped,
+  a repeat import, 401, 403, 429 with backoff, 5xx, and the account id check.
+
+## Google Ads (`google_ads`): monthly campaign cost per campaign
+
+The Google Ads API `searchStream` for one customer, with this GAQL:
+`SELECT campaign.id, campaign.name, customer.currency_code, segments.month, metrics.cost_micros FROM campaign WHERE segments.date BETWEEN 'since' AND 'until'`.
+The API version is pinned in `API_VERSION` (`v26`, the latest release in the Google Ads release
+notes when this was written). Sources:
+<https://developers.google.com/google-ads/api/docs/query/overview> and
+<https://developers.google.com/google-ads/api/docs/release-notes>.
+
+- **Credentials.** A developer token, an OAuth client ID and secret, and a refresh token
+  granted the `https://www.googleapis.com/auth/adwords` scope. The refresh token is exchanged
+  at `oauth2.googleapis.com/token` on each sync; the access token is never stored.
+- **Developer token.** A production account needs an **approved developer token (basic
+  access)**. A test-level token works straight away, against test accounts only, and its
+  data is test data.
+- **Config.** `customer_id` (required, ten digits, dashes allowed), `login_customer_id`
+  (optional, the manager (MCC) account that the customer is reached through) and
+  `name_prefixes` (optional, as for Meta Ads).
+- **Money.** `metrics.cost_micros` is an integer in millionths of the account currency. It
+  is read as an exact integer and rounded half up to the currency's minor units; no float is
+  used.
+- **What is booked.** One invoice per month and currency, `google-ads-cost:{YYYY-MM}:{currency}`,
+  unique per connection. Each campaign is one usage line. The current month is not booked.
+- **Errors.** 400, 401 and 403 from the token endpoint, and 401 and 403 from the search, are
+  refusals and are not retried. 429 and 5xx are retried three times with backoff, then reported.
+- **Tests.** `crates/ledgers-connect/tests/google_ads.rs`: the token exchange and the search
+  headers (`developer-token`, `login-customer-id`), the GAQL window, exact micro conversion,
+  the current month skipped, a repeat import, refusals, 429 with backoff, 5xx and the customer id check.
+
+## Jira (`jira`): seats and projects, a planned cost, nothing booked
+
+**Research (October 2026).** Atlassian's Commerce REST API has invoice endpoints
+(`/v2/invoices`, `/v1/invoices/{id}/download`). They are addressed by a transaction account
+(`X-transaction-account`), the commerce account of a Marketplace vendor, and the docs do not
+say they return a customer's own Jira Cloud subscription invoices, so they are not used. The
+Organization (admin) REST API's user endpoints list users and roles; the parts of it checked
+showed no price or invoice data. Atlassian therefore exposes no billing data this connector can
+book, as far as the documentation checked shows. Sources:
+<https://developer.atlassian.com/platform/commerce/rest/api-group-invoices/> and
+<https://developer.atlassian.com/cloud/admin/organization/rest/api-group-users/>.
+
+**The connector books nothing.** It reads, per site (`{site}.atlassian.net`):
+
+- `GET /rest/api/3/users/search` (paged): the active accounts of type `atlassian`. These are
+  the **seats in use**.
+- `GET /rest/api/3/applicationrole`: each product with its licensed seats and user count.
+  Needs Jira administrator rights; without them the product counts are a note, not a failure.
+- `GET /rest/api/3/project/search` (paged): the projects and their keys. A project key is the
+  allocation key, so a rule maps the project to a business unit.
+
+- **Credentials.** The account email and an **API token**, sent as HTTP Basic. Least
+  privilege: an account that can browse users and projects. Jira administrator rights are
+  optional. **OAuth 2.0 (3LO) is not implemented.** If it is added, it needs read-only scopes
+  only; the exact scope names are to be checked against Atlassian's scope list first.
+- **Config.** `site` (required, `example.atlassian.net`; only `*.atlassian.net` hosts are
+  allowed, and the requests go to that host alone), `price_per_seat` (optional, a decimal
+  amount you type) and `price_currency` (an ISO code, required with a price).
+- **Planned cost.** Seats in use times the price per seat, shown as a note on the connection
+  ("Planned monthly cost ... not booked"). **It is a plan, never an expense.** Actual charges
+  come from the bank feed or the invoice inbox.
+- **What is stored.** Usage rows for each project, for the current month, with weight 1 each.
+  They are the allocation keys for the planned cost. A split of the planned cost by unit
+  is not yet shown anywhere in the app.
+- **Tests.** `crates/ledgers-connect/tests/jira.rs`: the site allow-list, Basic auth to the
+  site only, seat counting, product and project notes, no invoice booked, the planned note
+  from the typed price, refusals, 429 with backoff, 5xx, and a repeat sync.
 
 ## Providers not built, and why
 

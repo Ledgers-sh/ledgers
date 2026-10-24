@@ -1,0 +1,10 @@
+[
+  {
+    "results": [
+      {"campaign": {"id": "2001", "name": "SQZ Brand"}, "customer": {"currencyCode": "EUR"}, "segments": {"month": "2026-07-01"}, "metrics": {"costMicros": "1234567"}},
+      {"campaign": {"id": "2002", "name": "LED Search"}, "customer": {"currencyCode": "EUR"}, "segments": {"month": "2026-07-01"}, "metrics": {"costMicros": "2000000"}},
+      {"campaign": {"id": "2001", "name": "SQZ Brand"}, "customer": {"currencyCode": "EUR"}, "segments": {"month": "2026-08-01"}, "metrics": {"costMicros": "7"}}
+    ],
+    "requestId": "request-test-1"
+  }
+]

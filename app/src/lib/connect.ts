@@ -62,6 +62,9 @@ export const SOURCE_COLOURS: Record<string, string> = {
   polar: '#B5C7A8',
   spaceship: '#C7B98F',
   twilio: '#E2776A',
+  meta_ads: '#9DB4E8',
+  google_ads: '#E3C27A',
+  jira: '#8CC4E8',
 };
 
 /**

@@ -20,7 +20,10 @@ pub mod connector;
 pub mod cost;
 pub mod demo;
 pub mod gcp;
+pub mod google_ads;
 pub mod http;
+pub mod jira;
+pub mod meta_ads;
 pub mod model;
 pub mod module;
 pub mod money;
@@ -75,6 +78,11 @@ pub const SQLITE_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "connect_spaceship_twilio",
         include_str!("../migrations/sqlite/0007_connect_spaceship_twilio.sql"),
     ),
+    cratefield_core::SqlMigration::new(
+        "0008",
+        "connect_meta_google_jira",
+        include_str!("../migrations/sqlite/0008_connect_meta_google_jira.sql"),
+    ),
 ];
 
 /// The Postgres set: the same portable DDL as SQLite, with the append-only
@@ -114,6 +122,11 @@ pub const POSTGRES_MIGRATIONS: &[cratefield_core::SqlMigration] = &[
         "0007",
         "connect_spaceship_twilio",
         include_str!("../migrations/postgres/0007_connect_spaceship_twilio.sql"),
+    ),
+    cratefield_core::SqlMigration::new(
+        "0008",
+        "connect_meta_google_jira",
+        include_str!("../migrations/postgres/0008_connect_meta_google_jira.sql"),
     ),
 ];
 

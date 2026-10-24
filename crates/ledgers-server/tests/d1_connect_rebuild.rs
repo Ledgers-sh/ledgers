@@ -25,6 +25,10 @@ const D1_CONNECT_POLAR: &str =
 const D1_CONNECT_SPACESHIP_TWILIO: &str =
     include_str!("../d1/migrations/0050_ledgers_connect_connect_spaceship_twilio.sql");
 
+/// The D1 mirror of migration 0008 (Meta Ads, Google Ads and Jira).
+const D1_CONNECT_META_GOOGLE_JIRA: &str =
+    include_str!("../d1/migrations/0051_ledgers_connect_connect_meta_google_jira.sql");
+
 /// The D1 mirror of migration 0005 (Stripe, and the ledger idempotency table).
 const D1_CONNECT_STRIPE: &str =
     include_str!("../d1/migrations/0044_ledgers_connect_connect_stripe.sql");
@@ -236,6 +240,53 @@ fn the_spaceship_and_twilio_mirror_applies_to_a_database_with_rows() {
     let refused = conn.execute(
         "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
          VALUES ('conn-x', 'co-1', 'unknown', 'X', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+        [],
+    );
+    assert!(refused.is_err(), "an unknown connector is still refused");
+}
+
+#[test]
+fn the_meta_google_and_jira_mirror_applies_to_a_database_with_rows() {
+    let conn = seeded();
+    for (sql, step) in [
+        (D1_CONNECT_PROVIDERS, "0041"),
+        (D1_CONNECT_CLOUD, "0042"),
+        (D1_CONNECT_LLM, "0043"),
+        (D1_CONNECT_STRIPE, "0044"),
+        (D1_CONNECT_POLAR, "0045"),
+        (D1_CONNECT_SPACESHIP_TWILIO, "0050"),
+        (D1_CONNECT_META_GOOGLE_JIRA, "0051"),
+    ] {
+        conn.execute_batch(&format!("BEGIN;\n{sql}\nCOMMIT;"))
+            .unwrap_or_else(|err| panic!("{step} applies to a database holding rows: {err}"));
+    }
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect("count") };
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM connector_connection WHERE id = 'conn-1' AND name = 'Cloudflare (prod)'"
+        ),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_credential WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_run WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+    for connector in ["meta_ads", "google_ads", "jira"] {
+        conn.execute(
+            "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+             VALUES (?1, 'co-1', ?2, ?2, '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+            [format!("conn-{connector}"), connector.to_owned()],
+        )
+        .unwrap_or_else(|err| panic!("{connector} is accepted after 0051: {err}"));
+    }
+    let refused = conn.execute(
+        "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+         VALUES ('conn-y', 'co-1', 'unknown', 'Y', '{}', 'FZ', 0, 'person-1', 'now', 'now')",
         [],
     );
     assert!(refused.is_err(), "an unknown connector is still refused");
