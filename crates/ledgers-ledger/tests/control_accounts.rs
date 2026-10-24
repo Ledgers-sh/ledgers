@@ -9,6 +9,7 @@ use ledgers_ledger::account::AccountDraft;
 use ledgers_ledger::commands;
 use ledgers_ledger::{Entry, EntryDraft, JournalError, Line, PostContext, PostedEntry};
 use ledgers_money::{Amount, Currency};
+use std::collections::BTreeMap;
 use time::Month;
 
 /// Creates a test journal with standard properties.
@@ -123,7 +124,7 @@ fn manual_post_to_ar_account_is_rejected() {
                     base: Amount::new(5_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
                 Line {
@@ -132,7 +133,7 @@ fn manual_post_to_ar_account_is_rejected() {
                     base: Amount::new(5_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
             ],
@@ -200,7 +201,7 @@ fn manual_post_to_ap_account_is_rejected() {
                     base: Amount::new(3_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
                 Line {
@@ -209,7 +210,7 @@ fn manual_post_to_ap_account_is_rejected() {
                     base: Amount::new(3_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
             ],
@@ -291,7 +292,7 @@ fn manual_post_to_other_tagged_accounts_succeeds() {
                     base: Amount::new(2_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
                 Line {
@@ -300,7 +301,7 @@ fn manual_post_to_other_tagged_accounts_succeeds() {
                     base: Amount::new(2_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
             ],
@@ -326,7 +327,7 @@ fn manual_post_to_other_tagged_accounts_succeeds() {
                     base: Amount::new(1_500, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
                 Line {
@@ -335,7 +336,7 @@ fn manual_post_to_other_tagged_accounts_succeeds() {
                     base: Amount::new(1_500, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
             ],
@@ -385,7 +386,7 @@ fn privileged_post_to_ar_account_succeeds() {
                     base: Amount::new(7_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
                 Line {
@@ -394,7 +395,7 @@ fn privileged_post_to_ar_account_succeeds() {
                     base: Amount::new(7_000, Currency::from_code("EUR").unwrap()),
                     fx: None,
                     tax_code: None,
-                    dimensions: Default::default(),
+                    dimensions: BTreeMap::default(),
                     memo: None,
                 },
             ],

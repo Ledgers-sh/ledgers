@@ -21,9 +21,12 @@ CREATE TABLE open_item (
     tx_remaining_minor  BIGINT NOT NULL,
     base_remaining_minor BIGINT NOT NULL,
     created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL,
-    UNIQUE (company_id, kind, source_id) WHERE source_id IS NOT NULL
+    updated_at          TEXT NOT NULL
 );
+
+-- Unique (company_id, kind, source_id) for non-NULL source_id. Postgres rejects a
+-- WHERE clause on an inline table constraint, so this is a separate partial unique index.
+CREATE UNIQUE INDEX idx_open_item_source_id_unique ON open_item(company_id, kind, source_id) WHERE source_id IS NOT NULL;
 
 CREATE INDEX idx_open_item_company ON open_item(company_id);
 CREATE INDEX idx_open_item_ledger ON open_item(company_id, ledger);

@@ -271,6 +271,98 @@ async fn seed_company(db: &dyn Database) {
     .await;
 }
 
+async fn assert_bill_open_item(db: &dyn Database, bill_id: &str, gross_minor: i64) -> String {
+    // Verify the open_item was created
+    let item_rows = db
+        .query(&Statement::with_values(
+            "SELECT id, company_id, ledger, kind, party_id, source_id, tx_original_minor, \
+             tx_remaining_minor, base_original_minor, base_remaining_minor, due_date \
+             FROM open_item WHERE company_id = ? AND kind = 'bill' AND source_id = ?"
+                .to_string(),
+            vec![Value::from(COMPANY_ID), Value::from(bill_id)],
+        ))
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(item_rows.rows.len(), 1, "should have one open item");
+    let item = &item_rows.rows[0];
+    assert_eq!(
+        item.get::<String>("ledger").unwrap_or_default(),
+        "ap",
+        "ledger should be ap"
+    );
+    assert_eq!(
+        item.get::<i64>("tx_original_minor").unwrap_or(0),
+        gross_minor,
+        "original tx amount should be gross"
+    );
+    assert_eq!(
+        item.get::<i64>("tx_remaining_minor").unwrap_or(0),
+        gross_minor,
+        "remaining tx should equal original after posting"
+    );
+    item.get::<String>("id").unwrap_or_default()
+}
+
+async fn assert_partial_payment_allocates(
+    db: &dyn Database,
+    bill_id: &str,
+    item_id: &str,
+    gross_minor: i64,
+) {
+    // Record a partial payment
+    let payment_amount = 6000i64; // EUR 60.00
+    let payment_input = RecordPaymentInput {
+        id: bill_id.to_string(),
+        amount: payment_amount,
+        date: "2026-10-20".to_string(),
+        from_account: "1010".to_string(),
+        reference: Some("payment ref".to_string()),
+    };
+
+    let _payment_output = run_command(db, &BillsRecordPayment, &payment_input, "payment-001")
+        .await
+        .expect("record-payment should succeed");
+
+    // Verify the allocation row was created
+    let alloc_rows = db
+        .query(&Statement::with_values(
+            "SELECT id, open_item_id, tx_minor, base_minor FROM allocation \
+             WHERE company_id = ? AND open_item_id = ?"
+                .to_string(),
+            vec![Value::from(COMPANY_ID), Value::from(item_id)],
+        ))
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(alloc_rows.rows.len(), 1, "should have one allocation");
+    let alloc = &alloc_rows.rows[0];
+    assert_eq!(
+        alloc.get::<i64>("tx_minor").unwrap_or(0),
+        payment_amount,
+        "allocation tx amount should match payment"
+    );
+
+    // Verify the open_item remaining was decremented
+    let updated_item_rows = db
+        .query(&Statement::with_values(
+            "SELECT tx_remaining_minor, base_remaining_minor FROM open_item WHERE id = ?"
+                .to_string(),
+            vec![Value::from(item_id)],
+        ))
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(updated_item_rows.rows.len(), 1);
+    let updated_item = &updated_item_rows.rows[0];
+    let remaining = updated_item.get::<i64>("tx_remaining_minor").unwrap_or(0);
+    assert_eq!(
+        remaining,
+        gross_minor - payment_amount,
+        "remaining should be decremented by payment"
+    );
+}
+
 async fn test_bill_posting_and_payment_impl(db: &dyn Database) {
     seed_company(db).await;
 
@@ -323,88 +415,9 @@ async fn test_bill_posting_and_payment_impl(db: &dyn Database) {
         .await
         .expect("post-entry should succeed");
 
-    // Verify the open_item was created
-    let item_rows = db
-        .query(&Statement::with_values(
-            "SELECT id, company_id, ledger, kind, party_id, source_id, tx_original_minor, \
-             tx_remaining_minor, base_original_minor, base_remaining_minor, due_date \
-             FROM open_item WHERE company_id = ? AND kind = 'bill' AND source_id = ?"
-                .to_string(),
-            vec![Value::from(COMPANY_ID), Value::from(bill_id)],
-        ))
-        .await
-        .expect("query should succeed");
+    let item_id = assert_bill_open_item(db, bill_id, gross_minor).await;
 
-    assert_eq!(item_rows.rows.len(), 1, "should have one open item");
-    let item = &item_rows.rows[0];
-    assert_eq!(
-        item.get::<String>("ledger").unwrap_or_default(),
-        "ap",
-        "ledger should be ap"
-    );
-    assert_eq!(
-        item.get::<i64>("tx_original_minor").unwrap_or(0),
-        gross_minor,
-        "original tx amount should be gross"
-    );
-    assert_eq!(
-        item.get::<i64>("tx_remaining_minor").unwrap_or(0),
-        gross_minor,
-        "remaining tx should equal original after posting"
-    );
-    let item_id = item.get::<String>("id").unwrap_or_default();
-
-    // Record a partial payment
-    let payment_amount = 6000i64; // EUR 60.00
-    let payment_input = RecordPaymentInput {
-        id: bill_id.to_string(),
-        amount: payment_amount,
-        date: "2026-10-20".to_string(),
-        from_account: "1010".to_string(),
-        reference: Some("payment ref".to_string()),
-    };
-
-    let _payment_output = run_command(db, &BillsRecordPayment, &payment_input, "payment-001")
-        .await
-        .expect("record-payment should succeed");
-
-    // Verify the allocation row was created
-    let alloc_rows = db
-        .query(&Statement::with_values(
-            "SELECT id, open_item_id, tx_minor, base_minor FROM allocation \
-             WHERE company_id = ? AND open_item_id = ?"
-                .to_string(),
-            vec![Value::from(COMPANY_ID), Value::from(&item_id)],
-        ))
-        .await
-        .expect("query should succeed");
-
-    assert_eq!(alloc_rows.rows.len(), 1, "should have one allocation");
-    let alloc = &alloc_rows.rows[0];
-    assert_eq!(
-        alloc.get::<i64>("tx_minor").unwrap_or(0),
-        payment_amount,
-        "allocation tx amount should match payment"
-    );
-
-    // Verify the open_item remaining was decremented
-    let updated_item_rows = db
-        .query(&Statement::with_values(
-            "SELECT tx_remaining_minor, base_remaining_minor FROM open_item WHERE id = ?"
-                .to_string(),
-            vec![Value::from(&item_id)],
-        ))
-        .await
-        .expect("query should succeed");
-
-    assert_eq!(updated_item_rows.rows.len(), 1);
-    let updated_item = &updated_item_rows.rows[0];
-    let remaining = updated_item.get::<i64>("tx_remaining_minor").unwrap_or(0);
-    assert_eq!(
-        remaining,
-        gross_minor - payment_amount,
-        "remaining should be decremented by payment"
-    );
+    assert_partial_payment_allocates(db, bill_id, &item_id, gross_minor).await;
 
     // Verify reconciliation shows no AP difference
     let as_of = "2026-10-24";
