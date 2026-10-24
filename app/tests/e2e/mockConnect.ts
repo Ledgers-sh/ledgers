@@ -129,6 +129,13 @@ const CONNECTORS = [
     config_keys: [],
   },
   {
+    id: 'polar',
+    name: 'Polar',
+    credential_fields: [{ name: 'token', label: 'Organization access token (orders:read, refunds:read)' }],
+    hosts: ['api.polar.sh'],
+    config_keys: ['clearing_account', 'revenue_account', 'tax_account'],
+  },
+  {
     id: 'stripe',
     name: 'Stripe',
     credential_fields: [{ name: 'token', label: 'Restricted API key (read access)' }],

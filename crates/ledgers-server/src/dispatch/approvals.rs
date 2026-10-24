@@ -478,6 +478,19 @@ impl ServerDispatch {
                 )
                 .await?
             }
+            "connections.suspense_rebook" => {
+                run_stored(
+                    &approvals,
+                    &executor,
+                    &authn,
+                    &ledgers_connect::commands::SuspenseRebook,
+                    credential,
+                    ctx,
+                    approval_id,
+                    signed_in_at,
+                )
+                .await?
+            }
             other => {
                 return Err(ApprovalError::Other(format!(
                     "{other} has no approval path"

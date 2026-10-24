@@ -813,6 +813,12 @@ fn connection_human_commands() -> Vec<CommandDescriptor> {
             "ledgers connections sync",
         ),
         human_entry(
+            "connections.suspense_rebook",
+            "POST",
+            "/v1/connections/{connection_id}/suspense-rebook",
+            "ledgers connections suspense-rebook",
+        ),
+        human_entry(
             "connections.test",
             "POST",
             "/v1/connections/{connection_id}/test",

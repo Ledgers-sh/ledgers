@@ -890,6 +890,16 @@ impl Dispatch for ServerDispatch {
                 self.connections_test(deps, presented, request_id, input)
                     .await
             }
+            "connections.suspense_rebook" => {
+                self.execute(
+                    deps,
+                    &ledgers_connect::commands::SuspenseRebook,
+                    presented,
+                    request_id,
+                    input,
+                )
+                .await
+            }
             "connections.runs" => {
                 self.execute(
                     deps,
@@ -2208,6 +2218,13 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_connect::commands::TestInput>(),
                 schema_of::<ledgers_connect::commands::TestOutput>(),
+            ),
+        ),
+        (
+            "connections.suspense_rebook",
+            (
+                schema_of::<ledgers_connect::commands::SuspenseRebookInput>(),
+                schema_of::<PostEntryOutput>(),
             ),
         ),
         (

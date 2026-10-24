@@ -6211,6 +6211,109 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/connections/{connection_id}/runs\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/connections/{connection_id}/suspense-rebook": {
+      "post": {
+        "operationId": "connections_suspense_rebook",
+        "description": "Execute command: connections.suspense_rebook",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "SuspenseRebookInput",
+                "description": "The input of `connections.suspense_rebook`: a journal entry a ledger connector posted to\nthe suspense account, and the account its suspense amount moves to.",
+                "type": "object",
+                "properties": {
+                  "connection_id": {
+                    "description": "The connection the entry came from.",
+                    "type": "string"
+                  },
+                  "entry_id": {
+                    "description": "The journal entry that holds the suspense amount.",
+                    "type": "string"
+                  },
+                  "to_account": {
+                    "description": "The account the suspense amount is re-booked to. A leaf of the chart.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connection_id",
+                  "entry_id",
+                  "to_account"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "PostEntryOutput",
+                  "description": "Output for `journal.post_entry` command.",
+                  "type": "object",
+                  "properties": {
+                    "entry": {
+                      "description": "The posted entry with its assigned number.",
+                      "$ref": "#/components/schemas/SerializablePostedEntry"
+                    }
+                  },
+                  "required": [
+                    "entry"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "connections.suspense_rebook",
+        "x-ledgers-tier": "draft",
+        "x-ledgers-cli": "ledgers connections suspense-rebook",
+        "x-ledgers-mcp": null,
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/connections/{connection_id}/suspense-rebook\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json",
+        "x-ledgers-human-only": true
+      }
+    },
     "/v1/connections/{connection_id}/sync": {
       "post": {
         "operationId": "connections_sync_now",
@@ -13874,6 +13977,41 @@
           "finished_at"
         ]
       },
+      "SerializablePostedEntry": {
+        "description": "Serializable version of [`PostedEntry`].",
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "description": "The entry's id.",
+            "type": "string"
+          },
+          "journal_id": {
+            "description": "The journal it posted into.",
+            "type": "string"
+          },
+          "fiscal_year": {
+            "description": "The fiscal year the number is scoped to.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "The gapless number assigned.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_at": {
+            "description": "The recorded-at timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "journal_id",
+          "fiscal_year",
+          "number",
+          "recorded_at"
+        ]
+      },
       "SyncOutput": {
         "description": "What one sync produced.",
         "type": "object",
@@ -14461,41 +14599,6 @@
         "required": [
           "transaction",
           "rate"
-        ]
-      },
-      "SerializablePostedEntry": {
-        "description": "Serializable version of [`PostedEntry`].",
-        "type": "object",
-        "properties": {
-          "entry_id": {
-            "description": "The entry's id.",
-            "type": "string"
-          },
-          "journal_id": {
-            "description": "The journal it posted into.",
-            "type": "string"
-          },
-          "fiscal_year": {
-            "description": "The fiscal year the number is scoped to.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "number": {
-            "description": "The gapless number assigned.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "recorded_at": {
-            "description": "The recorded-at timestamp.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "entry_id",
-          "journal_id",
-          "fiscal_year",
-          "number",
-          "recorded_at"
         ]
       },
       "FiscalYearView": {
