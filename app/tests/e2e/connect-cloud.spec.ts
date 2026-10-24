@@ -135,3 +135,33 @@ test('Supabase takes a personal access token and says that its prices are not bo
   await expect(page.getByRole('status').filter({ hasText: 'Supabase (test) is connected' })).toBeVisible();
   expect(connectState.tokensReceived).toContain('sbp_TEST_TOKEN_0001');
 });
+
+test('OpenAI asks for an admin key and says that a project key cannot read costs', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'OpenAI' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('A project key cannot read organization costs');
+  await form.getByLabel('Name').fill('OpenAI (test)');
+  await form.getByLabel('Token').fill('sk-admin-TEST_0001');
+  await form.getByLabel('Expense account').fill('6200');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'OpenAI (test) is connected' })).toBeVisible();
+  expect(connectState.tokensReceived).toContain('sk-admin-TEST_0001');
+});
+
+test('OpenRouter asks for a management key, and its help says that model calls are not possible with it', async ({ page }) => {
+  await mockApi({ seed: true, units: true, person: true });
+  await signInPerson(page);
+  await page.goto('/#/settings/integrations');
+  await page.locator('.gallery-card', { hasText: 'OpenRouter' }).getByRole('button', { name: /Connect/ }).click();
+  const form = page.locator('.connect-form');
+  await expect(form).toContainText('cannot make model calls');
+  await form.getByLabel('Name').fill('OpenRouter (test)');
+  await form.getByLabel('Token').fill('sk-or-mgmt-TEST_0001');
+  await form.getByLabel('Expense account').fill('6200');
+  await form.getByRole('button', { name: 'Save connection' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'OpenRouter (test) is connected' })).toBeVisible();
+  expect(connectState.tokensReceived).toContain('sk-or-mgmt-TEST_0001');
+});

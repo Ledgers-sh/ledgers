@@ -56,6 +56,8 @@ export const SOURCE_COLOURS: Record<string, string> = {
   gcp: '#B7A3D6',
   azure: '#D98C5F',
   supabase: '#8DB89E',
+  openai: '#D8C3A5',
+  openrouter: '#9FB3C8',
 };
 
 /**

@@ -22,7 +22,7 @@ test('the gallery offers the three sources, and coming soon is text only', async
   const soon = page.locator('.coming-soon');
   await expect(soon.getByRole('heading', { name: 'Coming soon' })).toBeVisible();
   await expect(soon.locator('button, a')).toHaveCount(0);
-  await expect(soon.getByText('OpenAI')).toBeVisible();
+  await expect(soon.getByText('GitHub')).toBeVisible();
 });
 
 test('a token is sent once, the field clears, and nothing shows it again', async ({ page }) => {

@@ -1,11 +1,12 @@
 /**
  * Brand marks for the connectable sources (issue #142). Path data for
- * Cloudflare, Anthropic, PlanetScale, Vercel, Google Cloud and Supabase is from
+ * Cloudflare, Anthropic, PlanetScale, Vercel, Google Cloud, Supabase and
+ * OpenRouter is from
  * Simple Icons 16.35.0 (CC0-1.0, https://simpleicons.org): the icon artwork is
  * public domain; the trademarks stay with their owners and the marks only
- * identify the service. Simple Icons has no Amazon Web Services or Microsoft
- * Azure mark, so those use a neutral cloud glyph that names the service and is
- * not either company's logo. Each mark has a 24-unit viewBox and is drawn
+ * identify the service. Simple Icons has no Amazon Web Services, Microsoft
+ * Azure or OpenAI mark, so those use neutral glyphs that name the service and
+ * are not the companies' logos. Each mark has a 24-unit viewBox and is drawn
  * inline: no external images are loaded.
  */
 
@@ -36,6 +37,14 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   gcp: {
     title: 'Google Cloud',
     path: 'M12.19 2.38a9.344 9.344 0 0 0-9.234 6.893c.053-.02-.055.013 0 0-3.875 2.551-3.922 8.11-.247 10.941l.006-.007-.007.03a6.717 6.717 0 0 0 4.077 1.356h5.173l.03.03h5.192c6.687.053 9.376-8.605 3.835-12.35a9.365 9.365 0 0 0-2.821-4.552l-.043.043.006-.05A9.344 9.344 0 0 0 12.19 2.38zm-.358 4.146c1.244-.04 2.518.368 3.486 1.15a5.186 5.186 0 0 1 1.862 4.078v.518c3.53-.07 3.53 5.262 0 5.193h-5.193l-.008.009v-.04H6.785a2.59 2.59 0 0 1-1.067-.23h.001a2.597 2.597 0 1 1 3.437-3.437l3.013-3.012A6.747 6.747 0 0 0 8.11 8.24c.018-.01.04-.026.054-.023a5.186 5.186 0 0 1 3.67-1.69z',
+  },
+  openai: {
+    title: 'OpenAI',
+    path: 'M12 2.5l2.2 6.3 6.3 2.2-6.3 2.2L12 19.5l-2.2-6.3-6.3-2.2 6.3-2.2z',
+  },
+  openrouter: {
+    title: 'OpenRouter',
+    path: 'M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z',
   },
   supabase: {
     title: 'Supabase',

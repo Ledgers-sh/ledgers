@@ -18,6 +18,8 @@ const SOURCE_NAMES: Record<string, string> = {
   gcp: 'Google Cloud',
   azure: 'Microsoft Azure',
   supabase: 'Supabase',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
 };
 
 /** Stacked bars per month, one segment per series (a unit or a source). Same frame as the other charts. */

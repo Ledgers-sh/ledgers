@@ -17,6 +17,9 @@ const D1_CONNECT_PROVIDERS: &str =
 const D1_CONNECT_CLOUD: &str =
     include_str!("../d1/migrations/0042_ledgers_connect_connect_cloud.sql");
 
+/// The D1 mirror of migration 0004 (the `OpenAI` and `OpenRouter` ids).
+const D1_CONNECT_LLM: &str = include_str!("../d1/migrations/0043_ledgers_connect_connect_llm.sql");
+
 fn seeded() -> Connection {
     let conn = Connection::open_in_memory().expect("in-memory sqlite");
     // D1 enforces foreign keys; so does this connection.
@@ -89,6 +92,22 @@ fn the_cloud_mirror_applies_after_the_provider_mirror_to_a_database_with_rows() 
         .expect("0041 applies");
     conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_CLOUD}\nCOMMIT;"))
         .expect("0042 applies to the rebuilt table, with the run and credential rows in place");
+    conn.execute_batch(&format!("BEGIN;\n{D1_CONNECT_LLM}\nCOMMIT;"))
+        .expect("0043 applies after 0042, with the rows in place");
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect("count") };
+    assert_eq!(
+        count("SELECT COUNT(*) FROM connector_run WHERE connection_id = 'conn-1'"),
+        1
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+    for connector in ["openai", "openrouter"] {
+        conn.execute(
+            "INSERT INTO connector_connection (id, company_id, connector, name, config_json, default_unit, is_demo, created_by, created_at, updated_at)
+             VALUES (?1, 'co-1', ?2, ?2, '{}', 'FZ', 0, 'person-1', 'now', 'now')",
+            [format!("conn-{connector}"), connector.to_owned()],
+        )
+        .unwrap_or_else(|err| panic!("{connector} is accepted after 0043: {err}"));
+    }
     let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect("count") };
     assert_eq!(
         count("SELECT COUNT(*) FROM connector_connection WHERE id = 'conn-1'"),
