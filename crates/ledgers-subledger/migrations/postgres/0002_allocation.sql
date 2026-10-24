@@ -12,9 +12,11 @@ CREATE TABLE allocation (
     tx_minor        BIGINT NOT NULL,
     base_minor      BIGINT NOT NULL,
     fx_difference_minor BIGINT NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL,
-    -- Non-unique index on entry_id (multiple allocations can share one entry)
+    created_at      TEXT NOT NULL
 );
+
+-- Non-unique index on entry_id (multiple allocations can share one entry)
+CREATE INDEX idx_allocation_entry_id_unique ON allocation(entry_id) WHERE entry_id IS NOT NULL;
 
 CREATE INDEX idx_allocation_item ON allocation(open_item_id);
 CREATE INDEX idx_allocation_company ON allocation(company_id);
