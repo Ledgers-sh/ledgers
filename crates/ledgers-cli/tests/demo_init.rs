@@ -21,8 +21,9 @@ async fn demo_init_is_idempotent_with_a_temp_database() {
     let first = demo::init(&db_path, company_id, &blob_dir, true, year)
         .await
         .expect("first run succeeds");
-    assert_eq!(first.posted, 153, "first run posts all entries");
-    assert_eq!(first.reversed, 2, "first run posts reversals");
+    // Every fixture entry: journal entries plus the link-only offset.
+    assert_eq!(first.posted, 178, "first run posts all entries");
+    assert_eq!(first.reversed, 1, "first run posts reversals");
     assert_eq!(first.dimensions_created, 4, "first run creates dimensions");
 
     // Second run should post nothing new
@@ -39,8 +40,8 @@ async fn demo_init_is_idempotent_with_a_temp_database() {
         "second run creates no new dimensions"
     );
     assert_eq!(
-        second.skipped, 155,
-        "second run skips all 155 entries (153 posts + 2 reversals)"
+        second.skipped, 179,
+        "second run skips all 179 entries (178 posts and offsets + 1 reversal)"
     );
 
     // Clean up

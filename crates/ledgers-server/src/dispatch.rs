@@ -1022,6 +1022,7 @@ impl Dispatch for ServerDispatch {
             | "bank.transactions.link"
             | "bank.transactions.ignore"
             | "bank.rules.list"
+            | "bank.receivables.open_items"
             | "bank.rules.create"
             | "bank.rules.enable" => {
                 self.bank_command(deps, presented, request_id, command, input)
@@ -1994,6 +1995,13 @@ pub fn registry() -> Registry {
             (
                 schema_of::<ledgers_bank::model::RulesListInput>(),
                 schema_of::<ledgers_bank::model::RulesListOutput>(),
+            ),
+        ),
+        (
+            "bank.receivables.open_items",
+            (
+                schema_of::<ledgers_bank::model::ReceivablesOpenItemsInput>(),
+                schema_of::<ledgers_bank::model::ReceivablesOpenItemsOutput>(),
             ),
         ),
         (

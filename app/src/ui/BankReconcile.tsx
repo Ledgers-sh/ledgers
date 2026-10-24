@@ -7,8 +7,9 @@ import { Ltr } from '../i18n/Ltr';
  * and never acted on.
  */
 import { unitSelectOption } from './UnitOption';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import {
+  bankReceivablesOpenItems,
   bankRulesList,
   bankRuleCreate,
   bankTransactionIgnore,
@@ -16,9 +17,12 @@ import {
   bankTransactionPost,
   isNeedsApproval,
   type AccountView,
+  type ReceivableOpenItem,
   type Suggestion,
   type TransactionView,
 } from '../api/bank';
+import { PartyPicker, type PickedParty } from './PartyPicker';
+import { receiptSettlement } from '../lib/receipt';
 import { useAsync } from '../hooks';
 import { useSession } from '../session';
 import { distinctiveWord, formatIban, journalPreview, lineStatus, REASON_KEYS, type PreviewLine } from '../lib/bank';
@@ -45,6 +49,9 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
   const rules = useAsync(() => bankRulesList(client).then((r) => r.rules), [client.baseUrl, client.apiKey]);
   const [choice, setChoice] = useState<Choice | null>(line.suggestions.length > 0 ? { kind: 'suggestion', index: 0 } : null);
   const [manualAccount, setManualAccount] = useState('');
+  // A receipt to a receivables account settles the chosen customer's open invoices.
+  const [customer, setCustomer] = useState<PickedParty | null>(null);
+  const [openItems, setOpenItems] = useState<ReceivableOpenItem[] | null>(null);
   // The business unit a manual or rule match posts to: the switcher's unit by default.
   const [matchUnit, setMatchUnit] = useState(scopeUnit ?? '');
   const [ruleUnit, setRuleUnit] = useState(scopeUnit ?? '');
@@ -67,6 +74,27 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
   const amount = BigInt(line.amount.minor);
   const open = status === 'unmatched' || status === 'suggested';
   const suggestion = choice?.kind === 'suggestion' ? line.suggestions[choice.index] : undefined;
+  const receivable = choice?.kind === 'manual' && (accounts.find((a) => a.number === manualAccount)?.tags.includes('ar') ?? false);
+  const incoming = amount > 0n;
+
+  useEffect(() => {
+    if (!receivable || !customer) {
+      setOpenItems(null);
+      return;
+    }
+    let live = true;
+    setOpenItems(null);
+    bankReceivablesOpenItems(client, customer.id)
+      .then((result) => {
+        if (live) setOpenItems(result.items);
+      })
+      .catch((err: unknown) => {
+        if (live) setError(err);
+      });
+    return () => {
+      live = false;
+    };
+  }, [client.baseUrl, client.apiKey, receivable, customer?.id]);
 
   /** The account the other side of the entry goes to, when it is known from the choice. */
   const counterpartNumber = (): string | null => {
@@ -98,7 +126,10 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
 
   // A rule without an account cannot post on its own: the person picks the other account instead.
   const matchable =
-    choice !== null && (choice.kind === 'manual' ? manualAccount !== '' : suggestion !== undefined && (suggestion.kind !== 'rule' || !!suggestion.account_number));
+    choice !== null &&
+    (choice.kind === 'manual'
+      ? manualAccount !== '' && (!receivable || (customer !== null && incoming))
+      : suggestion !== undefined && (suggestion.kind !== 'rule' || !!suggestion.account_number));
   const canMatch = !busy && matchable;
 
   const afterWrite = (result: unknown, done: string) => {
@@ -127,10 +158,12 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
     setNotice(null);
     try {
       if (choice.kind === 'manual') {
-        const result = await bankTransactionPost(client, line.id, {
-          counterparty_account: manualAccount,
-          ...(matchUnit === '' ? {} : { unit: matchUnit }),
-        });
+        const result = receivable
+          ? await bankTransactionPost(client, line.id, { counterparty_account: manualAccount, party_id: customer?.id })
+          : await bankTransactionPost(client, line.id, {
+              counterparty_account: manualAccount,
+              ...(matchUnit === '' ? {} : { unit: matchUnit }),
+            });
         afterWrite(result, t('bank.toast_matched'));
       } else if (suggestion?.kind === 'entry') {
         const result = await bankTransactionLink(client, line.id, suggestion.target_id);
@@ -352,6 +385,26 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
             </div>
           )}
 
+          {choice?.kind === 'manual' && receivable && (
+            <section class="receipt" aria-labelledby="receipt-heading">
+              <h3 id="receipt-heading" class="receipt-heading">
+                {t('bank.receipt_heading')}
+              </h3>
+              {!incoming && <p class="note">{t('bank.receipt_incoming_only')}</p>}
+              <PartyPicker
+                id="bank-customer"
+                label={t('bank.customer')}
+                selected={customer}
+                onPick={(party) => setCustomer(party)}
+              />
+              {customer && openItems === null && <p class="hint">{t('bank.receipt_loading')}</p>}
+              {customer && openItems !== null && openItems.length === 0 && <p class="note">{t('bank.receipt_none_open')}</p>}
+              {customer && openItems !== null && openItems.length > 0 && (
+                <ReceiptPlan items={openItems} amount={amount} currency={currency} />
+              )}
+            </section>
+          )}
+
           {unitsEnabled && matchAccount && (
             <div class="field">
               <span id="bank-match-unit-label">{t('units.field')}</span>
@@ -518,6 +571,41 @@ export function BankReconcile({ account, line, onChanged }: { account: AccountVi
         </p>
       )}
       {error !== null && <ErrorBanner error={error} />}
+    </div>
+  );
+}
+
+/** The open invoices a receipt settles, with what each owes and what this receipt takes from it. */
+function ReceiptPlan({ items, amount, currency }: { items: ReceivableOpenItem[]; amount: bigint; currency: string }) {
+  const { settlements, onAccount } = receiptSettlement(amount, items);
+  return (
+    <div class="receipt-plan">
+      <ul class="receipt-items">
+        {items.map((item) => {
+          const settle = settlements.find((s) => s.item.id === item.id)?.settle ?? 0n;
+          return (
+            <li key={item.id} class="receipt-item">
+              <span class="receipt-item-head">
+                <span class="mono">{item.document ?? item.id}</span>
+                <span class="hint">{item.posting_date}</span>
+              </span>
+              <span class="receipt-item-amounts">
+                <span>
+                  {t('bank.receipt_owed')} <Money minor={item.remaining.minor} currency={item.remaining.currency} />
+                </span>
+                <span>
+                  {t('bank.receipt_settles')} <Money minor={settle.toString()} currency={currency} />
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {onAccount > 0n && (
+        <p class="receipt-on-account">
+          {t('bank.receipt_on_account')} <Money minor={onAccount.toString()} currency={currency} />
+        </p>
+      )}
     </div>
   );
 }

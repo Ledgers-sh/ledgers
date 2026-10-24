@@ -83,6 +83,7 @@ const READ_COMMANDS: &[&str] = &[
     "bank.accounts.get",
     "bank.transactions.list",
     "bank.rules.list",
+    "bank.receivables.open_items",
     "reports.units_summary",
     "tax.user_rates",
     "units.list",
@@ -102,6 +103,7 @@ const READ_COMMANDS: &[&str] = &[
     "bills.get",
     "bills.list",
     "bills.propose-entry",
+    "subledger.reconcile",
     "fiscal_years.list",
     "numbering.list",
     "tax_settings.get",
@@ -181,6 +183,9 @@ fn books_class(command: &str) -> Option<Class> {
         | "bank.transactions.ignore"
         | "bank.rules.create"
         | "bank.rules.enable"
+        | "subledger.post-item"
+        | "subledger.offset"
+        | "subledger.write-off"
         | "parties.create"
         | "parties.update"
         | "parties.check_vat"
@@ -188,7 +193,9 @@ fn books_class(command: &str) -> Option<Class> {
         | "agreements.post_period"
         | "test.write"
         | "test.post" => Class::Post,
-        "bill.pay" | "bills.record-payment" | "agreements.settle_period" => Class::MoneyOut,
+        "bill.pay" | "bills.record-payment" | "agreements.settle_period" | "subledger.allocate" => {
+            Class::MoneyOut
+        }
         "periods.close"
         | "periods.reopen"
         | "fiscal_years.create"
@@ -289,6 +296,7 @@ mod tests {
         ("documents.anchors", Class::Read),
         ("bills.get", Class::Read),
         ("bills.list", Class::Read),
+        ("subledger.reconcile", Class::Read),
         ("fiscal_years.list", Class::Read),
         ("numbering.list", Class::Read),
         ("tax_settings.get", Class::Read),
@@ -327,6 +335,10 @@ mod tests {
         ("bills.confirm", Class::Post),
         ("bills.discard", Class::Post),
         ("bills.post", Class::Post),
+        ("subledger.post-item", Class::Post),
+        ("subledger.offset", Class::Post),
+        ("subledger.write-off", Class::Post),
+        ("subledger.allocate", Class::MoneyOut),
         ("documents.register", Class::Post),
         ("documents.set_anchors", Class::Post),
         ("documents.delete", Class::Post),

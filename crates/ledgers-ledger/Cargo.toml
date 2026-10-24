@@ -46,6 +46,8 @@ async-trait = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-db = { workspace = true }
 ledgers-storage = { workspace = true }
+# The trend tests post receivables and payables as real subledger items.
+ledgers-subledger = { workspace = true }
 pollster = { workspace = true, features = ["macro"] }
 # Golden snapshot testing for the command registry surface.
 insta = { workspace = true }

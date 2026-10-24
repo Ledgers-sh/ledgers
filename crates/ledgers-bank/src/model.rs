@@ -348,6 +348,46 @@ pub struct TransactionsPostInput {
     pub journal_id: Option<String>,
     /// The fiscal year; the booking date's year when omitted.
     pub fiscal_year: Option<i64>,
+    /// The customer a receipt is from. Required when the counterparty is a
+    /// receivables account; the receipt settles that customer's open items.
+    #[serde(default)]
+    pub party_id: Option<String>,
+    /// The customer's open items the receipt settles, in the order to settle
+    /// them. When omitted, the customer's oldest open items are settled first.
+    /// Any amount beyond them becomes an on-account item for the customer.
+    #[serde(default)]
+    pub open_item_ids: Option<Vec<String>>,
+}
+
+/// `bank.receivables.open_items`: the customer whose open items are listed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReceivablesOpenItemsInput {
+    /// The customer id.
+    pub party_id: String,
+}
+
+/// One open receivable a customer owes.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct OpenItemView {
+    /// The open item id, as a receipt names it.
+    pub id: String,
+    /// `invoice` or `credit-note`.
+    pub kind: String,
+    /// The document number the item was posted with, if any.
+    pub document: Option<String>,
+    /// The posting date.
+    pub posting_date: String,
+    /// The due date, if the item has one.
+    pub due_date: Option<String>,
+    /// What is still owed, in the item's currency.
+    pub remaining: SerializableAmount,
+}
+
+/// Output of `bank.receivables.open_items`: the customer's open receivables, oldest first.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReceivablesOpenItemsOutput {
+    /// The open items.
+    pub items: Vec<OpenItemView>,
 }
 
 /// The entry a bank line posted.

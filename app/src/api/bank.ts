@@ -221,6 +221,20 @@ export interface PostTransactionInput {
   bill_id?: string;
   /** The business unit the counterparty line belongs to; required once the company has units and the account is income or expense. */
   unit?: string;
+  /** The customer a receipt is from: required when the counterparty account is a receivables account. */
+  party_id?: string;
+  /** The customer's open items the receipt settles, in order; the oldest first when omitted. */
+  open_item_ids?: string[];
+}
+
+/** One open receivable a customer owes, as a receipt settles it. */
+export interface ReceivableOpenItem {
+  id: string;
+  kind: string;
+  document: string | null;
+  posting_date: string;
+  due_date: string | null;
+  remaining: Amount;
 }
 
 export interface RuleCreateInput {
@@ -288,6 +302,11 @@ export function bankTransactionsList(config: Config, params: TransactionsQueryPa
 /** POST /v1/bank/transactions/{id}/post: posts the line's entry. An agent's may come back as NeedsApproval. */
 export function bankTransactionPost(config: Config, id: string, input: PostTransactionInput): Promise<TransactionPosted | NeedsApproval> {
   return request(config, { method: 'POST', path: `/v1/bank/transactions/${encodeURIComponent(id)}/post`, body: { id, ...input } });
+}
+
+/** GET /v1/bank/receivables/open-items: a customer's open invoices, oldest first. */
+export function bankReceivablesOpenItems(config: Config, partyId: string): Promise<{ items: ReceivableOpenItem[] }> {
+  return request(config, { method: 'GET', path: '/v1/bank/receivables/open-items', query: { party_id: partyId } });
 }
 
 /** POST /v1/bank/transactions/{id}/link: matches the line to an entry already posted. */

@@ -8,11 +8,17 @@ mod common;
 use common::{FY, POSTED_AT, agent};
 use cratefield_core::{Database, Statement};
 use cratefield_testing::TestHarness;
+use ledgers_commands::auth::{Authenticator, Credential, Principal, Role};
+use ledgers_commands::{
+    Command, CommandContext, CommandError, DefaultPolicy, Execute, Executed, Executor,
+};
 use ledgers_db::DbModule;
 use ledgers_db::retry::RetryPolicy;
 use ledgers_ledger::account::{AccountDraft, AccountType};
 use ledgers_ledger::{Entry, EntryDraft, LedgerModule, Line, PostContext, Side, commands, report};
 use ledgers_money::{Amount, Currency};
+use ledgers_subledger::commands::SubledgerAllocate;
+use ledgers_subledger::commands::{AllocateInput, AllocateItem, PostItemInput, SubledgerPostItem};
 use sea_query::Value as SeaValue;
 use std::collections::BTreeMap;
 use time::Date;
@@ -27,7 +33,7 @@ fn eur() -> Currency {
 
 /// Accounts with the tags the trend report reads: cash and bank, receivables
 /// (`ar`), payables (`ap`), sales and an expense.
-const ACCOUNTS: [(&str, &str, AccountType, &[&str]); 5] = [
+const ACCOUNTS: [(&str, &str, AccountType, &[&str]); 7] = [
     ("1020", "account.trends.bank", AccountType::Asset, &["bank"]),
     (
         "1030",
@@ -47,6 +53,19 @@ const ACCOUNTS: [(&str, &str, AccountType, &[&str]); 5] = [
         "account.trends.materials",
         AccountType::Expense,
         &[],
+    ),
+    // Allocation books exchange differences here; this scenario has none.
+    (
+        "4900",
+        "account.trends.fx-gain",
+        AccountType::Income,
+        &["fx-gain"],
+    ),
+    (
+        "6900",
+        "account.trends.fx-loss",
+        AccountType::Expense,
+        &["fx-loss"],
     ),
 ];
 
@@ -185,38 +204,130 @@ async fn post_the_quarter(db: &dyn Database) {
         ],
     )
     .await;
-    // February: a sale on credit (untagged), and a supplier bill on credit.
-    post(
+    // February: a sale on credit, invoiced through the subledger so the
+    // receivable is an open item, and a supplier bill on credit.
+    let invoice = subledger_item(
         db,
         "01TRENDS0000000000000003",
+        "ar",
+        "invoice",
+        "cust-1",
         "2026-02-05",
-        vec![
-            line("1030", Side::Debit, 80_000, None),
-            line("4000", Side::Credit, 80_000, None),
-        ],
+        80_000,
+        "4000",
+        None,
     )
     .await;
-    post(
+    subledger_item(
         db,
         "01TRENDS0000000000000004",
+        "ap",
+        "bill",
+        "vendor-1",
         "2026-02-15",
-        vec![
-            line("5010", Side::Debit, 20_000, Some("cc-a")),
-            line("2010", Side::Credit, 20_000, None),
-        ],
+        20_000,
+        "5010",
+        Some("cc-a"),
     )
     .await;
-    // March: the customer pays.
-    post(
-        db,
-        "01TRENDS0000000000000005",
-        "2026-03-01",
-        vec![
-            line("1020", Side::Debit, 80_000, None),
-            line("1030", Side::Credit, 80_000, None),
-        ],
-    )
-    .await;
+    // March: the customer pays, allocated against the invoice.
+    let input = AllocateInput {
+        ledger: "ar".to_owned(),
+        party_id: "cust-1".to_owned(),
+        journal_id: JOURNAL.to_owned(),
+        date: "2026-03-01".to_owned(),
+        bank_account: "1020".to_owned(),
+        paid: 80_000,
+        items: vec![AllocateItem {
+            open_item_id: invoice,
+            amount: 80_000,
+            paid_base: None,
+        }],
+        description: None,
+        reference: None,
+    };
+    let ctx = command_context("01TRENDS0000000000000005");
+    run_subledger(db, &SubledgerAllocate, &input, ctx).await;
+}
+
+struct TestAuthenticator;
+
+#[async_trait::async_trait]
+impl Authenticator for TestAuthenticator {
+    async fn authenticate(&self, _credential: &Credential) -> Result<Principal, CommandError> {
+        Ok(Principal::Person {
+            person_id: "trends-test".to_string(),
+            role: Role::Owner,
+        })
+    }
+}
+
+fn command_context(event_id: &str) -> CommandContext {
+    CommandContext {
+        company_id: COMPANY.to_owned(),
+        is_person: true,
+        event_id: event_id.to_owned(),
+        request_id: event_id.to_owned(),
+        now: POSTED_AT.to_owned(),
+    }
+}
+
+async fn run_subledger<C>(
+    db: &dyn Database,
+    command: &C,
+    input: &C::Input,
+    ctx: CommandContext,
+) -> C::Output
+where
+    C: Command + Sync,
+    C::Input: Sync,
+{
+    let executor = Executor::new(db, TestAuthenticator, DefaultPolicy);
+    match executor
+        .run(command, "bearer".to_string(), ctx, input, Execute::Run)
+        .await
+        .expect("the subledger command succeeds")
+    {
+        Executed::Done(output) => output,
+        _ => panic!("expected the command to run"),
+    }
+}
+
+/// Posts a subledger item (an invoice or a bill) and returns its open item id.
+#[allow(clippy::too_many_arguments)]
+async fn subledger_item(
+    db: &dyn Database,
+    event_id: &str,
+    ledger: &str,
+    kind: &str,
+    party_id: &str,
+    date: &str,
+    amount: i64,
+    counter_account: &str,
+    cost_centre: Option<&str>,
+) -> String {
+    let dimensions = cost_centre
+        .map(|code| BTreeMap::from([("cost_centre".to_owned(), code.to_owned())]))
+        .unwrap_or_default();
+    let input = PostItemInput {
+        ledger: ledger.to_owned(),
+        kind: kind.to_owned(),
+        party_id: party_id.to_owned(),
+        journal_id: JOURNAL.to_owned(),
+        document_date: date.to_owned(),
+        posting_date: date.to_owned(),
+        due_date: None,
+        currency: "EUR".to_owned(),
+        amount,
+        rate: None,
+        counter_account: counter_account.to_owned(),
+        dimensions,
+        counter_lines: Vec::new(),
+        description: format!("trend {kind} {event_id}"),
+        source_id: Some(format!("{kind}-{event_id}")),
+    };
+    let output = run_subledger(db, &SubledgerPostItem, &input, command_context(event_id)).await;
+    output.item_id
 }
 
 #[test]
@@ -226,6 +337,7 @@ fn the_trend_report_matches_the_entries_on_every_engine() {
             Box::new(ledgers_storage::StorageModule),
             Box::new(LedgerModule),
             Box::new(DbModule),
+            Box::new(ledgers_subledger::SubledgerModule),
         ]
     }) {
         pollster::block_on(scenario(&*kit.db));

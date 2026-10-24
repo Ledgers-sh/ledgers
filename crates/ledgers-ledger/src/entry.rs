@@ -683,6 +683,14 @@ pub enum JournalError {
     #[error("per-unit balancing requires exactly one unarchived inter-unit-clearing account")]
     ClearingAccountMissing,
 
+    /// A manual entry line is on a control account (tagged ar or ap);
+    /// these accounts post only through the subledger.
+    #[error("control accounts (ar, ap) post only through subledger commands: {accounts}")]
+    ControlAccountPosting {
+        /// The account number(s) that triggered the rejection.
+        accounts: String,
+    },
+
     /// A statement failed on the `Database` port.
     #[error(transparent)]
     Database(#[from] cratefield_core::DbError),
@@ -743,6 +751,15 @@ pub const JOURNAL_POST_CONFLICT: cratefield_core::ProblemDef = cratefield_core::
     status: cratefield_core::axum::http::StatusCode::SERVICE_UNAVAILABLE,
     title: "Posting conflicted",
     description: "The posting batch kept losing a concurrency race; retry the post later.",
+};
+
+/// `control-account-posting` problem: posting a manual journal to a control account (AR/AP).
+pub const CONTROL_ACCOUNT_POSTING: cratefield_core::ProblemDef = cratefield_core::ProblemDef {
+    slug: "control-account-posting",
+    status: cratefield_core::axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+    title: "Control accounts post only through the subledger",
+    description: "Control accounts (tagged ar or ap) cannot be posted to manually; use the \
+                  subledger commands instead.",
 };
 
 impl JournalError {
@@ -854,6 +871,11 @@ impl JournalError {
             JournalError::UnitUnbalanced { unit } => Problem::new(&JOURNAL_ENTRY_REFUSED)
                 .with_detail(self.to_string())
                 .with_extension("unit", unit.clone()),
+            JournalError::ControlAccountPosting { accounts } => {
+                Problem::new(&CONTROL_ACCOUNT_POSTING)
+                    .with_detail(self.to_string())
+                    .with_extension("accounts", accounts.clone())
+            }
             JournalError::Money(_) | JournalError::Database(_) => {
                 // No internals in the body (architecture section 6):
                 // the underlying error is the caller's to log.

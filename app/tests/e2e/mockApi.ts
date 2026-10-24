@@ -701,8 +701,8 @@ function seedAccounts(): MockAccount[] {
     normal_balance: account.normal_balance,
     currency: null,
     parent: null,
-    // The cash account is the chart account a bank account links to (tag bank).
-    tags: account.number === '1000' ? ['bank'] : [],
+    // The cash account is the chart account a bank account links to (tag bank); receivables are tagged ar.
+    tags: account.number === '1000' ? ['bank'] : account.number === '1200' ? ['ar'] : [],
     archived: false,
   }));
   return [

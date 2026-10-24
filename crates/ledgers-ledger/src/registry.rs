@@ -210,4 +210,8 @@ pub const EXEMPT: &[(&str, &str)] = &[
         "posting::reverse_by_external_id",
         "reversal helper; audit event handled by post_entry call within the function",
     ),
+    (
+        "posting::post_entry_with_control",
+        "test-only variant of post_entry with control account posting allowed",
+    ),
 ];

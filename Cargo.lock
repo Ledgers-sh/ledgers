@@ -2210,6 +2210,7 @@ dependencies = [
  "ledgers-ledger",
  "ledgers-money",
  "ledgers-storage",
+ "ledgers-subledger",
  "pollster",
  "proptest",
  "quick-xml",
@@ -2237,6 +2238,8 @@ dependencies = [
  "ledgers-extract",
  "ledgers-ledger",
  "ledgers-money",
+ "ledgers-storage",
+ "ledgers-subledger",
  "ledgers-tax",
  "pollster",
  "schemars 1.2.3",
@@ -2480,6 +2483,7 @@ dependencies = [
  "ledgers-db",
  "ledgers-money",
  "ledgers-storage",
+ "ledgers-subledger",
  "pollster",
  "schemars 1.2.3",
  "sea-query",
@@ -2565,6 +2569,7 @@ dependencies = [
  "ledgers-money",
  "ledgers-policy",
  "ledgers-storage",
+ "ledgers-subledger",
  "ledgers-tax",
  "p256",
  "pollster",
@@ -2591,6 +2596,29 @@ dependencies = [
  "cratefield-testing",
  "pollster",
  "sea-query",
+]
+
+[[package]]
+name = "ledgers-subledger"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cratefield-core",
+ "cratefield-testing",
+ "ledgers-audit",
+ "ledgers-commands",
+ "ledgers-db",
+ "ledgers-ledger",
+ "ledgers-money",
+ "ledgers-storage",
+ "pollster",
+ "proptest",
+ "schemars 1.2.3",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
 ]
 
 [[package]]

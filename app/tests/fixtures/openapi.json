@@ -3475,6 +3475,79 @@
         "x-ledgers-human-only": true
       }
     },
+    "/v1/bank/receivables/open-items": {
+      "get": {
+        "operationId": "bank_receivables_open_items",
+        "description": "Execute command: bank.receivables.open_items",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "bank"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "title": "ReceivablesOpenItemsOutput",
+                  "description": "Output of `bank.receivables.open_items`: the customer's open receivables, oldest first.",
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "description": "The open items.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OpenItemView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "bank.receivables.open_items",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers bank receivables open-items",
+        "x-ledgers-mcp": "bank_receivables_open_items",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/bank/receivables/open-items\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
     "/v1/bank/rules": {
       "post": {
         "operationId": "bank_rules_create",
@@ -4302,6 +4375,25 @@
                       "null"
                     ],
                     "format": "int64"
+                  },
+                  "party_id": {
+                    "description": "The customer a receipt is from. Required when the counterparty is a\nreceivables account; the receipt settles that customer's open items.",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "open_item_ids": {
+                    "description": "The customer's open items the receipt settles, in the order to settle\nthem. When omitted, the customer's oldest open items are settled first.\nAny amount beyond them becomes an on-account item for the customer.",
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": null
                   }
                 },
                 "required": [
@@ -11145,6 +11237,318 @@
         "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/reports/units-summary\" -H \"Authorization: Bearer $LEDGERS_KEY\""
       }
     },
+    "/v1/subledger/allocate": {
+      "post": {
+        "operationId": "subledger_allocate",
+        "description": "Execute command: subledger.allocate",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.allocate",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger allocate",
+        "x-ledgers-mcp": "subledger_allocate",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/allocate\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/offset": {
+      "post": {
+        "operationId": "subledger_offset",
+        "description": "Execute command: subledger.offset",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.offset",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger offset",
+        "x-ledgers-mcp": "subledger_offset",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/offset\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/post-item": {
+      "post": {
+        "operationId": "subledger_post-item",
+        "description": "Execute command: subledger.post-item",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.post-item",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger post-item",
+        "x-ledgers-mcp": "subledger_post-item",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/post-item\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
+    "/v1/subledger/reconcile": {
+      "get": {
+        "operationId": "subledger_reconcile",
+        "description": "Execute command: subledger.reconcile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.reconcile",
+        "x-ledgers-tier": "read",
+        "x-ledgers-cli": "ledgers subledger reconcile",
+        "x-ledgers-mcp": "subledger_reconcile",
+        "x-ledgers-curl": "curl -X GET \"$LEDGERS_URL/v1/subledger/reconcile\" -H \"Authorization: Bearer $LEDGERS_KEY\""
+      }
+    },
+    "/v1/subledger/write-off": {
+      "post": {
+        "operationId": "subledger_write-off",
+        "description": "Execute command: subledger.write-off",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "subledger"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not yet implemented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-ledgers-command": "subledger.write-off",
+        "x-ledgers-tier": "post-within-limits",
+        "x-ledgers-cli": "ledgers subledger write-off",
+        "x-ledgers-mcp": "subledger_write-off",
+        "x-ledgers-curl": "curl -X POST \"$LEDGERS_URL/v1/subledger/write-off\" -H \"Authorization: Bearer $LEDGERS_KEY\" --json @input.json"
+      }
+    },
     "/v1/tax-settings": {
       "get": {
         "operationId": "tax_settings_get",
@@ -12775,6 +13179,48 @@
         "required": [
           "date",
           "amount"
+        ]
+      },
+      "OpenItemView": {
+        "description": "One open receivable a customer owes.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The open item id, as a receipt names it.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`invoice` or `credit-note`.",
+            "type": "string"
+          },
+          "document": {
+            "description": "The document number the item was posted with, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "posting_date": {
+            "description": "The posting date.",
+            "type": "string"
+          },
+          "due_date": {
+            "description": "The due date, if the item has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining": {
+            "description": "What is still owed, in the item's currency.",
+            "$ref": "#/components/schemas/SerializableAmount"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "posting_date",
+          "remaining"
         ]
       },
       "RuleConditions": {

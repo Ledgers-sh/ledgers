@@ -18,8 +18,9 @@ ledgers-db = { workspace = true }
 ledgers-documents = { workspace = true }
 ledgers-extract = { workspace = true }
 ledgers-ledger = { workspace = true }
-ledgers-tax = { workspace = true }
 ledgers-money = { workspace = true }
+ledgers-subledger = { workspace = true }
+ledgers-tax = { workspace = true }
 sea-query = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -32,6 +33,9 @@ time = { workspace = true }
 pollster = { workspace = true }
 cratefield-testing = { workspace = true, features = ["harness"] }
 ledgers-audit = { workspace = true }
+ledgers-ledger = { workspace = true }
+ledgers-storage = { workspace = true }
+ledgers-subledger = { workspace = true }
 
 [lints]
 workspace = true

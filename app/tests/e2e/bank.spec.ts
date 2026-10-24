@@ -108,6 +108,32 @@ test.describe('bank: account page', () => {
     await expect(page.getByRole('button', { name: /Halden Supplies GmbH/ })).toContainText('Matched');
   });
 
+  test('a customer receipt settles the chosen customer\'s open invoices, oldest first, then posts', async ({ page }) => {
+    await mockApi({ seed: true, person: true, bank: true });
+    await signInPerson(page);
+    await openAccount(page);
+    await page.getByRole('button', { name: /Client Berlin AG/ }).click();
+    const panel = page.locator('#bank-reconcile');
+    await panel.getByRole('radio', { name: 'Another account' }).click();
+    await choose(page, 'Other account', /Accounts receivable/);
+
+    const heading = panel.getByRole('heading', { name: 'Customer receipt' });
+    await expect(heading).toBeVisible();
+    await page.getByRole('combobox', { name: 'Customer' }).fill('Acme');
+    await page.getByRole('option', { name: 'Acme GmbH' }).click();
+
+    // The receipt of 2500.00 settles both invoices exactly: 1000.00, then 1500.00.
+    await expect(panel.getByText('RE-2026-0101')).toBeVisible();
+    await expect(panel.getByText('RE-2026-0108')).toBeVisible();
+    await expect(panel.locator('.receipt-item', { hasText: 'RE-2026-0101' })).toContainText('1,000.00');
+    await expect(panel.locator('.receipt-item', { hasText: 'RE-2026-0108' })).toContainText('1,500.00');
+    await expect(panel.getByText('On account')).toHaveCount(0);
+
+    await panel.getByRole('button', { name: 'Match', exact: true }).click();
+    await expect(page.getByText('Line matched.')).toBeVisible();
+    expect(bankMock.writes).toContain('receipt:tx_client:party-acme');
+  });
+
   test('shows the journal a rule would post, and posts it to the rule account', async ({ page }) => {
     await mockApi({ seed: true, person: true, bank: true });
     await signInPerson(page);

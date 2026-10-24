@@ -168,6 +168,7 @@ pub fn fixture_with_options(
         ])),
         Box::new(ledgers_documents::DocumentsStoreModule),
         Box::new(ledgers_bills::BillsModule),
+        Box::new(ledgers_subledger::SubledgerModule),
         Box::new(ledgers_bank::BankModule),
         Box::new(ledgers_connect::ConnectModule),
         Box::new(ledgers_tax::module::TaxModule),

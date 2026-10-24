@@ -73,6 +73,10 @@ pub struct PostOptions {
     /// `(subject, limit)`: one post is charged to `subject` under the
     /// `post` meter, which refuses past `limit` a UTC day.
     pub daily_limit: Option<(String, u64)>,
+    /// When `true`, control account posting (ar/ap) is allowed (internal
+    /// subledger commands); when `false` (the default), manual posting to
+    /// control accounts is rejected.
+    pub allow_control_posting: bool,
 }
 
 /// The entry table, as declared by [`crate::module::LedgerModule`].
@@ -689,6 +693,21 @@ fn guard_statements(
             ],
         ),
     ]);
+
+    // Control account posting: reject manual posts to ar/ap accounts
+    if !options.allow_control_posting {
+        let control_account_key = guard::guard_key(&["control-account-posting", entry_id]);
+        statements.push(guard::assert_statement(
+            &control_account_key,
+            "(SELECT COUNT(*) FROM journal_line WHERE entry_id = ?\n\
+                 AND EXISTS (\n\
+                 SELECT 1 FROM account acct\n\
+                 WHERE acct.company_id = ? AND acct.number = journal_line.account_number\n\
+                 AND ((' ' || acct.tags || ' ') LIKE '% ar %' OR (' ' || acct.tags || ' ') LIKE '% ap %'))) = 0",
+            vec![SeaValue::from(entry_id), SeaValue::from(company)],
+        ));
+        statements.push(guard::release_statement(&control_account_key));
+    }
     // The daily allowance: the usage meter's guarded upsert, beside the
     // work it pays for; a spent allowance fails NOT NULL in this batch.
     if let (Some((subject, limit)), Some(day)) = (&options.daily_limit, day) {
@@ -848,6 +867,44 @@ fn guard_statements(
     statements
 }
 
+/// The typed refusal for a manual post that touches an ar or ap account:
+/// the lines' accounts that carry the `ar` or `ap` tag, if any.
+///
+/// # Errors
+/// [`JournalError::ControlAccountPosting`] naming the accounts, or a read
+/// failure as [`JournalError::Database`].
+async fn reject_control_accounts(
+    db: &dyn Database,
+    company_id: &str,
+    raw: &RawEntry,
+) -> Result<(), JournalError> {
+    let mut control_accounts = Vec::new();
+    for line in &raw.lines {
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT number FROM account\n\
+                     WHERE company_id = ? AND number = ?\n\
+                     AND ((' ' || tags || ' ') LIKE '% ar %' OR (' ' || tags || ' ') LIKE '% ap %')"
+                    .to_owned(),
+                vec![
+                    SeaValue::from(company_id),
+                    SeaValue::from(line.account_number.as_str()),
+                ],
+            ))
+            .await?;
+        if rows.first().is_some() {
+            control_accounts.push(line.account_number.clone());
+        }
+    }
+    if control_accounts.is_empty() {
+        Ok(())
+    } else {
+        Err(JournalError::ControlAccountPosting {
+            accounts: control_accounts.join(", "),
+        })
+    }
+}
+
 /// Plans one validated entry for the executor: converts it to statements,
 /// returning just the statements (no execution). The executor appends the
 /// audit record and executes the combined batch.
@@ -882,6 +939,10 @@ pub async fn plan_post_entry(
 
     // The executor has already determined the company and fiscal year context.
     // We just plan the statements here. The executor will append the Allowed audit event.
+    // A manual post to an ar/ap account is refused here with the typed error,
+    // before the guard probe would abort the batch with a bare NOT NULL failure.
+    reject_control_accounts(db, company_id, &raw).await?;
+
     let ctx = PostContext {
         fiscal_year,
         entry_id: entry_id.to_string(),
@@ -894,6 +955,57 @@ pub async fn plan_post_entry(
     // executor appends the audit event.
     let options = PostOptions {
         human: token.acts_as_person(),
+        ..Default::default()
+    };
+    let (statements, number) = plan_post_batch_statements_only(db, &raw, &ctx, &options).await?;
+
+    let posted = PostedEntry {
+        entry_id: ctx.entry_id,
+        journal_id: raw.journal_id.clone(),
+        fiscal_year: ctx.fiscal_year,
+        number,
+        recorded_at: ctx.recorded_at,
+    };
+
+    Ok((statements, posted))
+}
+
+/// Plans a posting batch allowing control account posting (AR/AP).
+/// This is the privileged path for internal callers (bills, subledger).
+///
+/// Same as [`plan_post_entry`] but permits posting to accounts tagged
+/// `ar` or `ap`, which are rejected by the public path.
+///
+/// # Errors
+/// [`JournalError::Money`] when an amount does not fit the storage width.
+pub(crate) async fn plan_control_post(
+    token: &ledgers_commands::ExecToken,
+    db: &dyn Database,
+    company_id: &str,
+    entry: &Entry,
+    fiscal_year: i64,
+    now: &str,
+    request_id: &str,
+) -> Result<(Vec<Statement>, PostedEntry), crate::JournalError> {
+    let raw = RawEntry::from_entry(entry)?;
+
+    let entry_id = request_id;
+    let outbox_id = format!("{request_id}-outbox");
+
+    if let Some(posted_entry) = read_posted_entry(db, entry_id, company_id).await? {
+        return Ok((vec![], posted_entry));
+    }
+
+    let ctx = PostContext {
+        fiscal_year,
+        entry_id: entry_id.to_string(),
+        recorded_at: now.to_string(),
+        outbox_id,
+    };
+
+    let options = PostOptions {
+        human: token.acts_as_person(),
+        allow_control_posting: true,
         ..Default::default()
     };
     let (statements, number) = plan_post_batch_statements_only(db, &raw, &ctx, &options).await?;
@@ -1115,6 +1227,27 @@ pub async fn post_raw_entry_with(
     }
 }
 
+/// Test helper: post an entry allowing control account posting (ar/ap).
+/// Used in tests to post to control accounts without using the privileged command path.
+/// This function is not part of the public API but is exported for test usage.
+#[doc(hidden)]
+pub async fn post_entry_with_control(
+    db: &dyn Database,
+    entry: &Entry,
+    ctx: &PostContext,
+    policy: RetryPolicy,
+    sleep: impl FnMut(Duration),
+    audit: &AuditContext,
+) -> Result<PostedEntry, JournalError> {
+    let raw = RawEntry::from_entry(entry)?;
+    let options = PostOptions {
+        human: audit.actor.is_person(),
+        allow_control_posting: true,
+        ..Default::default()
+    };
+    post_raw_entry_with(db, &raw, ctx, policy, sleep, &options, audit).await
+}
+
 /// Whether a failed statement was a guard probe's `NOT NULL` refusal
 /// (the probe row's `ok` column takes NULL exactly when the invariant
 /// does not hold) — as opposed to an engine failure on any other
@@ -1321,6 +1454,34 @@ async fn diagnose_refusal(
             return missing_or_archived(db, company, &line.account_number)
                 .await
                 .ok();
+        }
+    }
+
+    // Control account posting: check if any line is on an ar or ap account
+    if !options.allow_control_posting {
+        let mut control_accounts = Vec::new();
+        for line in &raw.lines {
+            let rows = db
+                .query(&Statement::with_values(
+                    "SELECT number FROM account\n\
+                         WHERE company_id = ? AND number = ?\n\
+                         AND ((' ' || tags || ' ') LIKE '% ar %' OR (' ' || tags || ' ') LIKE '% ap %')"
+                        .to_owned(),
+                    vec![
+                        SeaValue::from(company),
+                        SeaValue::from(line.account_number.as_str()),
+                    ],
+                ))
+                .await
+                .ok()?;
+            if rows.first().is_some() {
+                control_accounts.push(line.account_number.clone());
+            }
+        }
+        if !control_accounts.is_empty() {
+            return Some(JournalError::ControlAccountPosting {
+                accounts: control_accounts.join(", "),
+            });
         }
     }
 

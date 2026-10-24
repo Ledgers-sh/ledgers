@@ -13,11 +13,12 @@ use crate::iban;
 use crate::model::{
     AccountView, AccountsArchiveInput, AccountsCreateInput, AccountsGetInput, AccountsListInput,
     AccountsListOutput, AccountsUpdateInput, BalanceView, MAX_IMPORT_LINES, MAX_LIST, MatchedView,
-    PostedBankEntry, ReconcileInput, ReconciliationView, RuleView, RulesCreateInput,
-    RulesCreateRequest, RulesEnableInput, RulesEnableOutput, RulesListInput, RulesListOutput,
-    StatementSummary, StatementsImportInput, StatementsImportOutput, TransactionStatusOutput,
-    TransactionView, TransactionsIgnoreInput, TransactionsLinkInput, TransactionsListInput,
-    TransactionsListOutput, TransactionsPostInput, TransactionsPostOutput,
+    OpenItemView, PostedBankEntry, ReceivablesOpenItemsInput, ReceivablesOpenItemsOutput,
+    ReconcileInput, ReconciliationView, RuleView, RulesCreateInput, RulesCreateRequest,
+    RulesEnableInput, RulesEnableOutput, RulesListInput, RulesListOutput, StatementSummary,
+    StatementsImportInput, StatementsImportOutput, TransactionStatusOutput, TransactionView,
+    TransactionsIgnoreInput, TransactionsLinkInput, TransactionsListInput, TransactionsListOutput,
+    TransactionsPostInput, TransactionsPostOutput,
 };
 use crate::money::{Decimal, parse_minor};
 use crate::parse::CsvMapping;
@@ -33,6 +34,7 @@ use ledgers_ledger::surface::{
     PostEntry, PostEntryInput, SerializableAmount, SerializableEntryDraft, SerializableLine,
 };
 use ledgers_money::Currency;
+use ledgers_subledger::allocate::{AllocateInput, AllocateItem, plan_allocate};
 use sea_query::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -40,6 +42,8 @@ use std::collections::{BTreeMap, HashMap};
 pub const TAG_BANK: &str = "bank";
 /// The chart tag of accounts payable.
 const TAG_PAYABLE: &str = "ap";
+/// The chart tag of accounts receivable.
+const TAG_RECEIVABLE: &str = "ar";
 /// The journal a bank entry posts into when none is named (as bills do).
 const DEFAULT_JOURNAL_CODE: &str = "GN";
 /// The longest description a posted entry keeps.
@@ -1472,8 +1476,42 @@ impl Command for TransactionsPost {
         ctx: &CommandContext,
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
+        // A line to a receivables account is a customer's receipt: the subledger
+        // settles the customer's open items with it.
+        if let Some(number) = &input.counterparty_account
+            && is_receivable(db, &ctx.company_id, number).await?
+        {
+            return receipt_plan(token, db, ctx, input).await;
+        }
         let plan = post_plan(db, ctx, input).await?;
-        let posted = PostEntry.plan(token, db, ctx, &plan.entry).await?;
+        // A line matched to a bill is a payment of that bill: the bills module
+        // posts it and allocates the bill's open item, as any bill payment is.
+        // Any other line posts its own entry through the journal.
+        let (posted_statements, entry) = if let Some(bill_id) = &plan.bill_id {
+            {
+                if plan.line.minor >= 0 {
+                    return Err(invalid("a bill is paid by an outgoing (negative) line"));
+                }
+                let account = store::account(db, &ctx.company_id, &plan.line.account_id)
+                    .await?
+                    .ok_or_else(not_found)?;
+                let payment = ledgers_bills::commands::RecordPaymentInput {
+                    id: bill_id.clone(),
+                    amount: -plan.line.minor,
+                    date: plan.line.booking_date.clone(),
+                    from_account: account.ledger_account_number,
+                    reference: Some(plan.line.id.clone()),
+                };
+                let (payment_plan, paid) =
+                    ledgers_bills::commands::plan_record_payment(token, db, ctx, &payment).await?;
+                (payment_plan.statements, paid.entry)
+            }
+        } else {
+            {
+                let posted = PostEntry.plan(token, db, ctx, &plan.entry).await?;
+                (posted.statements, posted.output.entry)
+            }
+        };
         let key = guard::guard_key(&["bank-unmatched", &plan.line.id]);
         let mut statements = vec![guard::assert_statement(
             key.clone(),
@@ -1483,13 +1521,13 @@ impl Command for TransactionsPost {
                 Value::from(plan.line.id.as_str()),
             ],
         )];
-        statements.extend(posted.statements);
+        statements.extend(posted_statements);
         statements.push(Statement::with_values(
             "UPDATE bank_transaction SET status = 'matched', matched_entry_id = ?, matched_bill_id = ?, \
              updated_at = ? WHERE company_id = ? AND id = ? AND status = 'unmatched'"
                 .to_owned(),
             vec![
-                Value::from(posted.output.entry.entry_id.as_str()),
+                Value::from(entry.entry_id.as_str()),
                 Value::from(plan.bill_id.as_deref()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
@@ -1497,7 +1535,6 @@ impl Command for TransactionsPost {
             ],
         ));
         statements.push(guard::release_statement(key));
-        let entry = posted.output.entry;
         let mut out = Plan::with_output(TransactionsPostOutput {
             transaction_id: plan.line.id.clone(),
             status: "matched".to_owned(),
@@ -1512,6 +1549,253 @@ impl Command for TransactionsPost {
         out.statements = statements;
         out.objects = vec![plan.line.id];
         Ok(out)
+    }
+}
+
+/// Whether an account of the chart is tagged as receivable.
+async fn is_receivable(
+    db: &dyn Database,
+    company: &str,
+    number: &str,
+) -> Result<bool, CommandError> {
+    let chart = chart(db, company).await?;
+    Ok(find_account(&chart, number)
+        .is_some_and(|account| account.tags.iter().any(|t| t == TAG_RECEIVABLE)))
+}
+
+/// A customer's open receivables in the order a receipt settles them: the named
+/// items in the order named, or else every open invoice, oldest first.
+async fn settle_order(
+    db: &dyn Database,
+    company: &str,
+    party: &str,
+    named: Option<&[String]>,
+) -> Result<Vec<(String, i64)>, CommandError> {
+    let Some(named) = named else {
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT id, tx_remaining_minor FROM open_item \
+                 WHERE company_id = ? AND ledger = 'ar' AND party_id = ? AND tx_remaining_minor > 0 \
+                 ORDER BY posting_date, id"
+                    .to_owned(),
+                vec![Value::from(company), Value::from(party)],
+            ))
+            .await?;
+        return Ok(rows
+            .rows
+            .iter()
+            .filter_map(|row| {
+                Some((
+                    row.get::<String>("id")?,
+                    row.get::<i64>("tx_remaining_minor")?,
+                ))
+            })
+            .collect());
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for id in named {
+        if !seen.insert(id.as_str()) {
+            return Err(invalid(format!("open item {id} is named twice")));
+        }
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT id, tx_remaining_minor FROM open_item \
+                 WHERE company_id = ? AND ledger = 'ar' AND party_id = ? AND id = ? AND tx_remaining_minor > 0"
+                    .to_owned(),
+                vec![Value::from(company), Value::from(party), Value::from(id.as_str())],
+            ))
+            .await?;
+        let row = rows.rows.first().ok_or_else(|| {
+            invalid(format!(
+                "open item {id} is not an open receivable of this customer"
+            ))
+        })?;
+        let remaining: i64 = row.get("tx_remaining_minor").unwrap_or(0);
+        out.push((id.clone(), remaining));
+    }
+    Ok(out)
+}
+
+/// The allocations a payment of `paid` makes against the items in order: each
+/// item takes what it owes until the payment runs out. A remainder is on account.
+fn allocate_in_order(paid: i64, items: &[(String, i64)]) -> Vec<AllocateItem> {
+    let mut left = paid;
+    let mut out = Vec::new();
+    for (id, remaining) in items {
+        if left <= 0 {
+            break;
+        }
+        let amount = (*remaining).min(left);
+        if amount > 0 {
+            out.push(AllocateItem {
+                open_item_id: id.clone(),
+                amount,
+                paid_base: None,
+            });
+            left -= amount;
+        }
+    }
+    out
+}
+
+/// A receipt: a line that settles a customer's open receivables. The subledger
+/// allocates the payment; the excess becomes the customer's on-account item.
+async fn receipt_plan(
+    token: &ExecToken,
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &TransactionsPostInput,
+) -> Result<Plan<TransactionsPostOutput>, CommandError> {
+    let company = ctx.company_id.as_str();
+    let line = store::transaction(db, company, &input.id)
+        .await?
+        .ok_or_else(not_found)?;
+    if line.status != "unmatched" {
+        return Err(invalid(format!(
+            "the line is {} and cannot be posted",
+            line.status
+        )));
+    }
+    if line.minor <= 0 {
+        return Err(invalid("a receipt is an incoming (positive) bank line"));
+    }
+    if line.currency != "EUR" {
+        return Err(invalid(
+            "receipts are booked in EUR, the company's base currency",
+        ));
+    }
+    let party = input
+        .party_id
+        .as_deref()
+        .filter(|party| !party.is_empty())
+        .ok_or_else(|| invalid("a receivables line needs the customer: give party_id"))?;
+    let account = store::account(db, company, &line.account_id)
+        .await?
+        .ok_or_else(not_found)?;
+    if account.archived_at.is_some() {
+        return Err(invalid(
+            "the account is archived: its lines cannot be posted",
+        ));
+    }
+    let journal_id = ledgers_ledger::journal::find_journal(db, company, DEFAULT_JOURNAL_CODE)
+        .await
+        .map_err(|err| invalid(err.to_string()))?
+        .map(|journal| journal.id)
+        .ok_or_else(|| invalid("no general journal GN exists"))?;
+
+    let items = settle_order(db, company, party, input.open_item_ids.as_deref()).await?;
+    let allocate = AllocateInput {
+        ledger: "ar".to_owned(),
+        party_id: party.to_owned(),
+        journal_id,
+        date: line.booking_date.clone(),
+        bank_account: account.ledger_account_number.clone(),
+        paid: line.minor,
+        items: allocate_in_order(line.minor, &items),
+        description: Some(line.remittance.clone()).filter(|text| !text.is_empty()),
+        reference: Some(line.id.clone()),
+    };
+    let (allocated, paid) =
+        plan_allocate(token, db, ctx, &allocate)
+            .await
+            .map_err(|err| match err {
+                CommandError::InvalidInput(message) => invalid(message),
+                other => other,
+            })?;
+
+    let key = guard::guard_key(&["bank-unmatched", &line.id]);
+    let mut statements = vec![guard::assert_statement(
+        key.clone(),
+        "(SELECT status FROM bank_transaction WHERE company_id = ? AND id = ?) = 'unmatched'",
+        vec![Value::from(company), Value::from(line.id.as_str())],
+    )];
+    statements.extend(allocated.statements);
+    statements.push(Statement::with_values(
+        "UPDATE bank_transaction SET status = 'matched', matched_entry_id = ?, matched_bill_id = NULL, \
+         updated_at = ? WHERE company_id = ? AND id = ? AND status = 'unmatched'"
+            .to_owned(),
+        vec![
+            Value::from(paid.entry.entry_id.as_str()),
+            Value::from(ctx.now.as_str()),
+            Value::from(company),
+            Value::from(line.id.as_str()),
+        ],
+    ));
+    statements.push(guard::release_statement(key));
+    let entry = paid.entry;
+    let mut out = Plan::with_output(TransactionsPostOutput {
+        transaction_id: line.id.clone(),
+        status: "matched".to_owned(),
+        entry: PostedBankEntry {
+            entry_id: entry.entry_id,
+            journal_id: entry.journal_id,
+            fiscal_year: entry.fiscal_year,
+            number: entry.number,
+            recorded_at: entry.recorded_at,
+        },
+    });
+    out.statements = statements;
+    out.objects = vec![line.id];
+    Ok(out)
+}
+
+/// `bank.receivables.open_items`: a customer's open invoices, oldest first, for
+/// a receipt to settle.
+pub struct ReceivablesOpenItems;
+
+#[async_trait::async_trait]
+impl Command for ReceivablesOpenItems {
+    const NAME: &'static str = "bank.receivables.open_items";
+    const TIER: Tier = Tier::Read;
+    type Input = ReceivablesOpenItemsInput;
+    type Output = ReceivablesOpenItemsOutput;
+
+    async fn preview(
+        &self,
+        _db: &dyn Database,
+        _ctx: &CommandContext,
+        _input: &Self::Input,
+    ) -> Result<JournalPreview, CommandError> {
+        Ok(JournalPreview::empty())
+    }
+
+    async fn plan(
+        &self,
+        _token: &ExecToken,
+        db: &dyn Database,
+        ctx: &CommandContext,
+        input: &Self::Input,
+    ) -> Result<Plan<Self::Output>, CommandError> {
+        let rows = db
+            .query(&Statement::with_values(
+                "SELECT id, kind, source_id, posting_date, due_date, currency, tx_remaining_minor \
+                 FROM open_item \
+                 WHERE company_id = ? AND ledger = 'ar' AND party_id = ? AND tx_remaining_minor > 0 \
+                 ORDER BY posting_date, id"
+                    .to_owned(),
+                vec![
+                    Value::from(ctx.company_id.as_str()),
+                    Value::from(input.party_id.as_str()),
+                ],
+            ))
+            .await?;
+        let items = rows
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let currency: String = row.get("currency")?;
+                Some(OpenItemView {
+                    id: row.get("id")?,
+                    kind: row.get("kind")?,
+                    document: row.get("source_id"),
+                    posting_date: row.get("posting_date")?,
+                    due_date: row.get("due_date"),
+                    remaining: amount(row.get::<i64>("tx_remaining_minor")?, &currency),
+                })
+            })
+            .collect();
+        Ok(Plan::with_output(ReceivablesOpenItemsOutput { items }))
     }
 }
 
