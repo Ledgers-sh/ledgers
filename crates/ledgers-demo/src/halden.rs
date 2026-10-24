@@ -207,6 +207,7 @@ fn reverse(
 }
 
 /// A subledger item (an invoice, credit note or bill) and its lines.
+#[allow(clippy::too_many_arguments)]
 fn item(
     external_id: String,
     poster: Poster,
@@ -234,6 +235,7 @@ fn item(
 }
 
 /// A payment of a party's items from the bank, through the subledger.
+#[allow(clippy::too_many_arguments)]
 fn allocate(
     external_id: String,
     poster: Poster,
@@ -260,6 +262,7 @@ fn allocate(
 }
 
 /// A credit item cleared against a debit item, through the subledger.
+#[allow(clippy::too_many_arguments)]
 fn offset(
     external_id: String,
     poster: Poster,
@@ -585,7 +588,7 @@ fn month_entries(year: i32, month: u32) -> Vec<DemoEntry> {
         ));
     }
     if let Some(prev) = prev {
-        let prev_month = prev as u32 + 1;
+        let prev_month = u32::try_from(prev + 1).expect("a month of the year");
         out.push(allocate(
             id(month, "receipts-nordstrand"),
             Poster::Person,

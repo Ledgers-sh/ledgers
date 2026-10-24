@@ -564,7 +564,7 @@ fn push_counter(
             Rate::ONE,
             currency,
         );
-        line.tax_code = counter.tax_code.clone();
+        line.tax_code.clone_from(&counter.tax_code);
         line.dimensions = counter.dimensions.clone();
         lines.push(line);
     }

@@ -1473,7 +1473,34 @@ impl Command for TransactionsPost {
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
         let plan = post_plan(db, ctx, input).await?;
-        let posted = PostEntry.plan(token, db, ctx, &plan.entry).await?;
+        // A line matched to a bill is a payment of that bill: the bills module
+        // posts it and allocates the bill's open item, as any bill payment is.
+        // Any other line posts its own entry through the journal.
+        let (posted_statements, entry) = if let Some(bill_id) = &plan.bill_id {
+            {
+                if plan.line.minor >= 0 {
+                    return Err(invalid("a bill is paid by an outgoing (negative) line"));
+                }
+                let account = store::account(db, &ctx.company_id, &plan.line.account_id)
+                    .await?
+                    .ok_or_else(not_found)?;
+                let payment = ledgers_bills::commands::RecordPaymentInput {
+                    id: bill_id.clone(),
+                    amount: -plan.line.minor,
+                    date: plan.line.booking_date.clone(),
+                    from_account: account.ledger_account_number,
+                    reference: Some(plan.line.id.clone()),
+                };
+                let (payment_plan, paid) =
+                    ledgers_bills::commands::plan_record_payment(token, db, ctx, &payment).await?;
+                (payment_plan.statements, paid.entry)
+            }
+        } else {
+            {
+                let posted = PostEntry.plan(token, db, ctx, &plan.entry).await?;
+                (posted.statements, posted.output.entry)
+            }
+        };
         let key = guard::guard_key(&["bank-unmatched", &plan.line.id]);
         let mut statements = vec![guard::assert_statement(
             key.clone(),
@@ -1483,13 +1510,13 @@ impl Command for TransactionsPost {
                 Value::from(plan.line.id.as_str()),
             ],
         )];
-        statements.extend(posted.statements);
+        statements.extend(posted_statements);
         statements.push(Statement::with_values(
             "UPDATE bank_transaction SET status = 'matched', matched_entry_id = ?, matched_bill_id = ?, \
              updated_at = ? WHERE company_id = ? AND id = ? AND status = 'unmatched'"
                 .to_owned(),
             vec![
-                Value::from(posted.output.entry.entry_id.as_str()),
+                Value::from(entry.entry_id.as_str()),
                 Value::from(plan.bill_id.as_deref()),
                 Value::from(ctx.now.as_str()),
                 Value::from(ctx.company_id.as_str()),
@@ -1497,7 +1524,6 @@ impl Command for TransactionsPost {
             ],
         ));
         statements.push(guard::release_statement(key));
-        let entry = posted.output.entry;
         let mut out = Plan::with_output(TransactionsPostOutput {
             transaction_id: plan.line.id.clone(),
             status: "matched".to_owned(),

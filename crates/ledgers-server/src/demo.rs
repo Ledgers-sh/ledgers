@@ -237,6 +237,7 @@ async fn ensure_units(
 ///
 /// # Errors
 /// As [`seed`].
+#[allow(clippy::too_many_lines)]
 pub async fn seed_as(
     deps: &Deps,
     company_id: &str,
@@ -641,6 +642,7 @@ async fn offset_is_posted(db: &dyn Database, debit: &str) -> Result<bool, String
 
 /// Posts a subledger fixture entry (an item, a payment or an offset) as the
 /// owner, with the fixture's `external_id` as the event id.
+#[allow(clippy::too_many_lines)]
 async fn post_subledger(deps: &Deps, company_id: &str, entry: &DemoEntry) -> Result<(), String> {
     let auth = OwnerAuth {
         person_id: DEMO_OWNER_ID.to_owned(),

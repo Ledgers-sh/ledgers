@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::http::{APP_ORIGIN, Auth, call};
+use common::http::{APP_ORIGIN, Auth, Reply, call};
 use common::{Fixture, fixture, fixture_with_options, owner_session};
 use cratefield_core::axum::body::Body;
 use cratefield_core::axum::http::{HeaderValue, Method, Request, StatusCode, header};
@@ -1114,4 +1114,187 @@ fn vendor_history_excludes_bank_equity_and_ap_control_accounts() {
         bill["lines"][0]["suggested_from"], bill4_id,
         "the suggestion should name the bill it came from"
     );
+}
+
+/// The March operating account of the bank fixtures (invented, valid check digits).
+const BANK_IBAN: &str = "DE64100200300400500600";
+const CAMT_MARCH: &[u8] =
+    include_bytes!("../../ledgers-bank/tests/fixtures/camt053_bank_a_march_full.xml");
+
+/// A bank line that pays a bill is posted through the bill payment: the bill
+/// is paid, its open item is cleared, and the payables control reconciles.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_bank_line_matched_to_a_bill_pays_it_through_the_subledger() {
+    let fx = person_fixture();
+
+    // The bill: 89.90 gross, 19 percent VAT, the amount of the March fixture's
+    // outgoing 89.90 line to Stadtwerke Beispiel AG.
+    let pdf = ledgers_extract::fixture::pdf_with_text(&[
+        "Halden Supplies GmbH",
+        "VAT ID: DE123456789",
+        "Invoice No: RE-2026-0310",
+        "Invoice date: 15.10.2026",
+        "Due date: 2026-11-14",
+        "IBAN DE89 3704 0044 0532 0130 00",
+        "Subtotal 75,55 EUR",
+        "VAT 19%: 14,35 EUR",
+        "Total 89,90 EUR",
+    ]);
+    let (_, uploaded) = upload_pdf(&fx, &fx.keys.draft, &pdf);
+    let bill_id = extract(&fx, &fx.keys.full, &doc_id_of(&uploaded)).body["bill"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_owned();
+    let mut fields = complete_fields("RE-2026-0310");
+    fields["net_minor"] = json!(7_555);
+    fields["vat_minor"] = json!(1_435);
+    fields["gross_minor"] = json!(8_990);
+    fields["lines"][0]["net_minor"] = json!(7_555);
+    fields["lines"][0]["vat_minor"] = json!(1_435);
+    fields["lines"][0]["gross_minor"] = json!(8_990);
+    fx.send(
+        Method::POST,
+        &format!("/v1/bills/{bill_id}/update"),
+        &fx.keys.draft,
+        Some(&fields.to_string()),
+    );
+    for step in ["confirm", "post"] {
+        let reply = call(
+            &fx,
+            Method::POST,
+            &format!("/v1/bills/{bill_id}/{step}"),
+            Auth::Session(common::OWNER_SESSION),
+            true,
+            Some(json!({})),
+        );
+        assert_eq!(reply.status, StatusCode::OK, "{step}: {}", reply.text);
+    }
+
+    // The bank account and the March statement, imported.
+    let account = call(
+        &fx,
+        Method::POST,
+        "/v1/bank/accounts",
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({
+            "name": "Halden Works Girokonto",
+            "iban": BANK_IBAN,
+            "bic": "HALDDEFFXXX",
+            "currency": "EUR",
+            "ledger_account_number": "1020",
+            "opening_amount": "12500.00",
+            "opening_date": "2026-03-01",
+            "csv_mapping": null,
+        })),
+    );
+    assert_eq!(account.status, StatusCode::OK, "{}", account.text);
+    let account_id = account.json()["id"]
+        .as_str()
+        .expect("account id")
+        .to_owned();
+    let stored = upload_file(
+        &fx,
+        &fx.keys.draft,
+        CAMT_MARCH,
+        "application/xml",
+        "march.xml",
+    );
+    assert_eq!(stored.status, StatusCode::CREATED, "{}", stored.text);
+    let document = stored.json()["document"]["id"]
+        .as_str()
+        .expect("document id")
+        .to_owned();
+    let imported = call(
+        &fx,
+        Method::POST,
+        "/v1/bank/statements/import",
+        Auth::Bearer(&fx.keys.draft),
+        false,
+        Some(json!({"account_id": account_id, "document_id": document})),
+    );
+    assert_eq!(imported.status, StatusCode::OK, "{}", imported.text);
+
+    // The 89.90 outgoing line.
+    let lines = call(
+        &fx,
+        Method::GET,
+        "/v1/bank/transactions?status=unmatched&limit=200",
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        None,
+    );
+    assert_eq!(lines.status, StatusCode::OK, "{}", lines.text);
+    let line = lines.json()["transactions"]
+        .as_array()
+        .expect("lines")
+        .iter()
+        .find(|line| line["amount"]["minor"] == "-8990")
+        .expect("the 89.90 line")
+        .clone();
+    let line_id = line["id"].as_str().expect("line id").to_owned();
+
+    // Matched to the bill, the line pays it.
+    let posted = call(
+        &fx,
+        Method::POST,
+        &format!("/v1/bank/transactions/{line_id}/post"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        Some(json!({"id": line_id, "bill_id": bill_id})),
+    );
+    assert_eq!(posted.status, StatusCode::OK, "{}", posted.text);
+    assert_eq!(posted.json()["status"], "matched", "{}", posted.text);
+
+    let bill = call(
+        &fx,
+        Method::GET,
+        &format!("/v1/bills/{bill_id}"),
+        Auth::Session(common::OWNER_SESSION),
+        true,
+        None,
+    );
+    assert_eq!(bill.status, StatusCode::OK, "{}", bill.text);
+    assert_eq!(bill.json()["bill"]["paid_minor"], 8_990, "{}", bill.text);
+    assert_eq!(bill.json()["bill"]["status"], "paid", "{}", bill.text);
+
+    // The payables control and the open items agree: the bill is settled.
+    let rows = pollster::block_on(ledgers_subledger::reconcile::reconcile(
+        fx.deps.db.as_ref(),
+        common::COMPANY,
+        "2026-12-31",
+    ))
+    .expect("the reconciliation runs");
+    let ap = rows.iter().find(|row| row.ledger == "ap").expect("ap");
+    assert_eq!(ap.difference, 0, "{ap:?}");
+    assert_eq!(ap.subledger_balance, 0, "{ap:?}");
+}
+
+/// Uploads a file with a key, the way `POST /v1/documents/upload` takes it.
+fn upload_file(fx: &Fixture, key: &str, bytes: &[u8], content_type: &str, name: &str) -> Reply {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/documents/upload")
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(content_type).expect("type"),
+        )
+        .header("x-file-name", name)
+        .body(Body::from(bytes.to_vec()))
+        .expect("request");
+    let response = pollster::block_on(fx.router().clone().oneshot(request)).expect("answers");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = pollster::block_on(cratefield_core::axum::body::to_bytes(
+        response.into_body(),
+        usize::MAX,
+    ))
+    .expect("body");
+    Reply {
+        status,
+        headers,
+        text: String::from_utf8_lossy(&bytes).into_owned(),
+    }
 }

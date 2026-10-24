@@ -15,6 +15,7 @@ use ledgers_subledger::commands::{
 };
 use ledgers_subledger::reconcile::reconcile;
 use proptest::prelude::*;
+use std::collections::BTreeMap;
 
 struct TestAuthenticator;
 
@@ -153,7 +154,7 @@ proptest! {
                             amount: *amount,
                             rate: rate_opt,
                             counter_account: counter_account.to_owned(),
-                            dimensions: Default::default(),
+                            dimensions: BTreeMap::default(),
                             counter_lines: Vec::new(),
                             description: format!("Test {ledger} {currency}"),
                             source_id: Some(format!("{ledger}_{i}_{currency}")),
@@ -361,7 +362,7 @@ proptest! {
                             amount: cn_amount,
                             rate: rate_str,
                             counter_account: if tracked_d.ledger == "ap" { "6000" } else { "4000" }.to_owned(),
-                            dimensions: Default::default(),
+                            dimensions: BTreeMap::default(),
                             counter_lines: Vec::new(),
                             description: "Credit note for offset".to_owned(),
                             source_id: Some(format!("{event_id}-cn")),

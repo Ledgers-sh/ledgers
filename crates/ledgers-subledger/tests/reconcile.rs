@@ -17,6 +17,7 @@ use ledgers_subledger::commands::{AllocateInput, AllocateItem, PostItemInput};
 use ledgers_subledger::commands::{SubledgerAllocate, SubledgerPostItem};
 use ledgers_subledger::reconcile::reconcile;
 use sea_query::Value;
+use std::collections::BTreeMap;
 
 struct TestAuthenticator;
 
@@ -54,7 +55,7 @@ async fn post_invoice(
         amount,
         rate: rate.map(std::borrow::ToOwned::to_owned),
         counter_account: "4000".to_owned(),
-        dimensions: Default::default(),
+        dimensions: BTreeMap::default(),
         counter_lines: Vec::new(),
         description: "Test invoice".to_owned(),
         source_id: Some(format!("INV-{event_id}")),
@@ -110,7 +111,7 @@ async fn post_bill(
         amount,
         rate: rate.map(std::borrow::ToOwned::to_owned),
         counter_account: "6000".to_owned(),
-        dimensions: Default::default(),
+        dimensions: BTreeMap::default(),
         counter_lines: Vec::new(),
         description: "Test bill".to_owned(),
         source_id: Some(format!("BILL-{event_id}")),

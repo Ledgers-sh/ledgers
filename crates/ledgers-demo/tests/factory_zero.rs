@@ -3,7 +3,7 @@
 //! golden totals hold (the intercompany recharges are eliminated).
 
 use ledgers_demo::factory_zero::{self, GOLDEN};
-use ledgers_demo::{EntryKind, balance_of, is_intercompany};
+use ledgers_demo::{balance_of, is_intercompany};
 
 fn lines_of(entry: &ledgers_demo::DemoEntry) -> &[ledgers_demo::DemoLine] {
     entry.kind.lines().unwrap_or(&[])

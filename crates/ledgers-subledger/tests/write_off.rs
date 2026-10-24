@@ -8,6 +8,7 @@ use ledgers_commands::{
     auth::{Authenticator, Credential, Limits, Principal, Role},
 };
 use ledgers_subledger::commands::{SubledgerWriteOff, WriteOffInput};
+use std::collections::BTreeMap;
 
 struct PersonAuthenticator;
 
@@ -55,7 +56,7 @@ async fn post_invoice(
         amount,
         rate: None,
         counter_account: "4000".to_owned(),
-        dimensions: Default::default(),
+        dimensions: BTreeMap::default(),
         counter_lines: Vec::new(),
         description: "Test invoice".to_owned(),
         source_id: Some(format!("INV-{event_id}")),

@@ -272,7 +272,7 @@ fn command_context(event_id: &str) -> CommandContext {
     }
 }
 
-async fn run_subledger<C: Command>(
+async fn run_subledger<C>(
     db: &dyn Database,
     command: &C,
     input: &C::Input,

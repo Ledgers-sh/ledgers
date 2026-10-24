@@ -1567,28 +1567,47 @@ impl Command for BillsRecordPayment {
         ctx: &CommandContext,
         input: &Self::Input,
     ) -> Result<Plan<Self::Output>, CommandError> {
-        let row = store::bill_by_id(db, &ctx.company_id, &input.id)
-            .await?
-            .ok_or_else(not_found)?;
+        plan_record_payment(token, db, ctx, input)
+            .await
+            .map(|(plan, _)| plan)
+    }
+}
 
-        // Build guard statements at write time
-        let (mut guard_stmts, guard_keys) = vec_guard_statements(&row, input, ctx);
+/// Plans a bill payment: the payment entry on the payables account, and the
+/// allocation against the bill's open item. Also returns the entry it posts,
+/// so a bank line matched to the bill can report that entry.
+///
+/// # Errors
+/// As the command: a missing bill, or a payment the bill cannot take.
+pub async fn plan_record_payment(
+    token: &ExecToken,
+    db: &dyn Database,
+    ctx: &CommandContext,
+    input: &RecordPaymentInput,
+) -> Result<(Plan<RecordPaymentOutput>, PostEntryOutput), CommandError> {
+    let row = store::bill_by_id(db, &ctx.company_id, &input.id)
+        .await?
+        .ok_or_else(not_found)?;
 
-        // Build and post the payment entry
-        let entry_input = payment_entry_for(db, ctx, input, &row).await?;
-        let posted: Plan<PostEntryOutput> =
-            plan_post_entry_with_control(token, db, ctx, &entry_input).await?;
+    // Build guard statements at write time
+    let (mut guard_stmts, guard_keys) = vec_guard_statements(&row, input, ctx);
 
-        let entry_id = posted.output.entry.entry_id.clone();
+    // Build and post the payment entry
+    let entry_input = payment_entry_for(db, ctx, input, &row).await?;
+    let posted: Plan<PostEntryOutput> =
+        plan_post_entry_with_control(token, db, ctx, &entry_input).await?;
 
-        // Combine all statements: guards before mutation, then mutation, then release
-        let mut final_statements = Vec::new();
-        final_statements.append(&mut guard_stmts);
-        final_statements.extend(posted.statements);
+    let entry_id = posted.output.entry.entry_id.clone();
+    let entry_output = posted.output;
 
-        // Try to load and allocate the bill's open_item (if it exists)
-        // Bills posted before this change have no open_item; skip subledger rows if not found
-        if let Some(rows) = db
+    // Combine all statements: guards before mutation, then mutation, then release
+    let mut final_statements = Vec::new();
+    final_statements.append(&mut guard_stmts);
+    final_statements.extend(posted.statements);
+
+    // Try to load and allocate the bill's open_item (if it exists)
+    // Bills posted before this change have no open_item; skip subledger rows if not found
+    if let Some(rows) = db
             .query(&Statement::with_values(
                 "SELECT id, company_id, ledger, party_id, tx_remaining_minor, base_remaining_minor FROM open_item \
                  WHERE company_id = ? AND ledger = 'ap' AND kind = 'bill' AND source_id = ? LIMIT 1"
@@ -1651,7 +1670,7 @@ impl Command for BillsRecordPayment {
             final_statements.push(db_guard::release_statement(&guard_key));
         }
 
-        final_statements.push(Statement::with_values(
+    final_statements.push(Statement::with_values(
             "UPDATE bill SET paid_minor = paid_minor + ?, updated_at = ? WHERE company_id = ? AND id = ?"
                 .to_owned(),
             vec![
@@ -1661,23 +1680,22 @@ impl Command for BillsRecordPayment {
                 Value::from(row.id.as_str()),
             ],
         ));
-        // Release guard statements
-        for key in guard_keys {
-            final_statements.push(Statement::with_values(
-                "DELETE FROM ledger_guard WHERE guard_key = ?".to_owned(),
-                vec![Value::from(key)],
-            ));
-        }
-
-        let mut updated_row = row.clone();
-        updated_row.paid_minor += input.amount;
-        let bill = view_of(updated_row, Vec::new());
-
-        let mut out = Plan::with_output(RecordPaymentOutput { bill });
-        out.statements = final_statements;
-        out.objects = vec![row.id];
-        Ok(out)
+    // Release guard statements
+    for key in guard_keys {
+        final_statements.push(Statement::with_values(
+            "DELETE FROM ledger_guard WHERE guard_key = ?".to_owned(),
+            vec![Value::from(key)],
+        ));
     }
+
+    let mut updated_row = row.clone();
+    updated_row.paid_minor += input.amount;
+    let bill = view_of(updated_row, Vec::new());
+
+    let mut out = Plan::with_output(RecordPaymentOutput { bill });
+    out.statements = final_statements;
+    out.objects = vec![row.id];
+    Ok((out, entry_output))
 }
 
 #[cfg(test)]
